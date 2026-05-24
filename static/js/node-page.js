@@ -2,6 +2,7 @@ const NodePage = {
     nodeName: window.NODE_NAME,
     data: null,
     charts: {},
+    testResults: [],
 
     async init() {
         document.getElementById('node-scan-now')?.addEventListener('click', () => this.scanNow());
@@ -197,14 +198,85 @@ const NodePage = {
             const response = await fetch(`/api/rf-stats/test/${encodeURIComponent(source)}/${encodeURIComponent(target)}?type=${type}`, { method: 'POST' });
             const result = await response.json();
             if (!response.ok || !result.success) throw new Error(result.error || 'Test failed');
+            this.addTestResult(type, source, target, result.result || result);
             this.showToast('success', type === 'ping' ? 'Ping Complete' : 'iPerf Complete', `${source} -> ${target}`);
             await this.load();
         } catch (error) {
+            this.addTestResult(type, source, target, null, error.message);
             this.showToast('error', 'Test Failed', error.message);
         } finally {
             button.disabled = false;
             button.textContent = original;
         }
+    },
+
+    addTestResult(type, source, target, result, error = null) {
+        this.testResults.unshift({
+            type,
+            source,
+            target,
+            result,
+            error,
+            timestamp: new Date()
+        });
+        this.testResults = this.testResults.slice(0, 20);
+        this.renderTestResults();
+    },
+
+    renderTestResults() {
+        const container = document.getElementById('node-test-results');
+        if (!container) return;
+
+        if (!this.testResults.length) {
+            container.innerHTML = '<p class="log-empty">No tests run from this page yet.</p>';
+            return;
+        }
+
+        container.innerHTML = this.testResults.map(item => {
+            const label = item.type === 'iperf' ? 'iPerf3' : 'Ping';
+            const body = item.error
+                ? `<div class="test-result-error">${this.escapeHtml(item.error)}</div>`
+                : this.formatTestResult(item.type, item.result);
+
+            return `
+                <div class="test-result ${item.error ? 'test-result-failed' : 'test-result-ok'}">
+                    <div class="test-result-header">
+                        <strong>${label}: ${this.escapeHtml(item.source)} -> ${this.escapeHtml(item.target)}</strong>
+                        <span>${this.formatDate(item.timestamp)}</span>
+                    </div>
+                    ${body}
+                </div>
+            `;
+        }).join('');
+    },
+
+    formatTestResult(type, result) {
+        if (!result) {
+            return '<div class="test-result-error">No result details returned.</div>';
+        }
+
+        if (type === 'ping') {
+            return `
+                <table class="info-table test-result-table">
+                    <tr><td>Minimum:</td><td>${this.formatNumber(result.min)} ms</td></tr>
+                    <tr><td>Average:</td><td>${this.formatNumber(result.avg)} ms</td></tr>
+                    <tr><td>Maximum:</td><td>${this.formatNumber(result.max)} ms</td></tr>
+                    <tr><td>Packet Loss:</td><td>${this.formatNumber(result.loss)}%</td></tr>
+                </table>
+            `;
+        }
+
+        return `
+            <table class="info-table test-result-table">
+                <tr><td>Transmit:</td><td>${this.formatNumber(result.tx_mbps)} Mbps</td></tr>
+                <tr><td>Receive:</td><td>${this.formatNumber(result.rx_mbps)} Mbps</td></tr>
+            </table>
+        `;
+    },
+
+    formatNumber(value) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+        return Number(value).toFixed(2).replace(/\\.00$/, '');
     },
 
     setStatus(text) {
