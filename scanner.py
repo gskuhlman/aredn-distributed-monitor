@@ -665,6 +665,45 @@ def run_scan():
     return result
 
 
+def run_targeted_scan(target, max_depth=0):
+    """
+    Scan one requested node without running global stale-node/link cleanup.
+
+    This is intended for the node detail page where an operator wants to refresh
+    one node's sysinfo and immediate LQM/service data without causing unrelated
+    nodes to be marked inactive.
+    """
+    logger.info("Starting targeted scan for %s", target)
+    scan_started = monotonic()
+    start_url = normalize_start_url(target)
+    result = discover_network(start_url=start_url, max_depth=max_depth)
+
+    all_events = result.get('events', [])
+    for event in all_events:
+        database.log_event(
+            event_type=event['type'],
+            node_name=event.get('node'),
+            details=event.get('details'),
+            severity=event.get('severity', 'info')
+        )
+
+    result['events'] = all_events
+    result['timestamp'] = datetime.now().isoformat()
+    result['couchdb_write'] = write_observations(
+        result,
+        duration_ms=int((monotonic() - scan_started) * 1000)
+    )
+    result['observation_count'] = len(result.get('observation_docs', []))
+    result.pop('observation_docs', None)
+    logger.info(
+        "Targeted scan complete for %s: %s nodes, %s links",
+        target,
+        result.get('nodes_found'),
+        result.get('links_found')
+    )
+    return result
+
+
 def get_starting_node_url():
     """Get the current starting node URL"""
     return database.get_setting('starting_node', config.STARTING_NODE)

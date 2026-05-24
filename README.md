@@ -31,6 +31,8 @@ Important status principle for the new design: a node that is not visible from o
 - **Firmware Mismatch Detection**: Orange highlighting for nodes with mismatched firmware.
 - **Persistent Layout**: Node positions saved to browser localStorage.
 - **RF Statistics**: Optional ping and iPerf history for RF links.
+- **Full Node Information Page**: Per-node page with current metadata, links, services, charts, log history, targeted scan, ping, and iPerf actions.
+- **Event Log Search**: Filter the event log by partial node name or log text.
 - **Optional CouchDB Observation Writes**: Writes append-only observations for distributed/offline replication when configured.
 - **Collector Health Endpoint**: Reports local collector identity and optional CouchDB connectivity.
 
@@ -171,6 +173,8 @@ Document IDs include collector ID, UTC poll timestamp, and target slug. This avo
 | `/api/nodes/all` | GET | Get all known nodes with link/service counts |
 | `/api/node/<name>` | GET | Get node details with services |
 | `/api/nodes/detail/<name>` | GET | Get node detail, links, services, and connectivity log |
+| `/api/nodes/full/<name>` | GET | Get all locally available node details for the full node page |
+| `/api/nodes/scan/<name>` | POST | Run a targeted scan against one known node |
 | `/api/links` | GET | Get all links |
 | `/api/links/active` | GET | Get active links only |
 | `/api/network` | GET | Get graph data for vis.js |
@@ -179,6 +183,8 @@ Document IDs include collector ID, UTC poll timestamp, and target slug. This avo
 | `/api/status` | GET | Get current scan status |
 | `/api/events` | GET | Get event log |
 | `/api/rf-stats/*` | GET/POST | RF statistics and tests |
+
+Full node pages are available at `/nodes/<name>`.
 
 ## WebSocket Events
 

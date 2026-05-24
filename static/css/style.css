@@ -233,6 +233,13 @@ body {
     text-decoration: underline;
 }
 
+.node-panel-actions {
+    margin: 12px 0;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 /* Quality indicators */
 .quality-good {
     color: #27ae60;
@@ -698,10 +705,17 @@ body {
     padding: 10px 20px;
     border-bottom: 1px solid #eee;
     background-color: #f8f9fa;
+    align-items: center;
+    flex-wrap: wrap;
 }
 
 .log-filters .checkbox-label {
     font-size: 0.85rem;
+}
+
+.log-filters .form-input {
+    min-width: 220px;
+    flex: 1;
 }
 
 .log-content {
@@ -1234,6 +1248,40 @@ body {
 .node-charts-grid canvas {
     width: 100% !important;
     height: 200px !important;
+}
+
+.node-page .header-tabs a {
+    text-decoration: none;
+}
+
+.node-page-content {
+    overflow-y: auto;
+    padding: 18px;
+    background: #f4f6f8;
+}
+
+.node-page-section {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.node-page-section h2 {
+    margin: 0 0 14px;
+    font-size: 18px;
+    color: #2c3e50;
+}
+
+.node-page-charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+}
+
+.node-page-section .chart-card {
+    min-height: 260px;
 }
 
 .connectivity-log {

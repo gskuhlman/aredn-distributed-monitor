@@ -292,6 +292,9 @@ function renderNodeDetails(data) {
                 <tr><td>First Seen:</td><td>${formatDate(node.first_seen)}</td></tr>
                 <tr><td>Last Seen:</td><td>${formatDate(node.last_seen)}</td></tr>
             </table>
+            <div class="node-panel-actions">
+                <a class="btn btn-secondary" href="/nodes/${encodeURIComponent(node.name)}">Full Node Info</a>
+            </div>
             <div class="node-ping-section">
                 <button id="ping-btn" class="btn ${isCurrentlyPinging ? 'btn-danger' : 'btn-primary'}"
                         onclick="toggleNodePing('${node.name}')" ${!node.ip ? 'disabled' : ''}>
@@ -316,7 +319,7 @@ function renderNodeDetails(data) {
             <div class="node-links">
                 <h3>Links (${links.length})</h3>
                 <table class="info-table">
-                    <tr><th>Node</th><th>Type</th><th>Quality</th><th>SNR</th></tr>
+                    <tr><th>Node</th><th>Type</th><th>Quality</th><th>SNR</th><th>Actions</th></tr>
         `;
 
         for (const link of links) {
@@ -328,6 +331,10 @@ function renderNodeDetails(data) {
                     <td>${link.link_type}</td>
                     <td class="${qualityClass}">${link.quality}%</td>
                     <td>${link.snr || 'N/A'}</td>
+                    <td>
+                        <button class="btn btn-small btn-secondary" onclick="runLinkedNodeTest('${node.name}', '${otherNode}', 'ping', this)">Ping</button>
+                        <button class="btn btn-small btn-secondary" onclick="runLinkedNodeTest('${node.name}', '${otherNode}', 'iperf', this)">iPerf3</button>
+                    </td>
                 </tr>
             `;
         }
@@ -368,6 +375,35 @@ function renderNodeDetails(data) {
     }
 
     panelContent.innerHTML = html;
+}
+
+async function runLinkedNodeTest(source, target, testType, button) {
+    const originalText = button ? button.textContent : '';
+    if (button) {
+        button.disabled = true;
+        button.textContent = testType === 'ping' ? 'Pinging...' : 'Testing...';
+    }
+
+    try {
+        const response = await fetch(
+            `/api/rf-stats/test/${encodeURIComponent(source)}/${encodeURIComponent(target)}?type=${testType}`,
+            { method: 'POST' }
+        );
+        const result = await response.json();
+        if (result.success) {
+            showToast('success', testType === 'ping' ? 'Ping Complete' : 'iPerf Complete', `${source} -> ${target}`);
+        } else {
+            showToast('error', 'Test Failed', result.error || 'Unknown error');
+        }
+    } catch (error) {
+        console.error('Linked node test failed:', error);
+        showToast('error', 'Test Failed', 'Network error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
 }
 
 /**
@@ -1087,6 +1123,7 @@ function renderEventLog() {
     const showNodes = document.getElementById('filter-nodes').checked;
     const showLinks = document.getElementById('filter-links').checked;
     const showFreq = document.getElementById('filter-freq').checked;
+    const nodeSearch = (document.getElementById('log-node-search')?.value || '').toLowerCase();
 
     const nodeEvents = ['node_discovered', 'node_offline', 'node_online'];
     const linkEvents = ['link_new', 'link_dropped', 'link_removed', 'link_restored'];
@@ -1096,6 +1133,10 @@ function renderEventLog() {
         if (nodeEvents.includes(event.event_type) && !showNodes) return false;
         if (linkEvents.includes(event.event_type) && !showLinks) return false;
         if (freqEvents.includes(event.event_type) && !showFreq) return false;
+        if (nodeSearch) {
+            const haystack = `${event.node_name || ''} ${event.details || ''} ${event.event_type || ''}`.toLowerCase();
+            if (!haystack.includes(nodeSearch)) return false;
+        }
         return true;
     });
 
@@ -1219,6 +1260,7 @@ function initEventListeners() {
     document.getElementById('filter-nodes').addEventListener('change', renderEventLog);
     document.getElementById('filter-links').addEventListener('change', renderEventLog);
     document.getElementById('filter-freq').addEventListener('change', renderEventLog);
+    document.getElementById('log-node-search').addEventListener('input', renderEventLog);
 
     // Clear log button
     document.getElementById('clear-log-btn').addEventListener('click', clearDisplayedLog);

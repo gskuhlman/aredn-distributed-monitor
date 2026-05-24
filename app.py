@@ -182,6 +182,12 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/nodes/<name>')
+def node_page(name):
+    """Full node information page."""
+    return render_template('node.html', node_name=name.lower())
+
+
 # ============ API Routes ============
 
 @app.route('/api/health')
@@ -309,6 +315,51 @@ def api_get_node_detail(name):
         'links': links,
         'connectivity_log': connectivity_log
     })
+
+
+@app.route('/api/nodes/full/<name>')
+def api_get_node_full(name):
+    """Get all locally available information for one node."""
+    node_name = name.lower()
+    node = database.get_node(node_name)
+    if not node:
+        return jsonify({'error': 'Node not found'}), 404
+
+    hours = request.args.get('hours', 24, type=int)
+    event_limit = request.args.get('event_limit', 500, type=int)
+
+    return jsonify({
+        'node': node,
+        'services': database.get_node_services(node_name),
+        'active_links': database.get_node_links(node_name),
+        'all_links': database.get_node_all_links(node_name),
+        'connectivity_log': database.get_node_connectivity_log(node_name, limit=event_limit),
+        'quality_history': database.get_node_history(node_name, hours=hours),
+        'ping_history': database.get_node_ping_history(node_name, hours=hours)
+    })
+
+
+@app.route('/api/nodes/scan/<name>', methods=['POST'])
+def api_scan_node(name):
+    """Run a targeted scan against one known node."""
+    node_name = name.lower()
+    node = database.get_node(node_name)
+    if not node:
+        return jsonify({'error': 'Node not found'}), 404
+    if not node.get('ip'):
+        return jsonify({'error': f'Node "{node_name}" has no IP address'}), 400
+
+    try:
+        result = scanner.run_targeted_scan(node['ip'], max_depth=0)
+        network_data = database.get_network_graph_data()
+        socketio.emit('scan_complete', {
+            'result': result,
+            'network': network_data
+        })
+        return jsonify({'success': True, 'result': result})
+    except Exception as exc:
+        logger.error("Targeted scan failed for %s: %s", node_name, exc)
+        return jsonify({'error': str(exc)}), 500
 
 
 @app.route('/api/nodes/history/<name>')

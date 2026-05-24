@@ -43,6 +43,7 @@ There is no full test suite or linting currently configured.
 
 - `templates/index.html`: Single-page app with Network, RF Stats, and Nodes tabs.
 - `static/js/network.js`: vis.js graph initialization, Socket.IO message handling, node position persistence, settings, and event-log UI.
+- `static/js/node-page.js`: Full node detail page, targeted node scan, per-link ping/iPerf actions, node log search, and charts.
 - `static/js/nodes.js`: Nodes table, filters, detail panel, node history charts, and delete action.
 - `static/js/rf-stats.js`: Chart.js graphs for quality, SNR, latency, throughput, and RF test actions.
 - `static/css/style.css`: Application layout and visual styling.
@@ -89,6 +90,9 @@ Existing dashboard routes:
 - `GET /api/network`
 - `GET /api/nodes`, `/api/nodes/active`, `/api/nodes/all`
 - `GET /api/node/<name>`, `/api/nodes/detail/<name>`
+- `GET /api/nodes/full/<name>`
+- `POST /api/nodes/scan/<name>`
+- `GET /nodes/<name>`
 - `GET /api/links`, `/api/links/active`
 - `GET/POST /api/settings`
 - `POST /api/scan`

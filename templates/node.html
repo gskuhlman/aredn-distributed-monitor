@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ node_name }} - AREDN Node Details</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container node-page">
+        <header class="header">
+            <div class="header-left">
+                <h1 id="node-page-title">{{ node_name }}</h1>
+                <nav class="header-tabs">
+                    <a class="tab-btn active" href="/">Network</a>
+                </nav>
+            </div>
+            <div class="header-controls">
+                <span id="node-page-status">Loading...</span>
+                <button id="node-scan-now" class="btn btn-primary">Scan Now</button>
+            </div>
+        </header>
+
+        <main class="node-page-content">
+            <section class="node-page-section">
+                <h2>Node Information</h2>
+                <div id="node-summary"></div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Connected Nodes</h2>
+                <div id="node-links"></div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Services</h2>
+                <div id="node-services"></div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Recent Link Metrics</h2>
+                <div class="node-page-charts">
+                    <div class="chart-card">
+                        <h4>Link Quality (%)</h4>
+                        <canvas id="node-page-quality-chart"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h4>Ping Latency (ms)</h4>
+                        <canvas id="node-page-ping-chart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Node Log</h2>
+                <input type="text" id="node-log-search" class="form-input" placeholder="Search this node log...">
+                <div id="node-log" class="connectivity-log"></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+    <script>
+        window.NODE_NAME = "{{ node_name }}";
+    </script>
+    <script src="{{ url_for('static', filename='js/node-page.js') }}"></script>
+</body>
+</html>
