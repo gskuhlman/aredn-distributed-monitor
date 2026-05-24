@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AREDN Network Monitor</title>
+
+    <!-- vis.js for network visualization -->
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+    <!-- Socket.IO for real-time updates -->
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+
+    <!-- Chart.js for RF stats graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1>AREDN Network Monitor</h1>
+                <nav class="header-tabs">
+                    <button class="tab-btn active" data-tab="network">Network</button>
+                    <button class="tab-btn" data-tab="rf-stats">RF Stats</button>
+                    <button class="tab-btn" data-tab="nodes">Nodes</button>
+                </nav>
+            </div>
+            <div class="header-controls">
+                <span id="status-indicator" class="status-indicator"></span>
+                <span id="status-text">Connecting...</span>
+                <button id="scan-btn" class="btn btn-primary">Scan Now</button>
+                <button id="log-btn" class="btn btn-secondary">Event Log</button>
+                <button id="settings-btn" class="btn btn-secondary">Settings</button>
+            </div>
+        </header>
+
+        <!-- Main content -->
+        <main class="main-content">
+            <!-- Network View -->
+            <div id="network-view" class="view-container active">
+                <!-- Network graph container -->
+                <div id="network-container" class="network-container"></div>
+            </div>
+
+            <!-- RF Stats View -->
+            <div id="rf-stats-view" class="view-container">
+                <div class="rf-stats-container">
+                    <!-- Charts area -->
+                    <main class="rf-charts-main">
+                        <!-- Header with time range and back button -->
+                        <div class="rf-charts-header">
+                            <div class="rf-header-left">
+                                <button id="rf-back-btn" class="btn btn-secondary hidden">Back to Overview</button>
+                                <div class="time-range-selector">
+                                    <button class="time-btn" data-hours="1">1H</button>
+                                    <button class="time-btn" data-hours="6">6H</button>
+                                    <button class="time-btn" data-hours="12">12H</button>
+                                    <button class="time-btn active" data-hours="24">24H</button>
+                                </div>
+                            </div>
+                            <div class="rf-stats-status">
+                                <span id="rf-stats-link-count">0</span> RF links
+                            </div>
+                        </div>
+
+                        <!-- Selected link info (shown when viewing charts) -->
+                        <div id="selected-link-info" class="selected-link-info hidden">
+                            <h2 id="selected-link-title"></h2>
+                            <div class="selected-link-actions">
+                                <button id="chart-ping-btn" class="btn btn-secondary">Run Ping Test</button>
+                                <button id="chart-iperf-btn" class="btn btn-secondary">Run iPerf Test</button>
+                            </div>
+                        </div>
+
+                        <!-- Charts grid (hidden until link selected) -->
+                        <div id="rf-charts-grid" class="rf-charts-grid hidden">
+                            <div class="chart-card">
+                                <h4>Link Quality (%)</h4>
+                                <canvas id="quality-chart"></canvas>
+                            </div>
+                            <div class="chart-card">
+                                <h4>Signal-to-Noise Ratio (dB)</h4>
+                                <canvas id="snr-chart"></canvas>
+                            </div>
+                            <div class="chart-card">
+                                <h4>Ping Latency (ms)</h4>
+                                <canvas id="ping-chart"></canvas>
+                            </div>
+                            <div class="chart-card">
+                                <h4>Throughput (Mbps)</h4>
+                                <canvas id="throughput-chart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Overview table -->
+                        <div id="rf-overview-table" class="rf-overview-table">
+                            <h3>All RF Links Overview</h3>
+                            <p class="rf-overview-hint">Click on a link row to view detailed charts</p>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Link</th>
+                                        <th>Quality</th>
+                                        <th>SNR</th>
+                                        <th>Ping (avg)</th>
+                                        <th>Throughput</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rf-overview-body">
+                                    <!-- Dynamically populated -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </main>
+                </div>
+            </div>
+
+            <!-- Nodes Database View -->
+            <div id="nodes-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="nodes-header">
+                        <div class="nodes-header-left">
+                            <input type="text" id="nodes-search" class="form-input" placeholder="Search nodes...">
+                            <select id="nodes-status-filter" class="form-input">
+                                <option value="all">All Nodes</option>
+                                <option value="active">Currently Active</option>
+                                <option value="24h">Last 24 Hours</option>
+                                <option value="7d">Last 7 Days</option>
+                                <option value="inactive">Inactive</option>
+                            </select>
+                            <select id="nodes-sort" class="form-input">
+                                <option value="alpha">Sort: Alpha</option>
+                                <option value="last-seen">Sort: Last Seen</option>
+                                <option value="firmware">Sort: Firmware</option>
+                                <option value="model">Sort: Model</option>
+                            </select>
+                        </div>
+                        <div class="nodes-count">
+                            <span id="nodes-total-count">0</span> nodes
+                        </div>
+                    </div>
+
+                    <!-- Nodes Table -->
+                    <div class="nodes-table-wrapper">
+                        <table class="nodes-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>IP</th>
+                                    <th>Model</th>
+                                    <th>Firmware</th>
+                                    <th>Status</th>
+                                    <th>Last Seen</th>
+                                    <th>Links</th>
+                                    <th>Services</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="nodes-table-body">
+                                <!-- Dynamically populated -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Node Detail Panel (inline within nodes view) -->
+                    <div id="node-detail-panel" class="node-detail-panel hidden">
+                        <div class="node-detail-header">
+                            <h2 id="node-detail-title">Node Details</h2>
+                            <button id="close-node-detail" class="btn-close">×</button>
+                        </div>
+                        <div class="node-detail-tabs">
+                            <button class="node-tab-btn active" data-node-tab="overview">Overview</button>
+                            <button class="node-tab-btn" data-node-tab="quality-history">Quality History</button>
+                            <button class="node-tab-btn" data-node-tab="ping-history">Ping History</button>
+                            <button class="node-tab-btn" data-node-tab="connectivity">Connectivity Log</button>
+                        </div>
+                        <div class="node-detail-content">
+                            <!-- Overview -->
+                            <div id="node-tab-overview" class="node-tab-content active">
+                                <div id="node-overview-content"></div>
+                            </div>
+                            <!-- Quality/SNR History -->
+                            <div id="node-tab-quality-history" class="node-tab-content">
+                                <div class="node-chart-controls">
+                                    <div class="time-range-selector">
+                                        <button class="time-btn" data-hours="1">1H</button>
+                                        <button class="time-btn" data-hours="6">6H</button>
+                                        <button class="time-btn" data-hours="12">12H</button>
+                                        <button class="time-btn active" data-hours="24">24H</button>
+                                    </div>
+                                </div>
+                                <div class="node-charts-grid">
+                                    <div class="chart-card">
+                                        <h4>Link Quality (%)</h4>
+                                        <canvas id="node-quality-chart"></canvas>
+                                    </div>
+                                    <div class="chart-card">
+                                        <h4>SNR (dB)</h4>
+                                        <canvas id="node-snr-chart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Ping History -->
+                            <div id="node-tab-ping-history" class="node-tab-content">
+                                <div class="node-chart-controls">
+                                    <div class="time-range-selector">
+                                        <button class="time-btn" data-hours="1">1H</button>
+                                        <button class="time-btn" data-hours="6">6H</button>
+                                        <button class="time-btn" data-hours="12">12H</button>
+                                        <button class="time-btn active" data-hours="24">24H</button>
+                                    </div>
+                                </div>
+                                <div class="chart-card">
+                                    <h4>Ping Latency (ms)</h4>
+                                    <canvas id="node-ping-chart"></canvas>
+                                </div>
+                            </div>
+                            <!-- Connectivity Log -->
+                            <div id="node-tab-connectivity" class="node-tab-content">
+                                <div id="node-connectivity-content" class="connectivity-log"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Side panel for node details -->
+            <aside id="side-panel" class="side-panel hidden">
+                <div class="panel-header">
+                    <h2 id="panel-title">Node Details</h2>
+                    <button id="close-panel" class="btn-close">&times;</button>
+                </div>
+                <div id="panel-content" class="panel-content">
+                    <!-- Node details will be populated here -->
+                </div>
+            </aside>
+
+            <!-- Settings panel -->
+            <aside id="settings-panel" class="settings-panel hidden">
+                <div class="panel-header">
+                    <h2>Settings</h2>
+                    <button id="close-settings" class="btn-close">&times;</button>
+                </div>
+                <div class="panel-content">
+                    <div class="form-group">
+                        <label for="starting-node">Starting Node:</label>
+                        <input type="text" id="starting-node" class="form-input"
+                               placeholder="localnode.local.mesh or 10.x.x.x">
+                        <small class="form-hint">Just enter hostname or IP address</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="show-tunnels">
+                            Show Tunnel/Wireguard Links
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="max-depth">Max Discovery Depth:</label>
+                        <input type="number" id="max-depth" class="form-input" min="1" max="20" value="5">
+                        <small class="form-hint">Maximum hops from starting node (1-20)</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="auto-scan" checked>
+                            Enable Automatic Scanning
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="poll-interval">Scan Interval (seconds):</label>
+                        <input type="number" id="poll-interval" class="form-input" min="10" max="600" value="30">
+                        <small class="form-hint">Time between automatic scans (10-600 seconds)</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="link-remove-after">Dropped Link Retention (minutes):</label>
+                        <input type="number" id="link-remove-after" class="form-input" min="1" max="10080" value="60">
+                        <small class="form-hint">Dropped links are removed after this time (default 60 minutes)</small>
+                    </div>
+                    <div class="form-group">
+                        <button id="save-settings" class="btn btn-primary">Save Settings</button>
+                        <button id="reset-positions" class="btn btn-secondary">Reset Node Positions</button>
+                    </div>
+                    <div class="settings-info">
+                        <h3>Current Status</h3>
+                        <p>Nodes: <span id="node-count">0</span></p>
+                        <p>Links: <span id="link-count">0</span></p>
+                        <p>Last Scan: <span id="last-scan">Never</span></p>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Event log panel -->
+            <aside id="log-panel" class="log-panel hidden">
+                <div class="panel-header">
+                    <h2>Event Log</h2>
+                    <div class="panel-header-buttons">
+                        <button id="clear-log-btn" class="btn btn-secondary btn-small">Clear</button>
+                        <button id="close-log" class="btn-close">&times;</button>
+                    </div>
+                </div>
+                <div class="log-filters">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="filter-nodes" checked>
+                        Nodes
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="filter-links" checked>
+                        Links
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="filter-freq" checked>
+                        Frequency
+                    </label>
+                </div>
+                <div id="log-content" class="log-content">
+                    <!-- Event log entries will be populated here -->
+                </div>
+            </aside>
+        </main>
+
+        <!-- Footer status bar -->
+        <footer class="footer">
+            <div class="footer-left">
+                <span>Nodes: <strong id="footer-nodes">0</strong></span>
+                <span>Links: <strong id="footer-links">0</strong></span>
+                <span>Depth: <strong id="footer-depth">0</strong></span>
+            </div>
+            <div class="footer-center">
+                <span id="footer-scan-status" class="scan-status"></span>
+            </div>
+            <div class="footer-right">
+                <span>Next scan: <span id="footer-countdown">--</span></span>
+                <span>Last scan: <span id="footer-last-scan">Never</span></span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Toast notifications container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Legend -->
+    <div class="legend">
+        <h4>Link Quality (Color)</h4>
+        <div class="legend-item">
+            <span class="legend-color green"></span> Good (>85%)
+        </div>
+        <div class="legend-item">
+            <span class="legend-color yellow"></span> Poor (50-85%)
+        </div>
+        <div class="legend-item">
+            <span class="legend-color red"></span> Bad/Dropped (<50%)
+        </div>
+        <div class="legend-item">
+            <span class="legend-color blue"></span> DTD (always blue)
+        </div>
+        <h4>Link Type (Pattern)</h4>
+        <div class="legend-item">
+            <span class="legend-line rf"></span> RF Link
+        </div>
+        <div class="legend-item">
+            <span class="legend-line dtd"></span> DTD (thick)
+        </div>
+        <div class="legend-item">
+            <span class="legend-line tunnel"></span> Tunnel (legacy)
+        </div>
+        <div class="legend-item">
+            <span class="legend-line wireguard"></span> Wireguard
+        </div>
+        <div class="legend-item">
+            <span class="legend-line xlink"></span> Xlink
+        </div>
+        <h4>Node Status</h4>
+        <div class="legend-item">
+            <span class="legend-node normal"></span> Normal
+        </div>
+        <div class="legend-item">
+            <span class="legend-node mismatch"></span> Firmware Mismatch
+        </div>
+        <div class="legend-item">
+            <span class="legend-node supernode"></span> Supernode
+        </div>
+        <div class="legend-item">
+            <span class="legend-node inactive"></span> Inactive (not polled)
+        </div>
+        <div class="legend-item">
+            <span class="legend-node offline"></span> Offline (15 min)
+        </div>
+        <h4>Services</h4>
+        <div class="legend-item">
+            <span class="service-icon phone">&#128222;</span> Phone/VOIP
+        </div>
+        <div class="legend-item">
+            <span class="service-icon chat">&#128172;</span> MeshChat
+        </div>
+        <div class="legend-item">
+            <span class="service-icon pbx">&#9742;</span> PBX
+        </div>
+        <div class="legend-item">
+            <span class="service-icon iperf">&#128200;</span> iPerf3 (built-in)
+        </div>
+    </div>
+
+    <!-- Custom JavaScript -->
+    <script src="{{ url_for('static', filename='js/network.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/rf-stats.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/nodes.js') }}"></script>
+</body>
+</html>

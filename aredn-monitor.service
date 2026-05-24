@@ -1,0 +1,28 @@
+[Unit]
+Description=AREDN Network Monitor
+Documentation=https://github.com/gskuhlman/AREDN_netmonitor
+After=network.target
+
+[Service]
+Type=simple
+User=aredn
+Group=aredn
+WorkingDirectory=/home/aredn/AREDN_netmonitor
+Environment="PATH=/home/aredn/AREDN_netmonitor/venv/bin"
+ExecStart=/home/aredn/AREDN_netmonitor/venv/bin/python app.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aredn-monitor
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/aredn/AREDN_netmonitor
+
+[Install]
+WantedBy=multi-user.target
