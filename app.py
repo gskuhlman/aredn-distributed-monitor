@@ -638,13 +638,27 @@ def api_trigger_rf_test(source, target):
         return jsonify({'error': 'Ping failed - target may not be reachable'}), 500
 
     elif test_type == 'iperf':
-        # iPerf requires either target IP or hostname
+        source_node = database.get_node(source)
+        source_ip = source_node.get('ip') if source_node else None
+
+        # iPerf requires source and target AREDN nodes. The source node is the
+        # AREDN client; the target node is the temporary iperf3 server.
         if target_ip:
-            result = rf_stats.run_iperf_test(target_ip)
+            result = rf_stats.run_iperf_test(
+                target_ip,
+                source_node_ip=source_ip,
+                source_node_name=source,
+                target_node_name=target
+            )
         else:
             # Try using target hostname with .local.mesh suffix
             target_hostname = f"{target}.local.mesh"
-            result = rf_stats.run_iperf_test(target_hostname)
+            result = rf_stats.run_iperf_test(
+                target_hostname,
+                source_node_ip=source_ip,
+                source_node_name=source,
+                target_node_name=target
+            )
 
         if result:
             database.update_link_history_throughput(

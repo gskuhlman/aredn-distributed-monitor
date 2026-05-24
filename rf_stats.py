@@ -10,6 +10,7 @@ import logging
 import time
 import platform
 import requests
+from urllib.parse import urlencode
 from datetime import datetime
 from collections import deque
 import threading
@@ -262,7 +263,15 @@ def ping_via_aredn(target, source_node_ip=None):
         return None
 
 
-def run_iperf_test(target_ip, duration=5, bandwidth_limit='10M', source_node_ip=None):
+def _node_address(node_name, fallback_ip=None):
+    """Return a node address suitable for AREDN CGI calls."""
+    if node_name:
+        return node_name if '.' in node_name else f"{node_name}.local.mesh"
+    return fallback_ip
+
+
+def run_iperf_test(target_ip, duration=5, bandwidth_limit='10M',
+                   source_node_ip=None, source_node_name=None, target_node_name=None):
     """
     Run iperf3 test using AREDN node's built-in iperf API.
 
@@ -274,6 +283,8 @@ def run_iperf_test(target_ip, duration=5, bandwidth_limit='10M', source_node_ip=
         duration: Test duration in seconds (default 5, not used with AREDN API)
         bandwidth_limit: Bandwidth limit (not used with AREDN API)
         source_node_ip: IP of node to run test from (defaults to starting node)
+        source_node_name: AREDN node name to run the client from
+        target_node_name: AREDN node name to use as the server
 
     Returns:
         dict with {tx_mbps, rx_mbps} or None on failure
@@ -293,12 +304,17 @@ def run_iperf_test(target_ip, duration=5, bandwidth_limit='10M', source_node_ip=
 
         if source_node_ip:
             source_host = source_node_ip
+        elif source_node_name:
+            source_host = _node_address(source_node_name)
+
+        server = _node_address(target_node_name, target_ip)
 
         # Use AREDN's built-in iperf API
-        # Format: http://<node>/cgi-bin/iperf?server=<target>&protocol=tcp
-        iperf_url = f"http://{source_host}/cgi-bin/iperf?server={target_ip}&protocol=tcp"
+        # Format: http://<client_node>/cgi-bin/iperf?server=<server_node>&protocol=tcp
+        query = urlencode({'server': server, 'protocol': 'tcp'})
+        iperf_url = f"http://{source_host}/cgi-bin/iperf?{query}"
 
-        logger.info(f"Running iperf test via AREDN API: {source_host} -> {target_ip}")
+        logger.info(f"Running iperf test via AREDN API: {source_host} -> {server}")
 
         response = requests.get(iperf_url, timeout=30)
 
@@ -311,8 +327,9 @@ def run_iperf_test(target_ip, duration=5, bandwidth_limit='10M', source_node_ip=
         output = response.text
 
         # Check for error
-        if 'SERVER ERROR' in output or 'no such server' in output.lower():
-            logger.warning(f"AREDN iperf failed: server not reachable")
+        lowered = output.lower()
+        if 'server error' in lowered or 'no such server' in lowered or 'unable to connect' in lowered:
+            logger.warning("AREDN iperf failed: %s", re.sub(r'<[^>]+>', ' ', output)[:300])
             return None
 
         # Parse iperf output to extract throughput
@@ -328,14 +345,17 @@ def run_iperf_test(target_ip, duration=5, bandwidth_limit='10M', source_node_ip=
         bitrate_values = []
 
         for line in lines:
-            # Match patterns like "46.5 Gbits/sec" or "125 Mbits/sec"
+            # Match patterns like "46.5 Gbits/sec", "125 Mbits/sec", or "850 Kbits/sec"
             gbits_match = re.search(r'([\d.]+)\s*Gbits/sec', line)
             mbits_match = re.search(r'([\d.]+)\s*Mbits/sec', line)
+            kbits_match = re.search(r'([\d.]+)\s*Kbits/sec', line)
 
             if gbits_match:
                 bitrate_values.append(float(gbits_match.group(1)) * 1000)  # Convert to Mbps
             elif mbits_match:
                 bitrate_values.append(float(mbits_match.group(1)))
+            elif kbits_match:
+                bitrate_values.append(float(kbits_match.group(1)) / 1000)
 
         if bitrate_values:
             # Take average of all samples (excluding the last summary if present)
@@ -509,6 +529,9 @@ def process_iperf_queue(socketio=None):
         source_node = test_item['source']
         target_node = test_item['target']
 
+        source = database.get_node(source_node)
+        source_ip = source.get('ip') if source else None
+
         # Get target node's IP
         target = database.get_node(target_node)
         if not target or not target.get('ip'):
@@ -536,7 +559,10 @@ def process_iperf_queue(socketio=None):
         result = run_iperf_test(
             target_ip,
             duration=config.IPERF_DURATION,
-            bandwidth_limit=config.IPERF_BANDWIDTH
+            bandwidth_limit=config.IPERF_BANDWIDTH,
+            source_node_ip=source_ip,
+            source_node_name=source_node,
+            target_node_name=target_node
         )
 
         if result:
