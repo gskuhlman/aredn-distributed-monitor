@@ -204,14 +204,6 @@ def tracker_is_connected(tracker):
     return True
 
 
-def tracker_target_is_reachable(hostname, tracker):
-    """Return False for known offline targets."""
-    target_node = database.get_node(hostname)
-    if not target_node or target_node.get('is_active'):
-        return True
-    return False
-
-
 def process_links(data, source_node):
     """Process LQM tracker data to extract links and discover connected nodes"""
     if not data or not source_node:
@@ -267,20 +259,6 @@ def process_links(data, source_node):
                             'severity': 'warning'
                         })
                         logger.info(f"Link reported disconnected: {source_node} -> {hostname}")
-                continue
-
-            if not tracker_target_is_reachable(hostname, tracker):
-                existing_link = database.get_link(source_node, hostname)
-                if existing_link and existing_link.get('status') not in ('dropped', 'removed'):
-                    changed = database.mark_link_dropped(source_node, hostname)
-                    if changed:
-                        events.append({
-                            'type': database.EVENT_LINK_DROPPED,
-                            'node': source_node,
-                            'details': f"{link_type} link to {hostname} dropped (target offline)",
-                            'severity': 'warning'
-                        })
-                        logger.info(f"Link target offline: {source_node} -> {hostname}")
                 continue
 
             current_targets.add(hostname)
