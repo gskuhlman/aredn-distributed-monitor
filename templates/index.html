@@ -277,9 +277,19 @@
                         <small class="form-hint">Time between automatic scans (10-600 seconds)</small>
                     </div>
                     <div class="form-group">
-                        <label for="link-remove-after">Dropped Link Retention (minutes):</label>
+                        <label for="link-remove-after">Dropped Link Display Retention (minutes):</label>
                         <input type="number" id="link-remove-after" class="form-input" min="1" max="10080" value="60">
-                        <small class="form-hint">Dropped links are removed after this time (default 60 minutes)</small>
+                        <small class="form-hint">Dropped links are hidden from the graph after this time, but retained in the database</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-node-days">New Node Announcement Window (days):</label>
+                        <input type="number" id="new-node-days" class="form-input" min="1" max="3650" value="30">
+                        <small class="form-hint">Only nodes not seen in this window are announced as new</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="database-retention-days">Database Retention (days):</label>
+                        <input type="number" id="database-retention-days" class="form-input" min="1" max="3650" value="90">
+                        <small class="form-hint">Nodes and related local state older than this are deleted from SQLite</small>
                     </div>
                     <div class="form-group">
                         <button id="save-settings" class="btn btn-primary">Save Settings</button>

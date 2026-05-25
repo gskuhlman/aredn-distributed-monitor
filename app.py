@@ -444,6 +444,14 @@ def api_get_settings():
         settings['link_remove_after_minutes'] = config.LINK_REMOVE_AFTER // 60
     else:
         settings['link_remove_after_minutes'] = int(settings['link_remove_after_minutes'])
+    if 'new_node_days' not in settings:
+        settings['new_node_days'] = config.NEW_NODE_DAYS
+    else:
+        settings['new_node_days'] = int(settings['new_node_days'])
+    if 'database_retention_days' not in settings:
+        settings['database_retention_days'] = config.DATABASE_RETENTION_DAYS
+    else:
+        settings['database_retention_days'] = int(settings['database_retention_days'])
 
     settings['link_timeout'] = config.LINK_TIMEOUT
     settings['quality_good'] = config.QUALITY_GOOD
@@ -498,7 +506,17 @@ def api_update_settings():
     if 'link_remove_after_minutes' in data:
         link_remove_after = max(1, min(10080, int(data['link_remove_after_minutes'])))
         database.set_setting('link_remove_after_minutes', str(link_remove_after))
-        logger.info(f"Dropped link retention updated to: {link_remove_after} minutes")
+        logger.info(f"Dropped link display retention updated to: {link_remove_after} minutes")
+
+    if 'new_node_days' in data:
+        new_node_days = max(1, min(3650, int(data['new_node_days'])))
+        database.set_setting('new_node_days', str(new_node_days))
+        logger.info(f"New node announcement window updated to: {new_node_days} days")
+
+    if 'database_retention_days' in data:
+        database_retention_days = max(1, min(3650, int(data['database_retention_days'])))
+        database.set_setting('database_retention_days', str(database_retention_days))
+        logger.info(f"Database retention updated to: {database_retention_days} days")
 
     return jsonify({'success': True, 'settings': database.get_all_settings()})
 

@@ -107,14 +107,16 @@ def process_node_data(data):
     existing_node = database.get_node(node_name)
 
     if existing_node is None:
-        # New node discovered
-        events.append({
-            'type': database.EVENT_NODE_DISCOVERED,
-            'node': node_name,
-            'details': f"Model: {model}, IP: {ip}",
-            'severity': 'info'
-        })
-        logger.info(f"New node discovered: {node_name}")
+        if should_announce_new_node(node_name):
+            events.append({
+                'type': database.EVENT_NODE_DISCOVERED,
+                'node': node_name,
+                'details': f"Model: {model}, IP: {ip}",
+                'severity': 'info'
+            })
+            logger.info(f"New node discovered: {node_name}")
+        else:
+            logger.info(f"Node rediscovered within new-node window: {node_name}")
     else:
         # Check if node was previously inactive (came back online)
         if not existing_node.get('is_active'):
@@ -529,6 +531,40 @@ def get_link_remove_after_seconds():
     return minutes * 60
 
 
+def get_new_node_days():
+    """Get the window used to suppress repeat new-node announcements."""
+    raw_value = database.get_setting('new_node_days', str(config.NEW_NODE_DAYS))
+    try:
+        days = int(raw_value)
+    except (TypeError, ValueError):
+        days = config.NEW_NODE_DAYS
+    return max(1, min(3650, days))
+
+
+def get_database_retention_days():
+    """Get how long inactive nodes remain in the local SQLite database."""
+    raw_value = database.get_setting('database_retention_days', str(config.DATABASE_RETENTION_DAYS))
+    try:
+        days = int(raw_value)
+    except (TypeError, ValueError):
+        days = config.DATABASE_RETENTION_DAYS
+    return max(1, min(3650, days))
+
+
+def should_announce_new_node(node_name):
+    """Only announce a node as new if it has no recent retained node events."""
+    return not database.has_recent_node_event(node_name, get_new_node_days())
+
+
+def prune_database_retention():
+    """Remove nodes and related local data older than the database retention window."""
+    retention_days = get_database_retention_days()
+    removed = database.prune_old_nodes(retention_days)
+    if removed > 0:
+        logger.info(f"Pruned {removed} nodes older than {retention_days} days from the database")
+    return removed
+
+
 def update_link_statuses():
     """Update link statuses based on timeouts, return details of changes"""
     # Get links that will be dropped before marking them
@@ -651,6 +687,7 @@ def run_scan():
 
     database.clear_old_events(config.CONNECTIVITY_LOG_RETENTION_DAYS)
     database.trim_connectivity_log(config.CONNECTIVITY_LOG_RETENTION_DAYS)
+    result['nodes_pruned'] = prune_database_retention()
 
     result['events'] = all_events
     result['timestamp'] = datetime.now().isoformat()

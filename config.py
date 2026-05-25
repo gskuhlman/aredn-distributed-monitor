@@ -33,6 +33,8 @@ POLL_INTERVAL = env_int("POLL_INTERVAL_SECONDS", 60)
 # Link timeout thresholds (in seconds)
 LINK_TIMEOUT = env_int("LINK_TIMEOUT_SECONDS", 300)  # 5 minutes - fallback timeout for links/nodes not seen by scans
 LINK_REMOVE_AFTER = env_int("LINK_REMOVE_AFTER_SECONDS", 3600)  # 60 minutes - remove dropped links from display
+NEW_NODE_DAYS = env_int("NEW_NODE_DAYS", 30)  # Announce nodes as new only when not seen recently
+DATABASE_RETENTION_DAYS = env_int("DATABASE_RETENTION_DAYS", 90)  # Keep inactive node records this many days
 
 # Connectivity event log
 CONNECTIVITY_LOG_PATH = "connectivity.log"

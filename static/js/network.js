@@ -1008,6 +1008,8 @@ async function loadSettings() {
         document.getElementById('auto-scan').checked = settings.auto_scan !== 'false';
         document.getElementById('poll-interval').value = settings.poll_interval || 30;
         document.getElementById('link-remove-after').value = settings.link_remove_after_minutes || 60;
+        document.getElementById('new-node-days').value = settings.new_node_days || 30;
+        document.getElementById('database-retention-days').value = settings.database_retention_days || 90;
 
         // Update poll interval for countdown
         if (settings.poll_interval) {
@@ -1029,6 +1031,8 @@ async function saveSettings() {
     const autoScan = document.getElementById('auto-scan').checked;
     const newPollInterval = parseInt(document.getElementById('poll-interval').value) || 30;
     const linkRemoveAfter = parseInt(document.getElementById('link-remove-after').value) || 60;
+    const newNodeDays = parseInt(document.getElementById('new-node-days').value) || 30;
+    const databaseRetentionDays = parseInt(document.getElementById('database-retention-days').value) || 90;
 
     try {
         const response = await fetch('/api/settings', {
@@ -1040,7 +1044,9 @@ async function saveSettings() {
                 max_depth: maxDepth,
                 auto_scan: autoScan,
                 poll_interval: newPollInterval,
-                link_remove_after_minutes: linkRemoveAfter
+                link_remove_after_minutes: linkRemoveAfter,
+                new_node_days: newNodeDays,
+                database_retention_days: databaseRetentionDays
             })
         });
 
@@ -1080,7 +1086,7 @@ function toggleSettings() {
 const EVENT_ICONS = {
     'node_discovered': { icon: '&#10133;', label: 'Node Discovered', class: 'event-info' },
     'node_offline': { icon: '&#10060;', label: 'Node Offline', class: 'event-warning' },
-    'node_online': { icon: '&#10004;', label: 'Node Online', class: 'event-success' },
+    'node_online': { icon: '&#10004;', label: 'Node Reconnected', class: 'event-success' },
     'link_new': { icon: '&#128279;', label: 'New Link', class: 'event-info' },
     'link_dropped': { icon: '&#128280;', label: 'Link Dropped', class: 'event-warning' },
     'link_removed': { icon: '&#128465;', label: 'Link Removed', class: 'event-info' },

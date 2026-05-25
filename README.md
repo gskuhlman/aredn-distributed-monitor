@@ -99,7 +99,9 @@ Edit `config.py` or set environment variables.
 | `REQUEST_TIMEOUT_SECONDS` / `REQUEST_TIMEOUT` | `10` | Timeout for AREDN sysinfo requests |
 | `MAX_DEPTH` | `5` | Maximum hops from starting node |
 | `LINK_TIMEOUT_SECONDS` / `LINK_TIMEOUT` | `300` | Seconds before legacy SQLite status marks nodes/links inactive |
-| `LINK_REMOVE_AFTER_SECONDS` / `LINK_REMOVE_AFTER` | `3600` | Seconds before old dropped links are removed from display |
+| `LINK_REMOVE_AFTER_SECONDS` / `LINK_REMOVE_AFTER` | `3600` | Seconds before old dropped links are hidden from the graph display |
+| `NEW_NODE_DAYS` | `30` | Days used to suppress repeat "new node" announcements for recently seen nodes |
+| `DATABASE_RETENTION_DAYS` | `90` | Days to keep inactive nodes and related local state in SQLite |
 | `SHOW_TUNNELS` | `false` | Show tunnel/WireGuard links |
 | `DATABASE_PATH` | `aredn_monitor.db` | SQLite database path |
 | `QUALITY_GOOD` | `85` | Threshold for good quality |
@@ -126,6 +128,45 @@ python couch_client.py
 ```
 
 This verifies CouchDB, creates the monitor database, creates the local config database, creates `_replicator`, and installs Mango indexes.
+
+### Collector-Only Node
+
+Use this mode for a node whose main purpose is data collection rather than serving as the primary dashboard. It still runs the Flask process because the scanner, scheduler, health endpoint, and CouchDB writer live in the same app.
+
+1. Install the application as usual and make sure the host can reach its local AREDN node.
+
+2. Set a stable collector identity and point it at CouchDB:
+
+   ```bash
+   export COLLECTOR_ID=site-east-collector
+   export COLLECTOR_SITE="East Site"
+   export STARTING_NODE=http://localnode.local.mesh/cgi-bin/sysinfo.json?lqm=1\&hosts=1\&services=1\&services_local=1
+   export COUCH_URL=http://admin:password@couchdb-host:5984
+   export COUCH_DB=aredn_monitor
+   ```
+
+3. Bootstrap CouchDB once from any collector with database admin credentials:
+
+   ```bash
+   python couch_client.py
+   ```
+
+4. Run the collector with a local-only listener if operators do not need to browse to it remotely:
+
+   ```bash
+   HOST=127.0.0.1 PORT=5000 python app.py
+   ```
+
+   For a systemd deployment, set the same environment variables in `aredn-monitor.service` or an EnvironmentFile and start the service with `systemctl`.
+
+5. Verify collection:
+
+   ```bash
+   curl http://127.0.0.1:5000/api/health
+   curl http://127.0.0.1:5000/api/collectors
+   ```
+
+Collector-only deployments should keep automatic scanning enabled through the Settings panel so scans continue on the configured interval. The local web UI can still be used for troubleshooting, but the durable distributed data is the append-only CouchDB observation stream.
 
 ## Project Structure
 

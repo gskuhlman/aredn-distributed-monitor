@@ -158,7 +158,7 @@ def init_db():
 
 
 def delete_node(name):
-    """Delete a node and all related data (links, services, events, link_history)"""
+    """Delete a node and its link/service/history state."""
     with get_connection() as conn:
         cursor = conn.cursor()
         # Delete services
@@ -170,6 +170,30 @@ def delete_node(name):
         # Delete node
         cursor.execute('DELETE FROM nodes WHERE name = ?', (name,))
         return cursor.rowcount
+
+
+def prune_old_nodes(days):
+    """Delete nodes and related local state when they exceed database retention."""
+    cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT name FROM nodes WHERE last_seen < ?', (cutoff,))
+        names = [row['name'] for row in cursor.fetchall()]
+        if not names:
+            return 0
+
+        placeholders = ','.join('?' * len(names))
+        cursor.execute(f'DELETE FROM services WHERE node_name IN ({placeholders})', names)
+        cursor.execute(
+            f'DELETE FROM links WHERE source_node IN ({placeholders}) OR target_node IN ({placeholders})',
+            names + names
+        )
+        cursor.execute(
+            f'DELETE FROM link_history WHERE source_node IN ({placeholders}) OR target_node IN ({placeholders})',
+            names + names
+        )
+        cursor.execute(f'DELETE FROM nodes WHERE name IN ({placeholders})', names)
+        return len(names)
 
 
 def get_node_history(name, hours=24):
@@ -263,6 +287,20 @@ def get_node(name):
         cursor.execute('SELECT * FROM nodes WHERE name = ?', (name,))
         row = cursor.fetchone()
         return dict(row) if row else None
+
+
+def has_recent_node_event(name, days):
+    """Return whether this node has any retained event within the recent-node window."""
+    cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT 1 FROM events
+            WHERE node_name = ?
+            AND timestamp >= ?
+            LIMIT 1
+        ''', (name, cutoff))
+        return cursor.fetchone() is not None
 
 
 def get_all_nodes():

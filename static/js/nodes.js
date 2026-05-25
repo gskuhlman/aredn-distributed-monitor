@@ -495,7 +495,7 @@ const NodesModule = {
             const eventIcons = {
                 'node_discovered': { icon: '&#10133;', label: 'Discovered', class: 'event-info' },
                 'node_offline': { icon: '&#10060;', label: 'Offline', class: 'event-warning' },
-                'node_online': { icon: '&#10004;', label: 'Online', class: 'event-success' },
+                'node_online': { icon: '&#10004;', label: 'Reconnected', class: 'event-success' },
                 'link_new': { icon: '&#128279;', label: 'New Link', class: 'event-info' },
                 'link_dropped': { icon: '&#128280;', label: 'Link Dropped', class: 'event-warning' },
                 'link_removed': { icon: '&#128465;', label: 'Link Removed', class: 'event-info' },
