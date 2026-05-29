@@ -18,6 +18,10 @@ pip install -r requirements.txt
 python app.py
 # Server starts at http://localhost:5000
 
+# Run via systemd user service (recommended for persistent operation)
+systemctl --user daemon-reload
+systemctl --user enable --now aredn-monitor
+
 # Validate Python syntax
 python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py
 

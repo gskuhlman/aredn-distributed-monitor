@@ -78,7 +78,7 @@ Important status principle for the new design: a node that is not visible from o
 
 ## Usage
 
-Start the application:
+Start the application directly:
 
 ```bash
 python app.py
@@ -87,6 +87,29 @@ python app.py
 Open `http://localhost:5000`.
 
 The network scans automatically when auto-scan is enabled. You can also click **Scan Now**, open **Settings**, click graph nodes for details, or use the RF Stats and Nodes tabs.
+
+### Running as a systemd Service
+
+`aredn-monitor.service` is included for persistent background running. It supports both **user-level** and **system-level** systemd; user-level is recommended when running as the application user.
+
+**User service (recommended):**
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now aredn-monitor
+```
+
+**System service (requires root / `sudo`):**
+
+```bash
+sudo cp aredn-monitor.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now aredn-monitor
+```
+
+If you need environment variables (e.g. `COUCH_URL`, `STARTING_NODE`), add an `Environment=` line to the service file or point `EnvironmentFile=` to a file with `KEY=VALUE` entries.
+
+**Note:** The previous service file included `ProtectSystem=strict` and `ProtectHome=read-only` hardening that caused immediate crashes. The current version removes these directives so the service starts cleanly.
 
 ## Configuration
 
