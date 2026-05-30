@@ -93,16 +93,20 @@ def ping_node(ip_address, count=5, timeout=5):
             )
 
             if stats_match and loss < 100:
+                ping_min = float(stats_match.group(1))
+                ping_max = float(stats_match.group(2))
+                ping_avg = float(stats_match.group(3))
+                # Approximate jitter from range on Windows (no mdev available)
+                jitter = round((ping_max - ping_min) / 2, 3) if count > 1 else 0.0
                 return {
-                    'min': float(stats_match.group(1)),
-                    'avg': float(stats_match.group(3)),
-                    'max': float(stats_match.group(2)),
-                    'loss': loss
+                    'min': ping_min,
+                    'avg': ping_avg,
+                    'max': ping_max,
+                    'loss': loss,
+                    'jitter': jitter
                 }
 
             # For single ping (count=1), parse individual reply line
-            # Format: "Reply from X.X.X.X: bytes=32 time=5ms TTL=64"
-            # Or with <1ms: "Reply from X.X.X.X: bytes=32 time<1ms TTL=64"
             reply_match = re.search(r'Reply from.*time[=<](\d+)ms', output)
             if reply_match:
                 time_ms = float(reply_match.group(1))
@@ -110,7 +114,8 @@ def ping_node(ip_address, count=5, timeout=5):
                     'min': time_ms,
                     'avg': time_ms,
                     'max': time_ms,
-                    'loss': 0.0
+                    'loss': 0.0,
+                    'jitter': 0.0
                 }
 
             # Check for "Request timed out" for single ping
@@ -119,7 +124,8 @@ def ping_node(ip_address, count=5, timeout=5):
                     'min': None,
                     'avg': None,
                     'max': None,
-                    'loss': 100.0
+                    'loss': 100.0,
+                    'jitter': None
                 }
         else:
             # Linux/macOS output: "rtt min/avg/max/mdev = 0.123/0.456/0.789/0.012 ms"
@@ -129,9 +135,9 @@ def ping_node(ip_address, count=5, timeout=5):
             loss_match = re.search(r'(\d+)%\s*packet loss', output)
             loss = float(loss_match.group(1)) if loss_match else 100.0
 
-            # Extract min/avg/max
+            # Extract min/avg/max/mdev (jitter)
             stats_match = re.search(
-                r'rtt min/avg/max/\S+\s*=\s*([\d.]+)/([\d.]+)/([\d.]+)',
+                r'rtt min/avg/max/\S+\s*=\s*([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)',
                 output
             )
 
@@ -140,7 +146,8 @@ def ping_node(ip_address, count=5, timeout=5):
                     'min': float(stats_match.group(1)),
                     'avg': float(stats_match.group(2)),
                     'max': float(stats_match.group(3)),
-                    'loss': loss
+                    'loss': loss,
+                    'jitter': float(stats_match.group(4))
                 }
 
         # If we got here, ping failed (100% loss or unparseable output)
@@ -148,7 +155,8 @@ def ping_node(ip_address, count=5, timeout=5):
             'min': None,
             'avg': None,
             'max': None,
-            'loss': 100.0
+            'loss': 100.0,
+            'jitter': None
         }
 
     except subprocess.TimeoutExpired:
@@ -223,21 +231,41 @@ def ping_via_aredn(target, source_node_ip=None):
         # Try to find min/avg/max - fping style
         stats_match = re.search(r'min/avg/max\s*=\s*([\d.]+)/([\d.]+)/([\d.]+)', output)
         if stats_match:
+            ping_min = float(stats_match.group(1))
+            ping_max = float(stats_match.group(3))
             return {
-                'min': float(stats_match.group(1)),
+                'min': ping_min,
                 'avg': float(stats_match.group(2)),
-                'max': float(stats_match.group(3)),
-                'loss': loss if loss is not None else 0.0
+                'max': ping_max,
+                'loss': loss if loss is not None else 0.0,
+                'jitter': round((ping_max - ping_min) / 2, 3)
             }
 
         # Try alternate format (Windows/standard ping)
         alt_match = re.search(r'Minimum\s*=\s*(\d+).*Maximum\s*=\s*(\d+).*Average\s*=\s*(\d+)', output)
         if alt_match:
+            ping_min = float(alt_match.group(1))
+            ping_max = float(alt_match.group(2))
             return {
-                'min': float(alt_match.group(1)),
+                'min': ping_min,
                 'avg': float(alt_match.group(3)),
-                'max': float(alt_match.group(2)),
-                'loss': loss if loss is not None else 0.0
+                'max': ping_max,
+                'loss': loss if loss is not None else 0.0,
+                'jitter': round((ping_max - ping_min) / 2, 3)
+            }
+
+        # Try to find mdev (Linux rtt output inside AREDN response)
+        rtt_match = re.search(
+            r'rtt min/avg/max/\S+\s*=\s*([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)',
+            output
+        )
+        if rtt_match:
+            return {
+                'min': float(rtt_match.group(1)),
+                'avg': float(rtt_match.group(2)),
+                'max': float(rtt_match.group(3)),
+                'loss': loss if loss is not None else 0.0,
+                'jitter': float(rtt_match.group(4))
             }
 
         # If we got some response but couldn't parse stats, check if it looks successful
@@ -246,7 +274,8 @@ def ping_via_aredn(target, source_node_ip=None):
                 'min': None,
                 'avg': None,
                 'max': None,
-                'loss': 0.0
+                'loss': 0.0,
+                'jitter': None
             }
 
         logger.warning(f"Could not parse AREDN ping output: {output[:200]}")
@@ -444,7 +473,8 @@ def run_ping_round(socketio=None):
                 ping_min=ping_result.get('min'),
                 ping_avg=ping_result.get('avg'),
                 ping_max=ping_result.get('max'),
-                ping_loss=ping_result.get('loss')
+                ping_loss=ping_result.get('loss'),
+                jitter=ping_result.get('jitter')
             )
 
             # Emit real-time update

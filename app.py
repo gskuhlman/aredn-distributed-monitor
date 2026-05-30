@@ -21,6 +21,7 @@ import config
 import database
 import scanner
 import rf_stats
+import link_health
 import couch_client
 
 # Configure logging
@@ -273,12 +274,13 @@ def api_get_active_nodes():
 @app.route('/api/node/<name>')
 def api_get_node(name):
     """Get a specific node with its services"""
-    node = database.get_node(name.lower())
+    node_name = name.lower()
+    node = database.get_observed_node(node_name)
     if not node:
         return jsonify({'error': 'Node not found'}), 404
 
-    services = database.get_node_services(name.lower())
-    links = database.get_node_links(name.lower())
+    services = database.get_node_services(node_name)
+    links = database.get_node_all_links(node_name) if node.get('is_link_only') else database.get_node_links(node_name)
 
     return jsonify({
         'node': node,
@@ -289,11 +291,8 @@ def api_get_node(name):
 
 @app.route('/api/nodes/all')
 def api_get_all_nodes():
-    """Get all nodes ever seen, with latest link info"""
-    nodes = database.get_all_nodes()
-    for node in nodes:
-        node['links_count'] = len(database.get_node_links(node['name']))
-        node['services_list'] = database.get_node_services(node['name'])
+    """Get all node names ever seen, including link-only endpoints."""
+    nodes = database.get_all_observed_nodes()
     return jsonify(nodes)
 
 
@@ -301,13 +300,13 @@ def api_get_all_nodes():
 def api_get_node_detail(name):
     """Get detailed information about a node"""
     node_name = name.lower()
-    node = database.get_node(node_name)
+    node = database.get_observed_node(node_name)
     if not node:
         return jsonify({'error': 'Node not found'}), 404
 
     services = database.get_node_services(node_name)
-    links = database.get_node_links(node_name)
-    connectivity_log = database.get_node_connectivity_log(node_name)
+    links = database.get_node_all_links(node_name)
+    connectivity_log = database.get_node_observed_events(node_name)
 
     return jsonify({
         'node': node,
@@ -321,7 +320,7 @@ def api_get_node_detail(name):
 def api_get_node_full(name):
     """Get all locally available information for one node."""
     node_name = name.lower()
-    node = database.get_node(node_name)
+    node = database.get_observed_node(node_name)
     if not node:
         return jsonify({'error': 'Node not found'}), 404
 
@@ -333,9 +332,10 @@ def api_get_node_full(name):
         'services': database.get_node_services(node_name),
         'active_links': database.get_node_links(node_name),
         'all_links': database.get_node_all_links(node_name),
-        'connectivity_log': database.get_node_connectivity_log(node_name, limit=event_limit),
+        'connectivity_log': database.get_node_observed_events(node_name, limit=event_limit),
         'quality_history': database.get_node_history(node_name, hours=hours),
-        'ping_history': database.get_node_ping_history(node_name, hours=hours)
+        'ping_history': database.get_node_ping_history(node_name, hours=hours),
+        'link_health': link_health.analyze_node_links(node_name, hours=hours)
     })
 
 
@@ -385,7 +385,7 @@ def api_get_node_connectivity(name):
     """Get connectivity events for a node"""
     node_name = name.lower()
     limit = request.args.get('limit', 200, type=int)
-    log = database.get_node_connectivity_log(node_name, limit=limit)
+    log = database.get_node_observed_events(node_name, limit=limit)
     return jsonify(log)
 
 
@@ -650,7 +650,8 @@ def api_trigger_rf_test(source, target):
             database.update_link_history_ping(
                 source, target,
                 result.get('min'), result.get('avg'),
-                result.get('max'), result.get('loss')
+                result.get('max'), result.get('loss'),
+                jitter=result.get('jitter')
             )
             return jsonify({'success': True, 'result': result})
         return jsonify({'error': 'Ping failed - target may not be reachable'}), 500

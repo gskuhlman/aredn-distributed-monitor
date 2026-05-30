@@ -30,11 +30,6 @@
             </section>
 
             <section class="node-page-section">
-                <h2>Connected Nodes</h2>
-                <div id="node-links"></div>
-            </section>
-
-            <section class="node-page-section">
                 <h2>Services</h2>
                 <div id="node-services"></div>
             </section>
@@ -47,10 +42,25 @@
                         <canvas id="node-page-quality-chart"></canvas>
                     </div>
                     <div class="chart-card">
+                        <h4>SNR (dB)</h4>
+                        <canvas id="node-page-snr-chart"></canvas>
+                    </div>
+                    <div class="chart-card">
                         <h4>Ping Latency (ms)</h4>
                         <canvas id="node-page-ping-chart"></canvas>
                     </div>
+                    <div class="chart-card">
+                        <h4>Throughput (Mbps)</h4>
+                        <canvas id="node-page-throughput-chart"></canvas>
+                    </div>
                 </div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Connected Nodes</h2>
+                <div id="node-links"></div>
+                <h3 class="subsection-heading">Link Health</h3>
+                <div id="node-link-health"></div>
             </section>
 
             <section class="node-page-section">

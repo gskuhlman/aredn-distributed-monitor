@@ -156,6 +156,28 @@ def init_db():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_link_history_link ON link_history(source_node, target_node, timestamp DESC)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_link_history_timestamp ON link_history(timestamp DESC)')
 
+        for column, definition in (
+            ('mac_address', 'TEXT'),
+            ('canonical_ip', 'TEXT'),
+            ('identity_status', 'TEXT'),
+            ('routability_status', 'TEXT'),
+            ('lqm_status_message', 'TEXT'),
+            ('signal', 'TEXT'),
+            ('noise', 'TEXT'),
+            ('tx_rate', 'TEXT'),
+            ('rx_rate', 'TEXT')
+        ):
+            try:
+                cursor.execute(f'ALTER TABLE links ADD COLUMN {column} {definition}')
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+        # Add jitter column to link_history
+        try:
+            cursor.execute('ALTER TABLE link_history ADD COLUMN jitter REAL')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
 
 def delete_node(name):
     """Delete a node and its link/service/history state."""
@@ -216,7 +238,8 @@ def get_node_ping_history(name, hours=24):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT timestamp, source_node, target_node, link_type, ping_min, ping_avg, ping_max, ping_loss
+            SELECT timestamp, source_node, target_node, link_type,
+                   ping_min, ping_avg, ping_max, ping_loss, jitter
             FROM link_history
             WHERE (source_node = ? OR target_node = ?)
             AND timestamp > ?
@@ -249,6 +272,134 @@ def get_node_all_links(name):
             ORDER BY last_seen DESC
         ''', (name, name))
         return [dict(row) for row in cursor.fetchall()]
+
+
+def get_node_observed_events(name, limit=200):
+    """Get events where a node was the event subject or mentioned in link details."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM events
+            WHERE node_name = ?
+            OR details LIKE ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+        ''', (name, f'%{name}%', limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def build_link_only_node(name):
+    """Build a synthetic node record from link/event evidence."""
+    links = get_node_all_links(name)
+    events = get_node_observed_events(name, limit=1)
+    if not links and not events:
+        return None
+
+    first_seen_values = [link.get('first_seen') for link in links if link.get('first_seen')]
+    first_seen_values.extend(event.get('timestamp') for event in events if event.get('timestamp'))
+    last_seen_values = [link.get('last_seen') for link in links if link.get('last_seen')]
+    last_seen_values.extend(event.get('timestamp') for event in events if event.get('timestamp'))
+    active_links = [link for link in links if link.get('status') != 'removed']
+    reporters = sorted({
+        link['source_node'] if link['target_node'] == name else link['target_node']
+        for link in links
+    })
+    mac_addresses = sorted({link.get('mac_address') for link in links if link.get('mac_address')})
+    canonical_ips = sorted({link.get('canonical_ip') for link in links if link.get('canonical_ip')})
+    identity_values = {link.get('identity_status') for link in links if link.get('identity_status')}
+    identity_status = 'mac_only' if 'mac_only' in identity_values else 'lqm_only'
+    routability_values = {link.get('routability_status') for link in links if link.get('routability_status')}
+    if 'routable' in routability_values:
+        routability_status = 'routable'
+    elif 'not_routable' in routability_values:
+        routability_status = 'not_routable'
+    else:
+        routability_status = 'unknown'
+
+    if not active_links:
+        lqm_status_message = 'Stale LQM entry'
+    elif routability_status == 'not_routable':
+        lqm_status_message = 'Seen by LQM, not currently routable'
+    elif any(ip and ':' in ip for ip in canonical_ips):
+        lqm_status_message = 'IPv6 link-local only'
+    elif not canonical_ips:
+        lqm_status_message = 'Awaiting host/IP mapping'
+    elif identity_status == 'mac_only':
+        lqm_status_message = 'MAC-only neighbor'
+    else:
+        lqm_status_message = 'LQM-only neighbor'
+
+    return {
+        'name': name,
+        'ip': None,
+        'description': 'Seen in link data, but not successfully polled by this collector',
+        'model': None,
+        'firmware_version': None,
+        'lat': None,
+        'lon': None,
+        'rf_frequency': None,
+        'rf_channel': None,
+        'first_seen': min(first_seen_values) if first_seen_values else None,
+        'last_seen': max(last_seen_values) if last_seen_values else None,
+        'is_active': 0,
+        'is_supernode': 0,
+        'is_link_only': True,
+        'observed_status': 'link-only' if active_links else 'removed',
+        'identity_status': identity_status,
+        'routability_status': routability_status,
+        'lqm_status_message': lqm_status_message,
+        'mac_addresses': mac_addresses,
+        'canonical_ips': canonical_ips,
+        'reporters': reporters,
+        'links_count': len(links),
+        'active_links_count': len(active_links),
+        'services_list': []
+    }
+
+
+def get_observed_node(name):
+    """Get a real node or a synthetic link-only node."""
+    node = get_node(name)
+    if node:
+        node['is_link_only'] = False
+        node['observed_status'] = 'active' if node.get('is_active') == 1 else 'inactive'
+        return node
+    return build_link_only_node(name)
+
+
+def get_all_observed_nodes():
+    """Get all polled nodes plus link-only endpoint names ever seen in links."""
+    nodes = get_all_nodes()
+    node_names = {node['name'] for node in nodes}
+    observed = []
+
+    for node in nodes:
+        item = dict(node)
+        item['is_link_only'] = False
+        item['observed_status'] = 'active' if item.get('is_active') == 1 else 'inactive'
+        item['links_count'] = len(get_node_all_links(item['name']))
+        item['active_links_count'] = len(get_node_links(item['name']))
+        item['services_list'] = get_node_services(item['name'])
+        observed.append(item)
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT source_node AS name FROM links
+            UNION
+            SELECT target_node AS name FROM links
+            ORDER BY name
+        ''')
+        link_names = [row['name'] for row in cursor.fetchall()]
+
+    for name in link_names:
+        if name in node_names:
+            continue
+        link_only = build_link_only_node(name)
+        if link_only:
+            observed.append(link_only)
+
+    return sorted(observed, key=lambda item: item.get('name') or '')
 
 
 # ============ Node Operations ============
@@ -389,7 +540,10 @@ def mark_orphan_nodes_inactive():
 
 # ============ Link Operations ============
 
-def upsert_link(source_node, target_node, link_type, quality=0, snr=None, distance=None):
+def upsert_link(source_node, target_node, link_type, quality=0, snr=None, distance=None,
+                mac_address=None, canonical_ip=None, identity_status=None,
+                routability_status=None, lqm_status_message=None,
+                signal=None, noise=None, tx_rate=None, rx_rate=None):
     """Insert or update a link"""
     now = local_timestamp()
     with get_connection() as conn:
@@ -410,26 +564,52 @@ def upsert_link(source_node, target_node, link_type, quality=0, snr=None, distan
                     quality = ?,
                     snr = ?,
                     distance = ?,
+                    mac_address = ?,
+                    canonical_ip = ?,
+                    identity_status = ?,
+                    routability_status = ?,
+                    lqm_status_message = ?,
+                    signal = ?,
+                    noise = ?,
+                    tx_rate = ?,
+                    rx_rate = ?,
                     last_seen = ?,
                     stable_since = ?,
                     drop_count = drop_count + 1,
                     status = 'good'
                 WHERE source_node = ? AND target_node = ?
-            ''', (link_type, quality, snr, distance, now, now, source_node, target_node))
+            ''', (link_type, quality, snr, distance, mac_address, canonical_ip,
+                  identity_status, routability_status, lqm_status_message,
+                  signal, noise, tx_rate, rx_rate,
+                  now, now, source_node, target_node))
         else:
             # Normal upsert
             cursor.execute('''
                 INSERT INTO links (source_node, target_node, link_type, quality, snr, distance,
+                                 mac_address, canonical_ip, identity_status, routability_status,
+                                 lqm_status_message, signal, noise, tx_rate, rx_rate,
                                  first_seen, last_seen, stable_since)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_node, target_node) DO UPDATE SET
                     link_type = excluded.link_type,
                     quality = excluded.quality,
                     snr = COALESCE(excluded.snr, snr),
                     distance = COALESCE(excluded.distance, distance),
+                    mac_address = COALESCE(excluded.mac_address, mac_address),
+                    canonical_ip = COALESCE(excluded.canonical_ip, canonical_ip),
+                    identity_status = COALESCE(excluded.identity_status, identity_status),
+                    routability_status = COALESCE(excluded.routability_status, routability_status),
+                    lqm_status_message = COALESCE(excluded.lqm_status_message, lqm_status_message),
+                    signal = COALESCE(excluded.signal, signal),
+                    noise = COALESCE(excluded.noise, noise),
+                    tx_rate = COALESCE(excluded.tx_rate, tx_rate),
+                    rx_rate = COALESCE(excluded.rx_rate, rx_rate),
                     last_seen = ?,
                     status = 'good'
-            ''', (source_node, target_node, link_type, quality, snr, distance, now, now, now, now))
+            ''', (source_node, target_node, link_type, quality, snr, distance,
+                  mac_address, canonical_ip, identity_status, routability_status,
+                  lqm_status_message, signal, noise, tx_rate, rx_rate,
+                  now, now, now, now))
 
 
 def get_link(source_node, target_node):
@@ -790,7 +970,7 @@ def clear_old_events(days=30):
 
 def insert_link_history(source_node, target_node, link_type, quality=None, snr=None,
                         ping_min=None, ping_avg=None, ping_max=None, ping_loss=None,
-                        throughput_tx=None, throughput_rx=None):
+                        jitter=None, throughput_tx=None, throughput_rx=None):
     """Insert a new link history record"""
     now = local_timestamp()
     with get_connection() as conn:
@@ -798,10 +978,10 @@ def insert_link_history(source_node, target_node, link_type, quality=None, snr=N
         cursor.execute('''
             INSERT INTO link_history (timestamp, source_node, target_node, link_type,
                                      quality, snr, ping_min, ping_avg, ping_max, ping_loss,
-                                     throughput_tx, throughput_rx)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     jitter, throughput_tx, throughput_rx)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (now, source_node, target_node, link_type, quality, snr,
-              ping_min, ping_avg, ping_max, ping_loss, throughput_tx, throughput_rx))
+              ping_min, ping_avg, ping_max, ping_loss, jitter, throughput_tx, throughput_rx))
         return cursor.lastrowid
 
 
@@ -895,7 +1075,8 @@ def cleanup_link_history(hours=24):
         return cursor.rowcount
 
 
-def update_link_history_ping(source_node, target_node, ping_min, ping_avg, ping_max, ping_loss):
+def update_link_history_ping(source_node, target_node, ping_min, ping_avg, ping_max, ping_loss,
+                             jitter=None):
     """Update the most recent history record with ping data, or insert new if none recent"""
     now = local_timestamp()
     # Check if there's a recent record (within last 2 minutes) to update
@@ -916,9 +1097,9 @@ def update_link_history_ping(source_node, target_node, ping_min, ping_avg, ping_
             # Update existing record
             cursor.execute('''
                 UPDATE link_history
-                SET ping_min = ?, ping_avg = ?, ping_max = ?, ping_loss = ?
+                SET ping_min = ?, ping_avg = ?, ping_max = ?, ping_loss = ?, jitter = ?
                 WHERE id = ?
-            ''', (ping_min, ping_avg, ping_max, ping_loss, row['id']))
+            ''', (ping_min, ping_avg, ping_max, ping_loss, jitter, row['id']))
         else:
             # Get link info for new record
             cursor.execute('''
@@ -929,10 +1110,12 @@ def update_link_history_ping(source_node, target_node, ping_min, ping_avg, ping_
             if link:
                 cursor.execute('''
                     INSERT INTO link_history (timestamp, source_node, target_node, link_type,
-                                             quality, snr, ping_min, ping_avg, ping_max, ping_loss)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             quality, snr, ping_min, ping_avg, ping_max, ping_loss,
+                                             jitter)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (now, source_node, target_node, link['link_type'],
-                      link['quality'], link['snr'], ping_min, ping_avg, ping_max, ping_loss))
+                      link['quality'], link['snr'], ping_min, ping_avg, ping_max, ping_loss,
+                      jitter))
 
 
 def update_link_history_throughput(source_node, target_node, throughput_tx, throughput_rx):
@@ -1062,6 +1245,7 @@ def get_network_graph_data():
     links = get_active_links()
 
     # Create sets for quick lookup
+    all_node_names = {n['name'] for n in all_nodes}
     active_node_names = {n['name'] for n in active_nodes}
     supernode_names = {n['name'] for n in active_nodes if n.get('is_supernode')}
     active_non_supernode_names = active_node_names - supernode_names
@@ -1092,6 +1276,62 @@ def get_network_graph_data():
             nodes.append(node)
             nodes_to_show.add(node['name'])
 
+    # Keep link-only endpoints visible when a scanned node reports them in LQM
+    # but the scanner has not been able to poll that endpoint as a node.
+    link_only_nodes = set()
+    for link in links:
+        source = link['source_node']
+        target = link['target_node']
+        if source in nodes_to_show and target not in all_node_names:
+            link_only_nodes.add(target)
+        elif target in nodes_to_show and source not in all_node_names:
+            link_only_nodes.add(source)
+
+    for node_name in sorted(link_only_nodes):
+        reported_links = []
+        for link in links:
+            if link['source_node'] == node_name or link['target_node'] == node_name:
+                reporter = link['target_node'] if link['source_node'] == node_name else link['source_node']
+                reported_links.append({
+                    'reporter': reporter,
+                    'source': link['source_node'],
+                    'target': link['target_node'],
+                    'mac_address': link.get('mac_address'),
+                    'canonical_ip': link.get('canonical_ip'),
+                    'identity_status': link.get('identity_status'),
+                    'routability_status': link.get('routability_status'),
+                    'lqm_status_message': link.get('lqm_status_message'),
+                    'signal': link.get('signal'),
+                    'noise': link.get('noise'),
+                    'tx_rate': link.get('tx_rate'),
+                    'rx_rate': link.get('rx_rate'),
+                    'link_type': link['link_type'],
+                    'quality': link['quality'],
+                    'snr': link.get('snr'),
+                    'status': link['status'],
+                    'last_seen': link['last_seen']
+                })
+
+        nodes_to_show.add(node_name)
+        nodes.append({
+            'name': node_name,
+            'ip': None,
+            'description': 'Seen as a link endpoint, but not pollable by this collector',
+            'model': None,
+            'firmware_version': None,
+            'lat': None,
+            'lon': None,
+            'rf_frequency': None,
+            'rf_channel': None,
+            'first_seen': None,
+            'last_seen': None,
+            'is_active': 0,
+            'is_supernode': 0,
+            'is_inactive': False,
+            'is_link_only': True,
+            'reported_links': reported_links
+        })
+
     # Filter links to only include those where BOTH ends are in nodes_to_show
     links = [link for link in links if link['source_node'] in nodes_to_show and link['target_node'] in nodes_to_show]
 
@@ -1102,6 +1342,7 @@ def get_network_graph_data():
     vis_nodes = []
 
     for node in nodes:
+        link_only = node.get('is_link_only', False)
         firmware = node.get('firmware_version', '')
         firmware_mismatch = reference_firmware and firmware and firmware != reference_firmware
         rf_freq = node.get('rf_frequency', '')
@@ -1109,7 +1350,7 @@ def get_network_graph_data():
         supernode = node.get('is_supernode', False)
 
         # Get services for this node and build icon string
-        services = get_node_services(node_name)
+        services = [] if link_only else get_node_services(node_name)
         service_icons = ' '.join([get_service_icon(s.get('name', '')) for s in services])
 
         # Build label with name, frequency, and service icons
@@ -1121,7 +1362,15 @@ def get_network_graph_data():
         label = '\n'.join(label_parts)
 
         # Build tooltip with service names
-        title_parts = [node_name, node.get('model', 'Unknown model'), f"Firmware: {firmware}"]
+        if link_only:
+            title_parts = [
+                node_name,
+                'Link-only endpoint',
+                'Seen in a neighbor LQM table, but this collector has not polled sysinfo for it.',
+                'Common causes: no routable canonical IP in LQM, depth/supernode boundary, DNS issue, or unreachable node.'
+            ]
+        else:
+            title_parts = [node_name, node.get('model', 'Unknown model'), f"Firmware: {firmware}"]
         if supernode:
             title_parts.append("** SUPERNODE **")
         if services:
@@ -1141,7 +1390,14 @@ def get_network_graph_data():
             'rf_frequency': rf_freq,
             'is_supernode': supernode,
             'is_inactive': node.get('is_inactive', False),
-            'node_type': 'main'
+            'is_link_only': link_only,
+            'reported_links': node.get('reported_links', []),
+            'identity_status': node.get('identity_status'),
+            'routability_status': node.get('routability_status'),
+            'lqm_status_message': node.get('lqm_status_message'),
+            'mac_addresses': node.get('mac_addresses', []),
+            'canonical_ips': node.get('canonical_ips', []),
+            'node_type': 'link_only' if link_only else 'main'
         })
 
     # Build edge data for vis.js
@@ -1223,7 +1479,17 @@ def get_network_graph_data():
             'quality': link['quality'],
             'snr': link.get('snr'),
             'status': link['status'],
-            'drop_count': link.get('drop_count', 0)
+            'drop_count': link.get('drop_count', 0),
+            'last_seen': link.get('last_seen'),
+            'mac_address': link.get('mac_address'),
+            'canonical_ip': link.get('canonical_ip'),
+            'identity_status': link.get('identity_status'),
+            'routability_status': link.get('routability_status'),
+            'lqm_status_message': link.get('lqm_status_message'),
+            'signal': link.get('signal'),
+            'noise': link.get('noise'),
+            'tx_rate': link.get('tx_rate'),
+            'rx_rate': link.get('rx_rate')
         }
 
         # Only add length if specified (don't send null)
