@@ -206,6 +206,46 @@ def tracker_is_connected(tracker):
     return True
 
 
+def tracker_mac_address(mac_key, tracker):
+    """Return the best MAC address value from a tracker entry."""
+    for key in ('mac', 'macaddr', 'mac_address', 'neighbor_mac'):
+        value = tracker.get(key)
+        if value:
+            return str(value).lower()
+    return str(mac_key).lower() if mac_key and ':' in str(mac_key) else None
+
+
+def tracker_routability_status(tracker):
+    """Classify whether LQM data says this neighbor is routable."""
+    if tracker.get('routable') is True:
+        return 'routable'
+    if tracker.get('routable') is False:
+        return 'not_routable'
+    return 'unknown'
+
+
+def tracker_identity_status(hostname, mac_address=None):
+    """Classify identity quality for a neighbor observed through LQM."""
+    if hostname:
+        return 'named'
+    return 'mac_only' if mac_address else 'lqm_only'
+
+
+def tracker_lqm_status_message(hostname, canonical_ip, routability_status):
+    """Human-facing diagnostic summary for an LQM neighbor."""
+    if not hostname:
+        return 'MAC-only neighbor'
+    if canonical_ip and ':' in str(canonical_ip):
+        return 'IPv6 link-local only'
+    if routability_status == 'not_routable':
+        return 'Seen by LQM, not currently routable'
+    if not canonical_ip:
+        return 'Awaiting host/IP mapping'
+    if routability_status == 'unknown':
+        return 'LQM-only neighbor'
+    return None
+
+
 def process_links(data, source_node):
     """Process LQM tracker data to extract links and discover connected nodes"""
     if not data or not source_node:
@@ -230,12 +270,19 @@ def process_links(data, source_node):
 
     for mac, tracker in trackers.items():
         link_type = tracker.get('type', '')
-        hostname = tracker.get('hostname', '').lower()
+        canonical_ip = tracker.get('canonical_ip')
+        mac_address = tracker_mac_address(mac, tracker)
+        tracker_hostname = tracker.get('hostname', '').lower()
+        hostname = tracker_hostname
+        if not hostname and mac_address:
+            hostname = f"mac-{mac_address.replace(':', '').replace('-', '')}"
 
         if not hostname:
             continue
 
-        canonical_ip = tracker.get('canonical_ip')
+        identity_status = tracker_identity_status(tracker_hostname, mac_address)
+        routability_status = tracker_routability_status(tracker)
+        lqm_status_message = tracker_lqm_status_message(tracker_hostname, canonical_ip, routability_status)
         quality = tracker.get('quality', 0)
         snr = tracker.get('snr')
         distance = tracker.get('distance')
@@ -293,7 +340,16 @@ def process_links(data, source_node):
                 link_type=link_type,
                 quality=quality,
                 snr=snr,
-                distance=distance
+                distance=distance,
+                mac_address=mac_address,
+                canonical_ip=canonical_ip,
+                identity_status=identity_status,
+                routability_status=routability_status,
+                lqm_status_message=lqm_status_message,
+                signal=tracker.get('signal'),
+                noise=tracker.get('noise'),
+                tx_rate=tracker.get('tx_rate'),
+                rx_rate=tracker.get('rx_rate')
             )
 
         # ALWAYS add routable nodes to discovery queue (regardless of link type)

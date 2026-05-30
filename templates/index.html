@@ -130,6 +130,7 @@
                             <select id="nodes-status-filter" class="form-input">
                                 <option value="all">All Nodes</option>
                                 <option value="active">Currently Active</option>
+                                <option value="link-only">Link-only</option>
                                 <option value="24h">Last 24 Hours</option>
                                 <option value="7d">Last 7 Days</option>
                                 <option value="inactive">Inactive</option>
@@ -400,6 +401,9 @@
         </div>
         <div class="legend-item">
             <span class="legend-node offline"></span> Offline (15 min)
+        </div>
+        <div class="legend-item">
+            <span class="legend-node link-only"></span> Link-only (not pollable)
         </div>
         <h4>Services</h4>
         <div class="legend-item">

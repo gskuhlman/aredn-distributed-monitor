@@ -77,6 +77,22 @@ def _node_ip(data):
     return None
 
 
+def tracker_mac_address(mac_key, tracker):
+    for key in ('mac', 'macaddr', 'mac_address', 'neighbor_mac'):
+        value = tracker.get(key)
+        if value:
+            return str(value).lower()
+    return str(mac_key).lower() if mac_key and ':' in str(mac_key) else None
+
+
+def tracker_routability_status(tracker):
+    if tracker.get('routable') is True:
+        return 'routable'
+    if tracker.get('routable') is False:
+        return 'not_routable'
+    return 'unknown'
+
+
 def build_node_observation(data, collector_id, collector_site, observed_at,
                            response_ms=None, errors=None):
     node_name = (data.get('node') or 'unknown').lower()
@@ -146,10 +162,11 @@ def iter_link_observations(data, source_node, collector_id, collector_site, obse
     if not isinstance(trackers, dict):
         return
 
-    for tracker in trackers.values():
-        neighbor = (tracker.get('hostname') or '').lower()
-        if not neighbor:
-            continue
+    for mac_key, tracker in trackers.items():
+        mac_address = tracker_mac_address(mac_key, tracker)
+        hostname = (tracker.get('hostname') or '').lower()
+        neighbor = hostname or mac_address or 'unknown'
+        identity_status = 'lqm_only' if hostname else ('mac_only' if mac_address else 'unknown')
 
         quality = tracker.get('quality')
         try:
@@ -169,6 +186,10 @@ def iter_link_observations(data, source_node, collector_id, collector_site, obse
             'poll_cycle_id': poll_cycle_id(collector_id, observed_at),
             'source_node': source_node,
             'neighbor_node': neighbor,
+            'neighbor_mac': mac_address,
+            'canonical_ip': tracker.get('canonical_ip'),
+            'identity_status': identity_status,
+            'routability_status': tracker_routability_status(tracker),
             'link_key': f"{pair[0]}--{pair[1]}",
             'link_type': tracker.get('type'),
             'lq': lq,

@@ -106,6 +106,8 @@ const NodesModule = {
             const rfFreq = (node.rf_frequency || '').toLowerCase();
             const rfChannel = (node.rf_channel || '').toLowerCase();
             const services = (node.services_list || []).map(s => (s.name || '').toLowerCase()).join(' ');
+            const reporters = (node.reporters || []).join(' ').toLowerCase();
+            const observedStatus = (node.observed_status || '').toLowerCase();
 
             const matchesSearch = !search ||
                 name.includes(search) ||
@@ -115,11 +117,15 @@ const NodesModule = {
                 description.includes(search) ||
                 rfFreq.includes(search) ||
                 rfChannel.includes(search) ||
-                services.includes(search);
+                services.includes(search) ||
+                reporters.includes(search) ||
+                observedStatus.includes(search);
 
             let matchesStatus = true;
             if (status === 'active') {
-                matchesStatus = node.is_active === 1;
+                matchesStatus = node.is_active === 1 && !node.is_link_only;
+            } else if (status === 'link-only') {
+                matchesStatus = !!node.is_link_only;
             } else if (status === 'inactive') {
                 matchesStatus = node.is_active !== 1;
             } else if (status === '24h') {
@@ -178,8 +184,10 @@ const NodesModule = {
 
         let html = '';
         for (const node of this.filteredNodes) {
-            const statusClass = node.is_active === 1 ? 'status-active' : 'status-inactive';
-            const statusText = node.is_active === 1 ? 'Active' : 'Inactive';
+            const statusClass = node.is_link_only ? 'status-link-only' : (node.is_active === 1 ? 'status-active' : 'status-inactive');
+            const statusText = node.is_link_only
+                ? (node.observed_status === 'removed' ? 'Link-only Removed' : 'Link-only')
+                : (node.is_active === 1 ? 'Active' : 'Inactive');
             const lastSeen = node.last_seen ? new Date(node.last_seen).toLocaleString() : 'Never';
             const servicesCount = (node.services_list || []).length;
             const nodeName = node.name || '';
@@ -187,20 +195,26 @@ const NodesModule = {
 
             const ipLink = node.ip ? `<a href="http://${encodeURIComponent(node.ip)}" target="_blank">${this.escapeHtml(node.ip)}</a>` : 'N/A';
             const nameLink = this.getQRZLink(nodeName);
+            const modelText = node.is_link_only ? 'Not polled' : (node.model || 'Unknown');
+            const firmwareText = node.is_link_only ? 'Not polled' : (node.firmware_version || 'Unknown');
+            const deleteButton = node.is_link_only
+                ? ''
+                : `<button class="btn btn-small btn-danger" data-node-action="delete" data-node-name="${encodedName}">Delete</button>`;
 
             html += `
                 <tr>
                     <td><strong>${nameLink}</strong></td>
                     <td>${ipLink}</td>
-                    <td>${this.escapeHtml(node.model || 'Unknown')}</td>
-                    <td>${this.escapeHtml(node.firmware_version || 'Unknown')}</td>
+                    <td>${this.escapeHtml(modelText)}</td>
+                    <td>${this.escapeHtml(firmwareText)}</td>
                     <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                     <td>${this.escapeHtml(lastSeen)}</td>
                     <td>${node.links_count || 0}</td>
                     <td>${servicesCount}</td>
                     <td>
                         <button class="btn btn-small btn-secondary" data-node-action="details" data-node-name="${encodedName}">Details</button>
-                        <button class="btn btn-small btn-danger" data-node-action="delete" data-node-name="${encodedName}">Delete</button>
+                        <a class="btn btn-small btn-secondary" href="/nodes/${encodedName}">Full</a>
+                        ${deleteButton}
                     </td>
                 </tr>
             `;
@@ -293,11 +307,29 @@ const NodesModule = {
                         <tr><td>RF Channel:</td><td>${this.escapeHtml(node.rf_channel || 'N/A')}</td></tr>
                         <tr><td>First Seen:</td><td>${node.first_seen ? new Date(node.first_seen).toLocaleString() : 'N/A'}</td></tr>
                         <tr><td>Last Seen:</td><td>${node.last_seen ? new Date(node.last_seen).toLocaleString() : 'N/A'}</td></tr>
-                        <tr><td>Status:</td><td>${node.is_active === 1 ? 'Active' : 'Inactive'}</td></tr>
+                        <tr><td>Status:</td><td>${this.getNodeStatusText(node)}</td></tr>
                         <tr><td>Supernode:</td><td>${node.is_supernode === 1 ? 'Yes' : 'No'}</td></tr>
+                        ${node.is_link_only ? `<tr><td>Reported By:</td><td>${this.escapeHtml((node.reporters || []).join(', ') || 'N/A')}</td></tr>` : ''}
                     </table>
                 </div>
             `;
+
+            if (node.is_link_only) {
+                html += `
+                    <div class="node-detail-section">
+                        <h3>Diagnostic Notes</h3>
+                        <p class="node-warning">${this.escapeHtml(node.lqm_status_message || 'LQM-only neighbor')}</p>
+                        <table class="info-table">
+                            <tr><td>Identity Status:</td><td>${this.escapeHtml(node.identity_status || 'lqm_only')}</td></tr>
+                            <tr><td>Routability Status:</td><td>${this.escapeHtml(node.routability_status || 'unknown')}</td></tr>
+                            <tr><td>MAC Address:</td><td>${this.escapeHtml((node.mac_addresses || []).join(', ') || 'N/A')}</td></tr>
+                            <tr><td>Canonical IP:</td><td>${this.escapeHtml((node.canonical_ips || []).join(', ') || 'N/A')}</td></tr>
+                            <tr><td>Likely causes:</td><td>No routable canonical IP, DNS failure, discovery depth limit, supernode boundary, or node HTTP/sysinfo unreachable</td></tr>
+                            <tr><td>Useful check:</td><td>Inspect the reporter's LQM tracker entry for routable and canonical_ip</td></tr>
+                        </table>
+                    </div>
+                `;
+            }
 
             if (node.lat && node.lon) {
                 html += `
@@ -313,7 +345,7 @@ const NodesModule = {
                     <div class="node-detail-section">
                         <h3>Connected Nodes (${links.length})</h3>
                         <table class="info-table">
-                            <tr><th>Node</th><th>Type</th><th>Quality</th><th>SNR</th><th>Status</th><th>Last Seen</th></tr>
+                            <tr><th>Node</th><th>Type</th><th>Quality</th><th>SNR</th><th>Signal</th><th>Noise</th><th>MAC</th><th>Routability</th><th>Status</th><th>Last Seen</th></tr>
                 `;
                 for (const link of links) {
                     const otherNode = link.source_node === node.name ? link.target_node : link.source_node;
@@ -324,6 +356,10 @@ const NodesModule = {
                             <td>${this.escapeHtml(link.link_type)}</td>
                             <td class="${qualityClass}">${link.quality || 0}%</td>
                             <td>${this.escapeHtml(link.snr || 'N/A')}</td>
+                            <td>${this.escapeHtml(link.signal || 'N/A')}</td>
+                            <td>${this.escapeHtml(link.noise || 'N/A')}</td>
+                            <td>${this.escapeHtml(link.mac_address || 'N/A')}</td>
+                            <td>${this.escapeHtml(link.routability_status || 'unknown')}</td>
                             <td>${this.escapeHtml(link.status || 'good')}</td>
                             <td>${link.last_seen ? new Date(link.last_seen).toLocaleString() : 'N/A'}</td>
                         </tr>
@@ -629,6 +665,13 @@ const NodesModule = {
         if (quality > 70) return 'quality-good';
         if (quality > 40) return 'quality-poor';
         return 'quality-bad';
+    },
+
+    getNodeStatusText(node) {
+        if (node.is_link_only) {
+            return node.observed_status === 'removed' ? 'Link-only / removed' : 'Link-only / not pollable';
+        }
+        return node.is_active === 1 ? 'Active' : 'Inactive';
     },
 
     getServiceIcon(serviceName) {

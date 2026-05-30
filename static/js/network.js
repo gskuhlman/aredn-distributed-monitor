@@ -93,6 +93,11 @@ const NODE_COLORS = {
         background: '#E0E0E0',
         border: '#999999',
         highlight: { background: '#EEEEEE', border: '#999999' }
+    },
+    linkOnly: {
+        background: '#FADBD8',
+        border: '#C0392B',
+        highlight: { background: '#FDEDEC', border: '#C0392B' }
     }
 };
 
@@ -254,6 +259,13 @@ async function showNodeDetails(nodeId) {
     selectedNode = nodeId;
     panelTitle.textContent = nodeId;
 
+    const graphNode = nodesDataset.get(nodeId);
+    if (graphNode && graphNode.is_link_only) {
+        renderLinkOnlyNodeDetails(graphNode);
+        sidePanel.classList.remove('hidden');
+        return;
+    }
+
     try {
         const response = await fetch(`/api/node/${encodeURIComponent(nodeId)}`);
         if (!response.ok) throw new Error('Node not found');
@@ -267,6 +279,63 @@ async function showNodeDetails(nodeId) {
         panelContent.innerHTML = '<p class="error">Failed to load node details</p>';
         sidePanel.classList.remove('hidden');
     }
+}
+
+function renderLinkOnlyNodeDetails(node) {
+    const reportedLinks = node.reported_links || [];
+    const linksHtml = reportedLinks.length > 0
+        ? `
+            <div class="node-links">
+                <h3>Reported Links</h3>
+                <table class="info-table">
+                    <tr><th>Reporter</th><th>Type</th><th>Quality</th><th>SNR</th><th>MAC</th><th>Routability</th><th>Status</th><th>Last Seen</th></tr>
+                    ${reportedLinks.map(link => `
+                        <tr>
+                            <td><a href="#" onclick="showNodeDetails('${link.reporter}'); return false;">${link.reporter}</a></td>
+                            <td>${link.link_type || 'N/A'}</td>
+                            <td>${link.quality !== null && link.quality !== undefined ? `${link.quality}%` : 'N/A'}</td>
+                            <td>${link.snr || 'N/A'}</td>
+                            <td>${link.mac_address || 'N/A'}</td>
+                            <td>${link.routability_status || 'unknown'}</td>
+                            <td>${link.status || 'N/A'}</td>
+                            <td>${formatDate(link.last_seen)}</td>
+                        </tr>
+                    `).join('')}
+                </table>
+            </div>
+        `
+        : '';
+
+    panelContent.innerHTML = `
+        <div class="node-info">
+            <h3>Link-Only Endpoint</h3>
+            <table class="info-table">
+                <tr><td>Name:</td><td>${node.id}</td></tr>
+                <tr><td>Status:</td><td>Seen in link data only</td></tr>
+                <tr><td>IP:</td><td>No routable IP known to this collector</td></tr>
+                <tr><td>Reported By:</td><td>${reportedLinks.length || 'Unknown'}</td></tr>
+                <tr><td>Identity Status:</td><td>${node.identity_status || 'lqm_only'}</td></tr>
+                <tr><td>Routability Status:</td><td>${node.routability_status || 'unknown'}</td></tr>
+                <tr><td>MAC Address:</td><td>${(node.mac_addresses || []).join(', ') || 'N/A'}</td></tr>
+                <tr><td>Canonical IP:</td><td>${(node.canonical_ips || []).join(', ') || 'N/A'}</td></tr>
+            </table>
+            <p class="node-warning">
+                ${node.lqm_status_message || 'LQM-only neighbor'}
+            </p>
+            <p class="node-warning">
+                Check whether the advertising node reports a routable canonical IP, whether DNS resolves the hostname, and whether discovery depth or a supernode boundary is stopping traversal.
+            </p>
+        </div>
+        ${linksHtml}
+        <div class="node-info">
+            <h3>Useful Checks</h3>
+            <table class="info-table">
+                <tr><td>From collector:</td><td>Resolve and browse to this hostname if DNS should work</td></tr>
+                <tr><td>On reporter:</td><td>Check the LQM tracker entry for routable and canonical_ip</td></tr>
+                <tr><td>Scan settings:</td><td>Confirm max depth and supernode boundaries are expected</td></tr>
+            </table>
+        </div>
+    `;
 }
 
 /**
@@ -737,7 +806,13 @@ function updateNetwork(data) {
 
     // Add or update nodes with appropriate coloring
     for (const node of data.nodes) {
-        if (node.is_inactive) {
+        if (node.is_link_only) {
+            node.color = NODE_COLORS.linkOnly;
+            if (!node.label.includes('(link-only)')) {
+                node.label = node.label + '\n(link-only)';
+            }
+            node.opacity = 0.85;
+        } else if (node.is_inactive) {
             // Inactive node (not polled recently but has links)
             node.color = NODE_COLORS.inactive;
             node.label = node.label + '\n(inactive)';
