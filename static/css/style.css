@@ -1327,47 +1327,31 @@ body {
     min-height: 260px;
 }
 
-.test-results {
+.test-results-grid {
     display: grid;
-    gap: 12px;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
 }
 
-.test-result {
-    border: 1px solid #ddd;
-    border-left-width: 4px;
-    border-radius: 6px;
-    background: #fff;
-    padding: 12px;
-}
-
-.test-result-ok {
-    border-left-color: #27ae60;
-}
-
-.test-result-failed {
-    border-left-color: #e74c3c;
-}
-
-.test-result-header {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
+.subsection-heading-inline {
+    font-size: 15px;
     color: #2c3e50;
+    margin: 0 0 8px;
 }
 
-.test-result-header span {
-    color: #777;
-    font-size: 0.85rem;
-    white-space: nowrap;
-}
-
-.test-result-table {
-    margin-top: 4px;
+.test-row-failed td {
+    background: #fdf2f2;
 }
 
 .test-result-error {
     color: #c0392b;
+    font-size: 0.82rem;
+}
+
+@media (max-width: 900px) {
+    .test-results-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .connectivity-log {

@@ -474,55 +474,59 @@ const NodePage = {
     },
 
     renderTestResults() {
-        const container = document.getElementById('node-test-results');
-        if (!container) return;
+        const pingContainer = document.getElementById('node-ping-results');
+        const iperfContainer = document.getElementById('node-iperf-results');
+        if (!pingContainer || !iperfContainer) return;
 
-        if (!this.testResults.length) {
-            container.innerHTML = '<p class="log-empty">No tests run from this page yet.</p>';
-            return;
+        const pings = this.testResults.filter(r => r.type === 'ping');
+        const iperfs = this.testResults.filter(r => r.type === 'iperf');
+
+        if (!pings.length) {
+            pingContainer.innerHTML = '<p class="log-empty">No ping tests run yet.</p>';
+        } else {
+            const rows = pings.map(item => {
+                const r = item.result;
+                const err = item.error;
+                return `<tr class="${err ? 'test-row-failed' : ''}">
+                    <td>${this.escapeHtml(item.source)}</td>
+                    <td>${this.escapeHtml(item.target)}</td>
+                    <td>${err ? '-' : this.formatNumber(r.min)}</td>
+                    <td>${err ? '-' : this.formatNumber(r.avg)}</td>
+                    <td>${err ? '-' : this.formatNumber(r.max)}</td>
+                    <td>${err ? '-' : this.formatNumber(r.jitter)}</td>
+                    <td>${err ? '-' : this.formatNumber(r.loss)}</td>
+                    <td>${err ? `<span class="test-result-error">${this.escapeHtml(err)}</span>` : ''}</td>
+                    <td>${this.formatDate(item.timestamp)}</td>
+                </tr>`;
+            }).join('');
+            pingContainer.innerHTML = `
+                <table class="info-table">
+                    <thead><tr><th>Source</th><th>Target</th><th>Min (ms)</th><th>Avg (ms)</th><th>Max (ms)</th><th>Jitter (ms)</th><th>Loss (%)</th><th>Error</th><th>Time</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>`;
         }
 
-        container.innerHTML = this.testResults.map(item => {
-            const label = item.type === 'iperf' ? 'iPerf3' : 'Ping';
-            const body = item.error
-                ? `<div class="test-result-error">${this.escapeHtml(item.error)}</div>`
-                : this.formatTestResult(item.type, item.result);
-
-            return `
-                <div class="test-result ${item.error ? 'test-result-failed' : 'test-result-ok'}">
-                    <div class="test-result-header">
-                        <strong>${label}: ${this.escapeHtml(item.source)} -> ${this.escapeHtml(item.target)}</strong>
-                        <span>${this.formatDate(item.timestamp)}</span>
-                    </div>
-                    ${body}
-                </div>
-            `;
-        }).join('');
-    },
-
-    formatTestResult(type, result) {
-        if (!result) {
-            return '<div class="test-result-error">No result details returned.</div>';
+        if (!iperfs.length) {
+            iperfContainer.innerHTML = '<p class="log-empty">No iPerf3 tests run yet.</p>';
+        } else {
+            const rows = iperfs.map(item => {
+                const r = item.result;
+                const err = item.error;
+                return `<tr class="${err ? 'test-row-failed' : ''}">
+                    <td>${this.escapeHtml(item.source)}</td>
+                    <td>${this.escapeHtml(item.target)}</td>
+                    <td>${err ? '-' : this.formatNumber(r.tx_mbps)}</td>
+                    <td>${err ? '-' : this.formatNumber(r.rx_mbps)}</td>
+                    <td>${err ? `<span class="test-result-error">${this.escapeHtml(err)}</span>` : ''}</td>
+                    <td>${this.formatDate(item.timestamp)}</td>
+                </tr>`;
+            }).join('');
+            iperfContainer.innerHTML = `
+                <table class="info-table">
+                    <thead><tr><th>Source</th><th>Target</th><th>TX (Mbps)</th><th>RX (Mbps)</th><th>Error</th><th>Time</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>`;
         }
-
-        if (type === 'ping') {
-            return `
-                <table class="info-table test-result-table">
-                    <tr><td>Minimum:</td><td>${this.formatNumber(result.min)} ms</td></tr>
-                    <tr><td>Average:</td><td>${this.formatNumber(result.avg)} ms</td></tr>
-                    <tr><td>Maximum:</td><td>${this.formatNumber(result.max)} ms</td></tr>
-                    <tr><td>Jitter:</td><td>${this.formatNumber(result.jitter)} ms</td></tr>
-                    <tr><td>Packet Loss:</td><td>${this.formatNumber(result.loss)}%</td></tr>
-                </table>
-            `;
-        }
-
-        return `
-            <table class="info-table test-result-table">
-                <tr><td>Transmit:</td><td>${this.formatNumber(result.tx_mbps)} Mbps</td></tr>
-                <tr><td>Receive:</td><td>${this.formatNumber(result.rx_mbps)} Mbps</td></tr>
-            </table>
-        `;
     },
 
     formatNumber(value) {
