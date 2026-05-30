@@ -353,12 +353,16 @@ def process_links(data, source_node):
             )
 
         # ALWAYS add routable nodes to discovery queue (regardless of link type)
-        # This ensures we discover all nodes even if connected only via tunnels
-        if tracker.get('routable') and canonical_ip:
+        # This ensures we discover all nodes even if connected only via tunnels.
+        # Fall back to the tracker 'ip' field when canonical_ip is null —
+        # Babel firmware leaves canonical_ip empty for OLSR DTD neighbors but
+        # populates 'ip' from its own discovery.
+        discover_ip = canonical_ip or tracker.get('ip')
+        if tracker.get('routable') and discover_ip:
             discovered_nodes.append({
                 'hostname': hostname,
-                'ip': canonical_ip,
-                'url': build_sysinfo_url(canonical_ip)
+                'ip': discover_ip,
+                'url': build_sysinfo_url(discover_ip)
             })
 
     missing_links = database.get_missing_source_links(source_node, current_targets)
