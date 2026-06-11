@@ -17,11 +17,21 @@ import observations
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Nodes whose last poll needed the bare-sysinfo fallback, used to emit
+# degraded/recovered events only on transitions instead of every scan.
+_degraded_nodes = set()
 
-def build_sysinfo_url(ip_or_hostname):
-    """Build the sysinfo.json URL for a node"""
+
+def build_sysinfo_url(ip_or_hostname, full=True):
+    """Build the sysinfo.json URL for a node.
+
+    The full URL asks the node to collect LQM, hosts, and service data, which
+    can take far longer than the bare sysinfo.json on a struggling node.
+    """
     # Remove any existing path/scheme
     host = ip_or_hostname.replace('http://', '').replace('https://', '').split('/')[0]
+    if not full:
+        return f"http://{host}/cgi-bin/sysinfo.json"
     return f"http://{host}/cgi-bin/sysinfo.json?lqm=1&hosts=1&services=1&services_local=1"
 
 
@@ -63,8 +73,12 @@ def is_supernode(data):
     return False
 
 
-def process_node_data(data):
-    """Process and save node data from sysinfo.json response"""
+def process_node_data(data, refresh_services=True):
+    """Process and save node data from sysinfo.json response.
+
+    refresh_services=False preserves stored services when processing a bare
+    sysinfo response that carries no services_local data.
+    """
     if not data:
         return None, []
 
@@ -161,15 +175,16 @@ def process_node_data(data):
     )
 
     # Process services_local (services provided by this node)
-    database.clear_node_services(node_name)
-    for service in data.get('services_local', []):
-        database.upsert_service(
-            node_name=node_name,
-            name=service.get('name', ''),
-            protocol=service.get('protocol', 'tcp'),
-            link=service.get('link', ''),
-            ip=ip
-        )
+    if refresh_services:
+        database.clear_node_services(node_name)
+        for service in data.get('services_local', []):
+            database.upsert_service(
+                node_name=node_name,
+                name=service.get('name', ''),
+                protocol=service.get('protocol', 'tcp'),
+                link=service.get('link', ''),
+                ip=ip
+            )
 
     return node_name, events
 
@@ -446,6 +461,17 @@ def discover_network(start_url=None, max_depth=None):
         # Fetch node data
         fetch_started = monotonic()
         data = fetch_node_info(url)
+        degraded = False
+        if not data:
+            # The full sysinfo request makes the node collect LQM, hosts, and
+            # service data, which can hang for tens of seconds on a struggling
+            # node. A bare sysinfo.json answering means the node is up but
+            # degraded, not down.
+            bare_url = build_sysinfo_url(url, full=False)
+            data = fetch_node_info(bare_url)
+            degraded = data is not None
+            if degraded:
+                logger.warning(f"Full sysinfo failed, bare sysinfo succeeded (degraded): {url}")
         response_ms = int((monotonic() - fetch_started) * 1000)
         if not data:
             error_msg = f"Failed to fetch: {url}"
@@ -463,15 +489,35 @@ def discover_network(start_url=None, max_depth=None):
             if depth == 0 and starting_node_error is None:
                 starting_node_error = f"Starting node unreachable: {url}"
                 logger.error(starting_node_error)
+                break
             continue
 
         # Process the node
-        node_name, node_events = process_node_data(data)
+        node_name, node_events = process_node_data(data, refresh_services=not degraded)
         all_events.extend(node_events)
 
         if not node_name:
             errors.append(f"Invalid node data from: {url}")
             continue
+
+        # Emit degraded/recovered events only on transitions
+        if degraded:
+            if node_name not in _degraded_nodes:
+                _degraded_nodes.add(node_name)
+                all_events.append({
+                    'type': database.EVENT_NODE_DEGRADED,
+                    'node': node_name,
+                    'details': "Full sysinfo timed out but node answers bare sysinfo (up but degraded)",
+                    'severity': 'warning'
+                })
+        elif node_name in _degraded_nodes:
+            _degraded_nodes.discard(node_name)
+            all_events.append({
+                'type': database.EVENT_NODE_DEGRADED,
+                'node': node_name,
+                'details': "Full sysinfo responding again",
+                'severity': 'info'
+            })
 
         reachable_nodes += 1
         observation_docs.append(
@@ -480,7 +526,11 @@ def discover_network(start_url=None, max_depth=None):
                 collector_id=config.COLLECTOR_ID,
                 collector_site=config.COLLECTOR_SITE,
                 observed_at=observed_at,
-                response_ms=response_ms
+                response_ms=response_ms,
+                errors=[{
+                    'kind': 'degraded',
+                    'message': 'full sysinfo failed; bare sysinfo fallback succeeded'
+                }] if degraded else None
             )
         )
         observation_docs.extend(
@@ -512,8 +562,13 @@ def discover_network(start_url=None, max_depth=None):
         if supernode:
             logger.info(f"Found supernode: {node_name} - not traversing beyond")
 
-        # Process links and get discovered nodes
-        discovered, link_events = process_links(data, node_name)
+        # Process links and get discovered nodes. A degraded (bare sysinfo)
+        # response has no LQM data, so it says nothing about links: skip
+        # link processing rather than mark every link from this node dropped.
+        if degraded:
+            discovered, link_events = [], []
+        else:
+            discovered, link_events = process_links(data, node_name)
         all_events.extend(link_events)
         links_found += len(discovered)
 

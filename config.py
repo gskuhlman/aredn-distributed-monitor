@@ -54,7 +54,7 @@ MAX_DEPTH = env_int("MAX_DEPTH", 5)
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "aredn_monitor.db")
 
 # Request timeout for node queries (seconds)
-REQUEST_TIMEOUT = env_int("REQUEST_TIMEOUT_SECONDS", 10)
+REQUEST_TIMEOUT = env_int("REQUEST_TIMEOUT_SECONDS", 30)
 
 # Web server settings
 HOST = os.environ.get("HOST", "0.0.0.0")
