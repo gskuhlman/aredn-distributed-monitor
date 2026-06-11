@@ -117,6 +117,23 @@ def init_db():
             )
         ''')
 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS selected_nodes (
+                node_name TEXT PRIMARY KEY,
+                selected_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Saved graph layout (node positions from the vis.js network map)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS node_positions (
+                node_name TEXT PRIMARY KEY,
+                x REAL NOT NULL,
+                y REAL NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # Events table for logging
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS events (
@@ -191,7 +208,9 @@ def delete_node(name):
         cursor.execute('DELETE FROM link_history WHERE source_node = ? OR target_node = ?', (name, name))
         # Delete node
         cursor.execute('DELETE FROM nodes WHERE name = ?', (name,))
-        return cursor.rowcount
+        deleted = cursor.rowcount
+        cursor.execute('DELETE FROM selected_nodes WHERE node_name = ?', (name,))
+        return deleted
 
 
 def prune_old_nodes(days):
@@ -215,6 +234,7 @@ def prune_old_nodes(days):
             names + names
         )
         cursor.execute(f'DELETE FROM nodes WHERE name IN ({placeholders})', names)
+        cursor.execute(f'DELETE FROM selected_nodes WHERE node_name IN ({placeholders})', names)
         return len(names)
 
 
@@ -363,8 +383,12 @@ def get_observed_node(name):
     if node:
         node['is_link_only'] = False
         node['observed_status'] = 'active' if node.get('is_active') == 1 else 'inactive'
+        node['is_selected'] = is_node_selected(name)
         return node
-    return build_link_only_node(name)
+    link_only = build_link_only_node(name)
+    if link_only:
+        link_only['is_selected'] = is_node_selected(name)
+    return link_only
 
 
 def get_all_observed_nodes():
@@ -377,6 +401,7 @@ def get_all_observed_nodes():
         item = dict(node)
         item['is_link_only'] = False
         item['observed_status'] = 'active' if item.get('is_active') == 1 else 'inactive'
+        item['is_selected'] = is_node_selected(item['name'])
         item['links_count'] = len(get_node_all_links(item['name']))
         item['active_links_count'] = len(get_node_links(item['name']))
         item['services_list'] = get_node_services(item['name'])
@@ -397,6 +422,7 @@ def get_all_observed_nodes():
             continue
         link_only = build_link_only_node(name)
         if link_only:
+            link_only['is_selected'] = is_node_selected(name)
             observed.append(link_only)
 
     return sorted(observed, key=lambda item: item.get('name') or '')
@@ -851,12 +877,95 @@ def get_all_settings():
         return {row['key']: row['value'] for row in cursor.fetchall()}
 
 
+# ============ Selected Node Operations ============
+
+def get_selected_node_names():
+    """Get node names included in selected-node scan/display mode."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT node_name FROM selected_nodes ORDER BY node_name')
+        return [row['node_name'] for row in cursor.fetchall()]
+
+
+def is_node_selected(name):
+    """Return whether a node is included in selected-node mode."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT 1 FROM selected_nodes WHERE node_name = ?', (name,))
+        return cursor.fetchone() is not None
+
+
+def set_node_selected(name, selected):
+    """Include or exclude a node from selected-node mode."""
+    node_name = (name or '').lower()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if selected:
+            cursor.execute('''
+                INSERT INTO selected_nodes (node_name, selected_at)
+                VALUES (?, ?)
+                ON CONFLICT(node_name) DO UPDATE SET selected_at = excluded.selected_at
+            ''', (node_name, local_timestamp()))
+        else:
+            cursor.execute('DELETE FROM selected_nodes WHERE node_name = ?', (node_name,))
+    return is_node_selected(node_name)
+
+
+# ============ Node Layout Operations ============
+
+def save_node_positions(positions):
+    """Upsert saved graph positions from a {node_name: {x, y}} mapping.
+
+    Positions for nodes not in the mapping are preserved, so saving while a
+    display filter hides part of the graph does not discard the hidden nodes'
+    layout. Entries without valid numeric x/y are skipped. Returns the number
+    of positions saved.
+    """
+    now = local_timestamp()
+    rows = []
+    for name, pos in (positions or {}).items():
+        if not name or not isinstance(pos, dict):
+            continue
+        try:
+            rows.append((str(name).lower(), float(pos['x']), float(pos['y']), now))
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.executemany('''
+            INSERT INTO node_positions (node_name, x, y, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(node_name) DO UPDATE SET
+                x = excluded.x,
+                y = excluded.y,
+                updated_at = excluded.updated_at
+        ''', rows)
+    return len(rows)
+
+
+def get_node_positions():
+    """Get the saved graph layout as {node_name: {x, y}}."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT node_name, x, y FROM node_positions')
+        return {row['node_name']: {'x': row['x'], 'y': row['y']} for row in cursor.fetchall()}
+
+
+def clear_node_positions():
+    """Delete the saved graph layout."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM node_positions')
+
+
 # ============ Event Operations ============
 
 # Event types
 EVENT_NODE_DISCOVERED = 'node_discovered'
 EVENT_NODE_OFFLINE = 'node_offline'
 EVENT_NODE_ONLINE = 'node_online'
+EVENT_NODE_DEGRADED = 'node_degraded'
 EVENT_LINK_NEW = 'link_new'
 EVENT_LINK_DROPPED = 'link_dropped'
 EVENT_LINK_REMOVED = 'link_removed'
@@ -1243,6 +1352,7 @@ def get_network_graph_data():
     active_nodes = get_active_nodes()
     all_nodes = get_all_nodes()
     links = get_active_links()
+    selected_node_names = set(get_selected_node_names())
 
     # Create sets for quick lookup
     all_node_names = {n['name'] for n in all_nodes}
@@ -1329,6 +1439,7 @@ def get_network_graph_data():
             'is_supernode': 0,
             'is_inactive': False,
             'is_link_only': True,
+            'is_selected': node_name in selected_node_names,
             'reported_links': reported_links
         })
 
@@ -1389,6 +1500,7 @@ def get_network_graph_data():
             'firmware_mismatch': firmware_mismatch,
             'rf_frequency': rf_freq,
             'is_supernode': supernode,
+            'is_selected': node_name in selected_node_names,
             'is_inactive': node.get('is_inactive', False),
             'is_link_only': link_only,
             'reported_links': node.get('reported_links', []),

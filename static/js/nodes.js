@@ -6,6 +6,7 @@
 const NodesModule = {
     nodes: [],
     filteredNodes: [],
+    networkData: { nodes: [], edges: [] },
     selectedNode: null,
     charts: {},
     timeRangeHours: 24,
@@ -73,9 +74,20 @@ const NodesModule = {
         try {
             const response = await fetch('/api/nodes/all');
             this.nodes = await response.json();
+            await this.loadNetworkData();
             this.filterNodes();
         } catch (error) {
             console.error('Error loading nodes:', error);
+        }
+    },
+
+    async loadNetworkData() {
+        try {
+            const response = await fetch('/api/network');
+            this.networkData = response.ok ? await response.json() : { nodes: [], edges: [] };
+        } catch (error) {
+            console.error('Error loading network data for node filters:', error);
+            this.networkData = { nodes: [], edges: [] };
         }
     },
 
@@ -88,6 +100,49 @@ const NodesModule = {
             .replace(/'/g, '&#39;');
     },
 
+    escapeAttr(value) {
+        return this.escapeHtml(value).replace(/`/g, '&#96;');
+    },
+
+    renderNodeIpLink(ip) {
+        if (!ip) return 'N/A';
+        const address = String(ip).trim();
+        return `<a href="${this.escapeAttr(`http://${address}`)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(address)}</a>`;
+    },
+
+    getSelectedNodeNames() {
+        const selected = new Set(
+            this.nodes
+                .filter(node => node.is_selected)
+                .map(node => node.name)
+                .filter(Boolean)
+        );
+
+        for (const node of this.networkData.nodes || []) {
+            if (node.is_selected && node.id) {
+                selected.add(node.id);
+            }
+        }
+
+        return selected;
+    },
+
+    getSelectedConnectedNodeNames() {
+        const selected = this.getSelectedNodeNames();
+        const visible = new Set(selected);
+
+        for (const edge of this.networkData.edges || []) {
+            const linkType = String(edge.link_type || '').toUpperCase();
+            if (linkType !== 'RF' && linkType !== 'DTD') continue;
+            if (selected.has(edge.from) || selected.has(edge.to)) {
+                visible.add(edge.from);
+                visible.add(edge.to);
+            }
+        }
+
+        return visible;
+    },
+
     filterNodes() {
         const search = (document.getElementById('nodes-search')?.value || '').toLowerCase();
         const status = document.getElementById('nodes-status-filter')?.value || 'all';
@@ -96,6 +151,8 @@ const NodesModule = {
         const now = Date.now();
         const ms24h = 24 * 60 * 60 * 1000;
         const ms7d = 7 * ms24h;
+        const selectedNames = status === 'selected' ? this.getSelectedNodeNames() : null;
+        const selectedConnectedNames = status === 'selected-connected' ? this.getSelectedConnectedNodeNames() : null;
 
         this.filteredNodes = this.nodes.filter(node => {
             const name = (node.name || '').toLowerCase();
@@ -122,7 +179,11 @@ const NodesModule = {
                 observedStatus.includes(search);
 
             let matchesStatus = true;
-            if (status === 'active') {
+            if (status === 'selected') {
+                matchesStatus = selectedNames.has(node.name);
+            } else if (status === 'selected-connected') {
+                matchesStatus = selectedConnectedNames.has(node.name);
+            } else if (status === 'active') {
                 matchesStatus = node.is_active === 1 && !node.is_link_only;
             } else if (status === 'link-only') {
                 matchesStatus = !!node.is_link_only;
@@ -193,7 +254,7 @@ const NodesModule = {
             const nodeName = node.name || '';
             const encodedName = encodeURIComponent(nodeName);
 
-            const ipLink = node.ip ? `<a href="http://${encodeURIComponent(node.ip)}" target="_blank">${this.escapeHtml(node.ip)}</a>` : 'N/A';
+            const ipLink = this.renderNodeIpLink(node.ip);
             const nameLink = this.getQRZLink(nodeName);
             const modelText = node.is_link_only ? 'Not polled' : (node.model || 'Unknown');
             const firmwareText = node.is_link_only ? 'Not polled' : (node.firmware_version || 'Unknown');
@@ -299,7 +360,7 @@ const NodesModule = {
                     <h3>Node Information</h3>
                     <table class="info-table">
                         <tr><td>Name:</td><td>${nameQRZ}</td></tr>
-                        <tr><td>IP:</td><td>${this.escapeHtml(node.ip || 'N/A')}</td></tr>
+                        <tr><td>IP:</td><td>${this.renderNodeIpLink(node.ip)}</td></tr>
                         <tr><td>Model:</td><td>${this.escapeHtml(node.model || 'Unknown')}</td></tr>
                         <tr><td>Firmware:</td><td>${this.escapeHtml(node.firmware_version || 'Unknown')}</td></tr>
                         <tr><td>Description:</td><td>${this.escapeHtml(node.description || 'N/A')}</td></tr>

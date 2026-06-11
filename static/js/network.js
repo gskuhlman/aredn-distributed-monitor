@@ -15,12 +15,70 @@ let droppedNodes = new Map(); // Track dropped nodes with timestamp: {nodeId: {t
 let isPinging = false;       // Track if continuous ping is active
 let pingTargetNode = null;   // Track which node is being pinged
 let pingIntervalId = null;   // Interval ID for REST API ping
+let fullNetworkData = { nodes: [], edges: [] };
 
 // How long to keep dropped nodes visible (15 minutes in milliseconds)
 const DROPPED_NODE_VISIBILITY_MS = 15 * 60 * 1000;
 
 // LocalStorage key for node positions
 const POSITIONS_STORAGE_KEY = 'aredn_node_positions';
+
+// Layout saved to the server database via the Save Node Layout button.
+// Used as a fallback under localStorage so the arrangement survives
+// browser-storage resets and nodes that leave and rejoin the mesh.
+let serverPositions = {};
+
+function getGraphFilters() {
+    return {
+        rfOnly: document.getElementById('filter-rf-only')?.checked || false,
+        selectedOnly: document.getElementById('scan-selected-only')?.checked || false
+    };
+}
+
+function filterNetworkData(data) {
+    if (!data || !data.nodes || !data.edges) {
+        return { nodes: [], edges: [] };
+    }
+
+    const filters = getGraphFilters();
+    let nodes = data.nodes.map(node => ({ ...node }));
+    let edges = data.edges.map(edge => ({ ...edge }));
+
+    if (filters.selectedOnly) {
+        const selectedIds = new Set(nodes.filter(node => node.is_selected).map(node => node.id));
+        nodes = nodes.filter(node => selectedIds.has(node.id));
+        edges = edges.filter(edge => selectedIds.has(edge.from) && selectedIds.has(edge.to));
+    }
+
+    if (filters.rfOnly) {
+        const rfNodeIds = new Set();
+        const dtdEdgesToKeep = [];
+        const rfEdges = edges.filter(edge => String(edge.link_type || '').toUpperCase() === 'RF');
+
+        for (const edge of rfEdges) {
+            rfNodeIds.add(edge.from);
+            rfNodeIds.add(edge.to);
+        }
+
+        for (const edge of edges) {
+            if (String(edge.link_type || '').toUpperCase() !== 'DTD') continue;
+            if (rfNodeIds.has(edge.from) || rfNodeIds.has(edge.to)) {
+                dtdEdgesToKeep.push(edge);
+                rfNodeIds.add(edge.from);
+                rfNodeIds.add(edge.to);
+            }
+        }
+
+        edges = [...rfEdges, ...dtdEdgesToKeep];
+        nodes = nodes.filter(node => rfNodeIds.has(node.id));
+    }
+
+    return { nodes, edges };
+}
+
+function renderCurrentNetwork(options = {}) {
+    updateNetwork(filterNetworkData(fullNetworkData), options);
+}
 
 /**
  * Save node positions to localStorage
@@ -319,6 +377,10 @@ function renderLinkOnlyNodeDetails(node) {
                 <tr><td>MAC Address:</td><td>${(node.mac_addresses || []).join(', ') || 'N/A'}</td></tr>
                 <tr><td>Canonical IP:</td><td>${(node.canonical_ips || []).join(', ') || 'N/A'}</td></tr>
             </table>
+            <label class="checkbox-label node-selected-control">
+                <input type="checkbox" id="panel-node-selected" ${node.is_selected ? 'checked' : ''}>
+                Include in selected nodes
+            </label>
             <p class="node-warning">
                 ${node.lqm_status_message || 'LQM-only neighbor'}
             </p>
@@ -336,6 +398,7 @@ function renderLinkOnlyNodeDetails(node) {
             </table>
         </div>
     `;
+    bindPanelSelectedToggle(node.id);
 }
 
 /**
@@ -354,13 +417,17 @@ function renderNodeDetails(data) {
             <h3>Node Information</h3>
             <table class="info-table">
                 <tr><td>Name:</td><td>${node.name}</td></tr>
-                <tr><td>IP:</td><td>${node.ip || 'N/A'}</td></tr>
+                <tr><td>IP:</td><td>${renderNodeIpLink(node.ip)}</td></tr>
                 <tr><td>Model:</td><td>${node.model || 'Unknown'}</td></tr>
                 <tr><td>Firmware:</td><td>${node.firmware_version || 'Unknown'}</td></tr>
                 <tr><td>Description:</td><td>${node.description || 'N/A'}</td></tr>
                 <tr><td>First Seen:</td><td>${formatDate(node.first_seen)}</td></tr>
                 <tr><td>Last Seen:</td><td>${formatDate(node.last_seen)}</td></tr>
             </table>
+            <label class="checkbox-label node-selected-control">
+                <input type="checkbox" id="panel-node-selected" ${node.is_selected ? 'checked' : ''}>
+                Include in selected nodes
+            </label>
             <div class="node-panel-actions">
                 <a class="btn btn-secondary" href="/nodes/${encodeURIComponent(node.name)}">Full Node Info</a>
             </div>
@@ -444,6 +511,38 @@ function renderNodeDetails(data) {
     }
 
     panelContent.innerHTML = html;
+    bindPanelSelectedToggle(node.name);
+}
+
+function bindPanelSelectedToggle(nodeName) {
+    const toggle = document.getElementById('panel-node-selected');
+    if (!toggle) return;
+    toggle.addEventListener('change', () => setNodeSelected(nodeName, toggle.checked, toggle));
+}
+
+async function setNodeSelected(nodeName, selected, toggle = null) {
+    if (toggle) toggle.disabled = true;
+    try {
+        const response = await fetch(`/api/nodes/selected/${encodeURIComponent(nodeName)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selected })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Failed to update node');
+
+        fullNetworkData.nodes = (fullNetworkData.nodes || []).map(node =>
+            node.id === nodeName ? { ...node, is_selected: result.is_selected } : node
+        );
+        renderCurrentNetwork({ notifyChanges: false });
+        showToast('success', result.is_selected ? 'Node Selected' : 'Node Excluded', nodeName);
+    } catch (error) {
+        console.error('Error updating selected node:', error);
+        if (toggle) toggle.checked = !selected;
+        showToast('error', 'Selection Failed', error.message);
+    } finally {
+        if (toggle) toggle.disabled = false;
+    }
 }
 
 async function runLinkedNodeTest(source, target, testType, button) {
@@ -721,33 +820,48 @@ function handlePingResult(data) {
 /**
  * Update network with new data
  */
-function updateNetwork(data) {
+function updateNetwork(data, options = {}) {
     if (!data || !data.nodes || !data.edges) return;
+    const notifyChanges = options.notifyChanges !== false;
 
     const currentNodeIds = nodesDataset.getIds();
     const newNodeIds = data.nodes.map(n => n.id);
-    const savedPositions = loadNodePositions();
+    // localStorage wins (it reflects the latest drags in this browser);
+    // the server-saved layout fills in for nodes localStorage doesn't know
+    const savedPositions = { ...serverPositions, ...loadNodePositions() };
     const now = Date.now();
 
+    if (!notifyChanges) {
+        droppedNodes.clear();
+        knownNodes = new Set(newNodeIds);
+        nodesDataset.remove(currentNodeIds.filter(id => !newNodeIds.includes(id)));
+    }
+
     // Check for nodes that came back online (were dropped but now active)
-    for (const node of data.nodes) {
-        if (droppedNodes.has(node.id)) {
-            console.log(`Node ${node.id} came back online`);
-            droppedNodes.delete(node.id);
+    if (notifyChanges) {
+        for (const node of data.nodes) {
+            if (droppedNodes.has(node.id)) {
+                console.log(`Node ${node.id} came back online`);
+                droppedNodes.delete(node.id);
+            }
         }
     }
 
     // Detect newly dropped nodes (were known but no longer in the network)
     const newlyDroppedNodes = [];
-    for (const nodeId of knownNodes) {
-        if (!newNodeIds.includes(nodeId) && !droppedNodes.has(nodeId)) {
-            newlyDroppedNodes.push(nodeId);
+    if (notifyChanges) {
+        for (const nodeId of knownNodes) {
+            if (!newNodeIds.includes(nodeId) && !droppedNodes.has(nodeId)) {
+                newlyDroppedNodes.push(nodeId);
+            }
         }
     }
 
     // Mark newly dropped nodes and keep them visible
     for (const nodeId of newlyDroppedNodes) {
-        showToast('warning', 'Node Dropped', `${nodeId} is no longer responding`);
+        if (notifyChanges) {
+            showToast('warning', 'Node Dropped', `${nodeId} is no longer responding`);
+        }
 
         // Get existing node data to preserve position
         const existingNode = nodesDataset.get(nodeId);
@@ -769,11 +883,13 @@ function updateNetwork(data) {
     }
 
     // Remove expired dropped nodes (older than 15 minutes)
-    for (const [nodeId, data] of droppedNodes.entries()) {
-        if (now - data.timestamp > DROPPED_NODE_VISIBILITY_MS) {
-            console.log(`Removing expired dropped node: ${nodeId}`);
-            droppedNodes.delete(nodeId);
-            nodesDataset.remove(nodeId);
+    if (notifyChanges) {
+        for (const [nodeId, data] of droppedNodes.entries()) {
+            if (now - data.timestamp > DROPPED_NODE_VISIBILITY_MS) {
+                console.log(`Removing expired dropped node: ${nodeId}`);
+                droppedNodes.delete(nodeId);
+                nodesDataset.remove(nodeId);
+            }
         }
     }
 
@@ -787,7 +903,7 @@ function updateNetwork(data) {
     }
 
     // Show info for new nodes (after initial load)
-    if (currentNodeIds.length > 0) {
+    if (notifyChanges && currentNodeIds.length > 0) {
         for (const nodeId of newNodes) {
             showToast('success', 'Node Discovered', `${nodeId} joined the network`);
         }
@@ -860,6 +976,22 @@ function updateNetwork(data) {
 
     // Update footer stats
     updateStats(data.nodes.length, data.edges.length);
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderNodeIpLink(ip) {
+    if (!ip) return 'N/A';
+    const address = String(ip).trim();
+    const href = escapeHtml(`http://${address}`).replace(/`/g, '&#96;');
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(address)}</a>`;
 }
 
 /**
@@ -962,7 +1094,8 @@ function initSocket() {
 
     socket.on('network_update', (data) => {
         console.log('Received network update:', data);
-        updateNetwork(data);
+        fullNetworkData = data;
+        renderCurrentNetwork({ notifyChanges: true });
     });
 
     socket.on('scan_started', (data) => {
@@ -997,7 +1130,8 @@ function initSocket() {
         }
 
         if (data.network) {
-            updateNetwork(data.network);
+            fullNetworkData = data.network;
+            renderCurrentNetwork({ notifyChanges: true });
         }
 
         if (data.result && data.result.timestamp) {
@@ -1079,6 +1213,7 @@ async function loadSettings() {
 
         document.getElementById('starting-node').value = settings.starting_node || '';
         document.getElementById('show-tunnels').checked = settings.show_tunnels === 'true';
+        document.getElementById('scan-selected-only').checked = settings.scan_selected_only === 'true';
         document.getElementById('max-depth').value = settings.max_depth || 5;
         document.getElementById('auto-scan').checked = settings.auto_scan !== 'false';
         document.getElementById('poll-interval').value = settings.poll_interval || 30;
@@ -1116,6 +1251,7 @@ async function saveSettings() {
             body: JSON.stringify({
                 starting_node: startingNode,
                 show_tunnels: showTunnels,
+                scan_selected_only: document.getElementById('scan-selected-only').checked,
                 max_depth: maxDepth,
                 auto_scan: autoScan,
                 poll_interval: newPollInterval,
@@ -1139,6 +1275,21 @@ async function saveSettings() {
     } catch (error) {
         console.error('Error saving settings:', error);
         alert('Failed to save settings');
+    }
+}
+
+async function saveSelectedScanMode() {
+    const selectedOnly = document.getElementById('scan-selected-only')?.checked || false;
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scan_selected_only: selectedOnly })
+        });
+        if (!response.ok) throw new Error('Failed to save selected-node mode');
+    } catch (error) {
+        console.error('Error saving selected-node mode:', error);
+        showToast('error', 'Setting Not Saved', error.message);
     }
 }
 
@@ -1322,6 +1473,15 @@ function initEventListeners() {
     // Settings button
     document.getElementById('settings-btn').addEventListener('click', toggleSettings);
 
+    document.getElementById('filter-rf-only').addEventListener('change', () => {
+        renderCurrentNetwork({ notifyChanges: false });
+    });
+
+    document.getElementById('scan-selected-only').addEventListener('change', async () => {
+        renderCurrentNetwork({ notifyChanges: false });
+        await saveSelectedScanMode();
+    });
+
     // Close panel buttons
     document.getElementById('close-panel').addEventListener('click', hidePanel);
     document.getElementById('close-settings').addEventListener('click', () => {
@@ -1333,6 +1493,9 @@ function initEventListeners() {
 
     // Save settings button
     document.getElementById('save-settings').addEventListener('click', saveSettings);
+
+    // Save layout button
+    document.getElementById('save-layout').addEventListener('click', saveNodeLayout);
 
     // Reset positions button
     document.getElementById('reset-positions').addEventListener('click', resetNodePositions);
@@ -1348,15 +1511,61 @@ function initEventListeners() {
 }
 
 /**
+ * Save the current node layout to the server database
+ */
+async function saveNodeLayout() {
+    if (!network) return;
+
+    const positions = {};
+    const livePositions = network.getPositions();
+    for (const [nodeId, pos] of Object.entries(livePositions)) {
+        positions[nodeId] = { x: pos.x, y: pos.y };
+    }
+
+    if (Object.keys(positions).length === 0) {
+        showToast('warning', 'Nothing to Save', 'No nodes are currently displayed');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/node-positions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ positions: positions })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'Server rejected the layout');
+        }
+
+        // Keep the in-memory server layout in sync without a reload.
+        // Merge: the server preserves positions for nodes a filter is hiding.
+        serverPositions = { ...serverPositions, ...positions };
+        showToast('success', 'Layout Saved', `Saved positions for ${result.saved} nodes to the database`);
+    } catch (error) {
+        console.error('Error saving node layout:', error);
+        showToast('error', 'Layout Not Saved', error.message);
+    }
+}
+
+/**
  * Reset all node positions and re-run physics layout
  */
-function resetNodePositions() {
-    if (!confirm('Reset all node positions? This will re-run the automatic layout.')) {
+async function resetNodePositions() {
+    if (!confirm('Reset all node positions? This will re-run the automatic layout and delete the layout saved in the database.')) {
         return;
     }
 
     // Clear localStorage
     localStorage.removeItem(POSITIONS_STORAGE_KEY);
+
+    // Clear the layout saved in the database so it does not reapply on reload
+    serverPositions = {};
+    try {
+        await fetch('/api/node-positions', { method: 'DELETE' });
+    } catch (error) {
+        console.error('Error clearing saved node layout:', error);
+    }
 
     // Clear fixed positions from all nodes
     nodesDataset.forEach(node => {
@@ -1384,10 +1593,21 @@ async function loadInitialData() {
         if (settings.poll_interval) {
             pollInterval = settings.poll_interval;
         }
+        document.getElementById('scan-selected-only').checked = settings.scan_selected_only === 'true';
+
+        // Load the saved layout before the first render so it applies
+        // to nodes that have no position in this browser's localStorage
+        try {
+            const positionsResponse = await fetch('/api/node-positions');
+            const positionsData = await positionsResponse.json();
+            serverPositions = positionsData.positions || {};
+        } catch (error) {
+            console.error('Error loading saved node layout:', error);
+        }
 
         const response = await fetch('/api/network');
-        const data = await response.json();
-        updateNetwork(data);
+        fullNetworkData = await response.json();
+        renderCurrentNetwork({ notifyChanges: false });
 
         // Also get status
         const statusResponse = await fetch('/api/status');

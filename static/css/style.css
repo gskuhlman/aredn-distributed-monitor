@@ -50,6 +50,22 @@ body {
     gap: 15px;
 }
 
+.header-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.header-checkbox input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
 /* Status indicator */
 .status-indicator {
     width: 12px;
@@ -248,6 +264,10 @@ body {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+.node-selected-control {
+    margin-top: 12px;
 }
 
 /* Quality indicators */
@@ -1127,6 +1147,16 @@ body {
 
 .nodes-table .btn-small {
     margin-right: 5px;
+}
+
+.nodes-table .btn-secondary {
+    background: #4f5f6f;
+    color: #fff;
+    font-weight: 600;
+}
+
+.nodes-table .btn-secondary:hover {
+    background: #394957;
 }
 
 .nodes-table td a {

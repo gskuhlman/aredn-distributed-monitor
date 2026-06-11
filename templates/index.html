@@ -31,6 +31,14 @@
                 </nav>
             </div>
             <div class="header-controls">
+                <label class="header-checkbox">
+                    <input type="checkbox" id="filter-rf-only">
+                    RF only
+                </label>
+                <label class="header-checkbox">
+                    <input type="checkbox" id="scan-selected-only">
+                    Only selected nodes
+                </label>
                 <span id="status-indicator" class="status-indicator"></span>
                 <span id="status-text">Connecting...</span>
                 <button id="scan-btn" class="btn btn-primary">Scan Now</button>
@@ -129,6 +137,8 @@
                             <input type="text" id="nodes-search" class="form-input" placeholder="Search nodes...">
                             <select id="nodes-status-filter" class="form-input">
                                 <option value="all">All Nodes</option>
+                                <option value="selected">Selected Nodes</option>
+                                <option value="selected-connected">Selected Nodes + Connected</option>
                                 <option value="active">Currently Active</option>
                                 <option value="link-only">Link-only</option>
                                 <option value="24h">Last 24 Hours</option>
@@ -294,7 +304,9 @@
                     </div>
                     <div class="form-group">
                         <button id="save-settings" class="btn btn-primary">Save Settings</button>
+                        <button id="save-layout" class="btn btn-secondary">Save Node Layout</button>
                         <button id="reset-positions" class="btn btn-secondary">Reset Node Positions</button>
+                        <small class="form-hint">Save Node Layout stores current node positions in the database so the arrangement survives browser resets and nodes that come and go</small>
                     </div>
                     <div class="settings-info">
                         <h3>Current Status</h3>

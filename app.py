@@ -79,6 +79,57 @@ def auto_scan_enabled():
     return database.get_setting('auto_scan', 'true') == 'true'
 
 
+def selected_scan_enabled():
+    """Return whether scans should be limited to selected nodes."""
+    return database.get_setting('scan_selected_only', 'false') == 'true'
+
+
+def run_configured_scan():
+    """Run the currently configured scan mode."""
+    if not selected_scan_enabled():
+        return scanner.run_scan()
+
+    selected_names = database.get_selected_node_names()
+    result = {
+        'nodes_found': 0,
+        'links_found': 0,
+        'nodes_visited': 0,
+        'max_depth_reached': 0,
+        'errors': [],
+        'events': [],
+        'timestamp': datetime.now().isoformat(),
+        'starting_node_error': None,
+        'selected_scan': True,
+        'selected_nodes': selected_names,
+        'inactive_nodes': [],
+        'dropped_links': []
+    }
+
+    if not selected_names:
+        result['errors'].append('Selected-node scan mode is enabled, but no nodes are selected')
+        return result
+
+    for node_name in selected_names:
+        node = database.get_node(node_name)
+        if not node or not node.get('ip'):
+            result['errors'].append(f'Selected node "{node_name}" has no pollable IP address')
+            continue
+
+        node_result = scanner.run_targeted_scan(node['ip'], max_depth=0)
+        result['nodes_found'] += node_result.get('nodes_found', 0)
+        result['links_found'] += node_result.get('links_found', 0)
+        result['nodes_visited'] += node_result.get('nodes_visited', 0)
+        result['max_depth_reached'] = max(
+            result['max_depth_reached'],
+            node_result.get('max_depth_reached', 0)
+        )
+        result['errors'].extend(node_result.get('errors', []))
+        result['events'].extend(node_result.get('events', []))
+
+    result['timestamp'] = datetime.now().isoformat()
+    return result
+
+
 def schedule_next_network_scan(delay_seconds=None):
     """Schedule one automatic network scan after the requested delay."""
     if not auto_scan_enabled():
@@ -121,7 +172,7 @@ def scheduled_scan():
     socketio.emit('scan_started', {'timestamp': datetime.now().isoformat()})
 
     try:
-        result = scanner.run_scan()
+        result = run_configured_scan()
         scan_state['last_scan'] = result['timestamp']
         scan_state['last_result'] = result
 
@@ -362,6 +413,60 @@ def api_scan_node(name):
         return jsonify({'error': str(exc)}), 500
 
 
+@app.route('/api/nodes/selected')
+def api_get_selected_nodes():
+    """Get nodes included in selected-node mode."""
+    return jsonify({'selected_nodes': database.get_selected_node_names()})
+
+
+@app.route('/api/nodes/selected/<name>', methods=['POST'])
+def api_set_selected_node(name):
+    """Include or exclude a node from selected-node mode."""
+    node_name = name.lower()
+    node = database.get_observed_node(node_name)
+    if not node:
+        return jsonify({'error': 'Node not found'}), 404
+
+    data = request.get_json(silent=True) or {}
+    selected = bool(data.get('selected'))
+    is_selected = database.set_node_selected(node_name, selected)
+    network_data = database.get_network_graph_data()
+    socketio.emit('network_update', network_data)
+    return jsonify({
+        'success': True,
+        'node': node_name,
+        'is_selected': is_selected,
+        'selected_nodes': database.get_selected_node_names()
+    })
+
+
+@app.route('/api/node-positions', methods=['GET'])
+def api_get_node_positions():
+    """Get the saved graph layout."""
+    return jsonify({'positions': database.get_node_positions()})
+
+
+@app.route('/api/node-positions', methods=['POST'])
+def api_save_node_positions():
+    """Save the graph layout as {positions: {node_name: {x, y}}}."""
+    data = request.get_json(silent=True) or {}
+    positions = data.get('positions')
+    if not isinstance(positions, dict):
+        return jsonify({'error': 'positions must be an object of {node_name: {x, y}}'}), 400
+
+    saved = database.save_node_positions(positions)
+    logger.info(f"Saved node layout: {saved} positions")
+    return jsonify({'success': True, 'saved': saved})
+
+
+@app.route('/api/node-positions', methods=['DELETE'])
+def api_clear_node_positions():
+    """Delete the saved graph layout."""
+    database.clear_node_positions()
+    logger.info("Cleared saved node layout")
+    return jsonify({'success': True})
+
+
 @app.route('/api/nodes/history/<name>')
 def api_get_node_history(name):
     """Get link quality/SNR history for a node"""
@@ -436,6 +541,8 @@ def api_get_settings():
         settings['max_depth'] = config.MAX_DEPTH
     if 'auto_scan' not in settings:
         settings['auto_scan'] = 'true'
+    if 'scan_selected_only' not in settings:
+        settings['scan_selected_only'] = 'false'
     if 'poll_interval' not in settings:
         settings['poll_interval'] = config.POLL_INTERVAL
     else:
@@ -492,6 +599,14 @@ def api_update_settings():
             if job:
                 scheduler.remove_job('network_scan')
                 logger.info("Scheduler paused")
+
+    if 'scan_selected_only' in data:
+        scan_selected_only = 'true' if data['scan_selected_only'] else 'false'
+        database.set_setting('scan_selected_only', scan_selected_only)
+        logger.info(f"Selected-node scan mode updated to: {scan_selected_only}")
+
+        if auto_scan_enabled() and not scan_state['is_scanning']:
+            schedule_next_network_scan()
 
     if 'poll_interval' in data:
         poll_interval = max(10, min(600, int(data['poll_interval'])))  # Clamp between 10-600

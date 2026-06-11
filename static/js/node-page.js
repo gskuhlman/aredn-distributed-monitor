@@ -7,6 +7,9 @@ const NodePage = {
     async init() {
         document.getElementById('node-scan-now')?.addEventListener('click', () => this.scanNow());
         document.getElementById('node-log-search')?.addEventListener('input', () => this.renderLog());
+        document.getElementById('node-selected-toggle')?.addEventListener('change', (event) => {
+            this.setSelected(event.target.checked);
+        });
         await this.load();
     },
 
@@ -53,6 +56,10 @@ const NodePage = {
             scanButton.disabled = true;
             scanButton.title = 'No polled IP address is available for this link-only endpoint';
         }
+        const selectedToggle = document.getElementById('node-selected-toggle');
+        if (selectedToggle) {
+            selectedToggle.checked = Boolean(node.is_selected);
+        }
         this.renderSummary();
         this.renderLinks();
         this.renderServices();
@@ -61,12 +68,36 @@ const NodePage = {
         this.renderLog();
     },
 
+    async setSelected(selected) {
+        const toggle = document.getElementById('node-selected-toggle');
+        if (toggle) toggle.disabled = true;
+        try {
+            const response = await fetch(`/api/nodes/selected/${encodeURIComponent(this.nodeName)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected })
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) throw new Error(result.error || 'Failed to update node');
+            if (this.data?.node) {
+                this.data.node.is_selected = result.is_selected;
+            }
+            if (toggle) toggle.checked = result.is_selected;
+            this.showToast('success', result.is_selected ? 'Node Selected' : 'Node Excluded', this.nodeName);
+        } catch (error) {
+            if (toggle) toggle.checked = !selected;
+            this.showToast('error', 'Selection Failed', error.message);
+        } finally {
+            if (toggle) toggle.disabled = false;
+        }
+    },
+
     renderSummary() {
         const node = this.data.node;
         document.getElementById('node-summary').innerHTML = `
             <table class="info-table">
                 <tr><td>Name:</td><td>${this.escapeHtml(node.name)}</td></tr>
-                <tr><td>IP:</td><td>${node.ip ? `<a href="http://${encodeURIComponent(node.ip)}" target="_blank">${this.escapeHtml(node.ip)}</a>` : 'N/A'}</td></tr>
+                <tr><td>IP:</td><td>${this.renderNodeIpLink(node.ip)}</td></tr>
                 <tr><td>Model:</td><td>${this.escapeHtml(node.model || 'Unknown')}</td></tr>
                 <tr><td>Firmware:</td><td>${this.escapeHtml(node.firmware_version || 'Unknown')}</td></tr>
                 <tr><td>Description:</td><td>${this.escapeHtml(node.description || 'N/A')}</td></tr>
@@ -553,6 +584,12 @@ const NodePage = {
 
     escapeAttr(value) {
         return this.escapeHtml(value).replace(/`/g, '&#96;');
+    },
+
+    renderNodeIpLink(ip) {
+        if (!ip) return 'N/A';
+        const address = String(ip).trim();
+        return `<a href="${this.escapeAttr(`http://${address}`)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(address)}</a>`;
     },
 
     getNodeStatusText(node) {
