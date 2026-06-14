@@ -417,6 +417,54 @@ def classify_snr(link):
     return {'snr': snr, 'rating': 'poor', 'details': f'SNR {snr} dB is poor (below {SNR_MARGINAL} dB)'}
 
 
+# ============ LQM Block State ============
+
+def analyze_block(link):
+    """Surface LQM's own block decision for this link.
+
+    A blocked link is the most direct flap explanation AREDN gives us, so it is
+    rated 'poor' whenever set, with the reason carried through for display.
+    """
+    blocked = link.get('blocked')
+    reason = link.get('blocked_reason')
+    if blocked is None:
+        return {'blocked': None, 'reason': None, 'rating': 'unknown'}
+    if blocked:
+        return {'blocked': True, 'reason': reason or 'unspecified', 'rating': 'poor'}
+    return {'blocked': False, 'reason': None, 'rating': 'good'}
+
+
+# ============ SNR Asymmetry (rev_snr) ============
+
+SNR_ASYMMETRY_MARGINAL = 3.0   # dB gap worth noting
+SNR_ASYMMETRY_POOR = 6.0       # dB gap that commonly drives flapping
+
+
+def analyze_snr_asymmetry(link):
+    """Compare our RX SNR against the neighbor's RX SNR (rev_snr).
+
+    "We hear them fine but they barely hear us" is a classic flapping cause and
+    is invisible in a single SNR number.
+    """
+    snr = _safe_float(link.get('snr'))
+    rev_snr = _safe_float(link.get('rev_snr'))
+    result = {'snr': snr, 'rev_snr': rev_snr, 'delta': None, 'rating': 'unknown', 'details': None}
+    if snr is None or rev_snr is None:
+        return result
+    delta = round(abs(snr - rev_snr), 1)
+    result['delta'] = delta
+    if delta >= SNR_ASYMMETRY_POOR:
+        result['rating'] = 'poor'
+        result['details'] = f'SNR {snr} dB vs neighbor {rev_snr} dB ({delta} dB gap)'
+    elif delta >= SNR_ASYMMETRY_MARGINAL:
+        result['rating'] = 'marginal'
+        result['details'] = f'{delta} dB SNR gap between directions'
+    else:
+        result['rating'] = 'good'
+        result['details'] = 'Balanced SNR in both directions'
+    return result
+
+
 # ============ TX/RX Rate Asymmetry ============
 
 def analyze_rate_asymmetry(link):
@@ -503,6 +551,8 @@ _METRIC_WEIGHTS = {
     'stability': 3,
     'flapping': 4,
     'asymmetry': 1,
+    'lqm_block': 4,
+    'snr_asymmetry': 3,
 }
 
 
@@ -524,6 +574,8 @@ def compute_overall_grade(metrics):
         'stability': metrics.get('stability', {}).get('rating'),
         'flapping': metrics.get('flapping', {}).get('rating'),
         'asymmetry': metrics.get('rate_asymmetry', {}).get('rating'),
+        'lqm_block': metrics.get('lqm_block', {}).get('rating'),
+        'snr_asymmetry': metrics.get('snr_asymmetry', {}).get('rating'),
     }
 
     for metric_name, rating in rating_map.items():
@@ -592,6 +644,21 @@ def analyze_link(node_name, link, quality_history, ping_history):
     stability = compute_rf_stability(link_quality)
     flapping = compute_flap_score(node_name, peer, link_type=link_type)
     asymmetry = analyze_rate_asymmetry(link)
+    block_state = analyze_block(link)
+    snr_asymmetry = analyze_snr_asymmetry(link)
+
+    # Attach the dominant LQM block reason from the structured state log so the
+    # flap column can show *why* a link is flapping, not just how often.
+    try:
+        flap_summary = database.get_pair_flap_summary(node_name, peer)
+        flapping['top_block_reason'] = flap_summary.get('top_block_reason')
+        # logged_downs reflects node-reported peer flaps only; scanner-to-node
+        # losses are surfaced separately so they are not read as RF instability.
+        flapping['logged_downs'] = flap_summary.get('node_reported_downs')
+        flapping['scanner_unreachable'] = flap_summary.get('scanner_unreachable')
+        flapping['inferred_downs'] = flap_summary.get('inferred_downs')
+    except Exception:
+        flapping['top_block_reason'] = None
 
     # Compute MOS from latest ping averages
     mos = compute_mos(
@@ -614,6 +681,8 @@ def analyze_link(node_name, link, quality_history, ping_history):
         'stability': stability,
         'flapping': flapping,
         'rate_asymmetry': asymmetry,
+        'lqm_block': block_state,
+        'snr_asymmetry': snr_asymmetry,
     }
 
     metrics['overall'] = compute_overall_grade(metrics)
@@ -650,9 +719,14 @@ def _deduplicate_links(node_name, links):
         result = dict(primary)
         for key in ('snr', 'signal', 'noise', 'tx_rate', 'rx_rate', 'distance',
                      'mac_address', 'canonical_ip', 'identity_status',
-                     'routability_status', 'lqm_status_message'):
+                     'routability_status', 'lqm_status_message', 'rev_snr'):
             if result.get(key) is None:
                 result[key] = secondary.get(key)
+        # A link blocked in either direction is blocked.
+        if secondary.get('blocked'):
+            result['blocked'] = secondary.get('blocked')
+            if result.get('blocked_reason') is None:
+                result['blocked_reason'] = secondary.get('blocked_reason')
         merged.append(result)
     return merged
 

@@ -292,6 +292,146 @@ def ping_via_aredn(target, source_node_ip=None):
         return None
 
 
+def _enrich_hops(hops):
+    """Label hops that are bare IPs with the AREDN node name when we know it."""
+    try:
+        ip_map = database.get_ip_name_map()
+    except Exception:
+        ip_map = {}
+    for hop in hops:
+        ip = hop.get('ip')
+        if ip and (not hop.get('host') or hop['host'] == ip):
+            name = ip_map.get(ip)
+            if name:
+                hop['host'] = name
+    return hops
+
+
+def _parse_traceroute(output):
+    """Parse `tracert` (Windows) or `traceroute` (Linux) text into hop dicts."""
+    hops = []
+    ip_re = re.compile(r'(\d{1,3}(?:\.\d{1,3}){3})')
+    for line in output.splitlines():
+        m = re.match(r'\s*(\d+)\s+(.*)', line)
+        if not m:
+            continue
+        hop_num = int(m.group(1))
+        rest = m.group(2)
+        ip_match = ip_re.search(rest)
+        ip = ip_match.group(1) if ip_match else None
+        times = re.findall(r'<?\s*([\d.]+)\s*ms', rest)
+        ms = float(times[0]) if times else None
+        timeout = ip is None and ('*' in rest or 'timed out' in rest.lower())
+        hops.append({'hop': hop_num, 'host': ip, 'ip': ip, 'ms': ms, 'timeout': timeout})
+    return hops
+
+
+def traceroute_local(target, max_hops=30, timeout=2):
+    """Run a traceroute FROM the scanner (this host) to a target IP/hostname.
+
+    This is the default "from the scanner" trace used by the network-page node
+    panel, analogous to ping_node. Hops are labeled with AREDN node names where
+    known.
+    """
+    if not target:
+        return None
+    try:
+        system = platform.system().lower()
+        if system == 'windows':
+            cmd = ['tracert', '-d', '-h', str(max_hops), '-w', str(timeout * 1000), target]
+        else:
+            cmd = ['traceroute', '-n', '-m', str(max_hops), '-w', str(timeout), '-q', '1', target]
+        subprocess_timeout = max_hops * timeout + 15
+        if USE_TPOOL:
+            result = eventlet.tpool.execute(_run_subprocess, cmd, subprocess_timeout)
+        else:
+            result = _run_subprocess(cmd, subprocess_timeout)
+        hops = _parse_traceroute(result.stdout)
+        if not hops:
+            return None
+        _enrich_hops(hops)
+        return {'target': target, 'source': 'scanner', 'hops': hops, 'raw': result.stdout[:2000]}
+    except subprocess.TimeoutExpired:
+        logger.warning("Local traceroute timeout for %s", target)
+        return None
+    except FileNotFoundError:
+        logger.error("traceroute/tracert not found on this host")
+        return None
+    except Exception as e:
+        logger.error("Local traceroute error for %s: %s", target, e)
+        return None
+
+
+def traceroute_via_aredn(target, source_node_ip=None):
+    """Run a traceroute FROM an AREDN node toward a target, via its CGI.
+
+    Mirrors ping_via_aredn: the trace originates at source_node_ip (any reachable
+    node), defaulting to the starting node. This lets us see where the route to a
+    target dies from an arbitrary vantage point in the mesh, not just the collector.
+
+    Returns {'target', 'source', 'hops': [{hop, host, ip, ms, timeout}], 'raw'}
+    or None on failure.
+    """
+    if not target:
+        return None
+    try:
+        import urllib.parse
+        starting_node = database.get_setting('starting_node', config.STARTING_NODE)
+        parsed = urllib.parse.urlparse(starting_node)
+        source_host = parsed.netloc or parsed.path.split('/')[0]
+        if source_node_ip:
+            source_host = source_node_ip
+
+        target_addr = target
+        if '.' not in target and not target.replace('.', '').isdigit():
+            target_addr = f"{target}.local.mesh"
+
+        url = f"http://{source_host}/cgi-bin/traceroute?server={urllib.parse.quote(target_addr)}"
+        logger.info("Running traceroute via AREDN API: %s -> %s", source_host, target_addr)
+        response = requests.get(url, timeout=45)
+        if response.status_code != 200:
+            logger.warning("AREDN traceroute API returned status %s", response.status_code)
+            return None
+
+        text = re.sub(r'<[^>]+>', '', response.text)
+        if 'Provide a server name' in text or '<title>ERROR' in response.text:
+            logger.warning("AREDN traceroute error for %s", target)
+            return None
+
+        hops = []
+        for line in text.splitlines():
+            m = re.match(r'\s*(\d+)\s+(.*)', line)
+            if not m:
+                continue
+            hop_num = int(m.group(1))
+            rest = m.group(2).strip()
+            if rest.startswith('*'):
+                hops.append({'hop': hop_num, 'host': None, 'ip': None, 'ms': None, 'timeout': True})
+                continue
+            ip_match = re.search(r'\(([\d.]+)\)', rest)
+            ip = ip_match.group(1) if ip_match else None
+            host = rest.split('(')[0].strip() if ip_match else rest.split()[0]
+            times = re.findall(r'([\d.]+)\s*ms', rest)
+            ms = float(times[0]) if times else None
+            hops.append({'hop': hop_num, 'host': host or None, 'ip': ip, 'ms': ms, 'timeout': False})
+
+        if not hops:
+            return None
+        _enrich_hops(hops)
+        return {'target': target_addr, 'source': source_host, 'hops': hops,
+                'raw': text.strip()[:2000]}
+
+    except requests.Timeout:
+        logger.warning("AREDN traceroute API timeout for %s", target)
+        return None
+    except requests.RequestException as e:
+        logger.error("AREDN traceroute request error: %s", e)
+        return None
+    except Exception as e:
+        logger.error("Traceroute error for %s: %s", target, e)
+        return None
+
+
 def _node_address(node_name, fallback_ip=None):
     """Return a node address suitable for AREDN CGI calls."""
     if node_name:
@@ -427,7 +567,12 @@ def record_rf_link_stats():
             target_node=link['target_node'],
             link_type=link['link_type'],
             quality=link.get('quality'),
-            snr=link.get('snr')
+            snr=link.get('snr'),
+            rev_snr=link.get('rev_snr'),
+            blocked=link.get('blocked'),
+            blocked_reason=link.get('blocked_reason'),
+            raw_tracker=link.get('raw_tracker'),
+            sample_type='scan'
         )
         count += 1
 
@@ -634,12 +779,190 @@ def process_iperf_queue(socketio=None):
 
 
 def cleanup_old_history():
-    """Clean up old link history records"""
+    """Clean up old link history, node health, and link state-log records"""
     hours = config.HISTORY_RETENTION_HOURS
     count = database.cleanup_link_history(hours=hours)
     if count > 0:
         logger.info(f"Cleaned up {count} old link history records")
+
+    health_count = database.cleanup_node_health(config.NODE_HEALTH_RETENTION_HOURS)
+    if health_count > 0:
+        logger.info(f"Cleaned up {health_count} old node health records")
+
+    state_count = database.cleanup_link_state_log(config.LINK_STATE_LOG_RETENTION_DAYS)
+    if state_count > 0:
+        logger.info(f"Cleaned up {state_count} old link state-log records")
+
     return count
+
+
+# ============ Incident Mode ============
+#
+# When a watched node's link is dropped, LQM-blocked, or marginal, we sample
+# that one link hard and bidirectionally instead of standing down. Pinging from
+# each end (via the node's own ping CGI) isolates which direction/hop is bad,
+# and high cadence catches sub-scan-interval flapping. Samples are stored with
+# sample_type='incident' so reports can separate them from routine scans.
+
+_incident_active = set()
+_incident_lock = threading.Lock()
+
+
+def select_incident_links():
+    """Return watched-node RF links currently worth incident probing."""
+    candidates = []
+    seen = set()
+    for link in database.get_all_links():
+        if link.get('link_type') != 'RF' or link.get('status') == 'removed':
+            continue
+        source = link.get('source_node')
+        target = link.get('target_node')
+        if not (config.is_watched_node(source) or config.is_watched_node(target)):
+            continue
+
+        dropped = link.get('status') == 'dropped'
+        blocked = bool(link.get('blocked'))
+        marginal = (link.get('quality') or 0) <= config.INCIDENT_MARGINAL_QUALITY
+        if not (dropped or blocked or marginal):
+            continue
+
+        key = (source, target)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(link)
+    return candidates
+
+
+def _record_incident_ping(source_node, target_node, ping_result):
+    """Persist one incident probe sample (direction = source -> target)."""
+    if not ping_result:
+        return
+    database.insert_link_history(
+        source_node=source_node,
+        target_node=target_node,
+        link_type='RF',
+        ping_min=ping_result.get('min'),
+        ping_avg=ping_result.get('avg'),
+        ping_max=ping_result.get('max'),
+        ping_loss=ping_result.get('loss'),
+        jitter=ping_result.get('jitter'),
+        sample_type='incident'
+    )
+
+
+def run_incident_capture(link, socketio=None):
+    """Bidirectionally probe one struggling link for INCIDENT_DURATION seconds."""
+    source_node = link['source_node']
+    target_node = link['target_node']
+    key = (source_node, target_node)
+
+    with _incident_lock:
+        if key in _incident_active:
+            return
+        _incident_active.add(key)
+
+    source = database.get_node(source_node)
+    target = database.get_node(target_node)
+    source_ip = source.get('ip') if source else None
+    target_ip = target.get('ip') if target else None
+
+    logger.info("Incident capture starting: %s <-> %s", source_node, target_node)
+    if socketio:
+        socketio.emit('incident_started', {'source': source_node, 'target': target_node})
+
+    started = time.monotonic()
+    rounds = 0
+    try:
+        while time.monotonic() - started < config.INCIDENT_DURATION:
+            rounds += 1
+            # source -> target
+            forward = ping_via_aredn(target_node, source_node_ip=source_ip)
+            _record_incident_ping(source_node, target_node, forward)
+            # target -> source (isolates the reverse direction)
+            reverse = ping_via_aredn(source_node, source_node_ip=target_ip)
+            _record_incident_ping(target_node, source_node, reverse)
+
+            if socketio:
+                socketio.emit('rf_stats_update', {
+                    'link': {'source': source_node, 'target': target_node},
+                    'timestamp': datetime.now().isoformat(),
+                    'sample_type': 'incident',
+                    'forward_ping': forward,
+                    'reverse_ping': reverse
+                })
+
+            time.sleep(config.INCIDENT_PROBE_INTERVAL)
+    finally:
+        with _incident_lock:
+            _incident_active.discard(key)
+        logger.info("Incident capture complete: %s <-> %s (%d rounds)",
+                    source_node, target_node, rounds)
+        if socketio:
+            socketio.emit('incident_complete', {
+                'source': source_node, 'target': target_node, 'rounds': rounds
+            })
+
+
+def maybe_run_incident_probes(socketio=None):
+    """Launch incident captures for any watched links currently in trouble.
+
+    Each capture runs in its own background task; a guard set prevents launching
+    a second capture for a link already being probed.
+    """
+    if not (config.INCIDENT_MODE_ENABLED and config.RF_STATS_ENABLED):
+        return []
+
+    launched = []
+    for link in select_incident_links():
+        key = (link['source_node'], link['target_node'])
+        with _incident_lock:
+            if key in _incident_active:
+                continue
+        launched.append(key)
+        if socketio is not None:
+            socketio.start_background_task(run_incident_capture, link, socketio)
+        else:
+            run_incident_capture(link, None)
+    if launched:
+        logger.info("Launched %d incident capture(s)", len(launched))
+    return launched
+
+
+def probe_mesh_reachability(socketio=None):
+    """Ask reachable neighbors to ping nodes the scanner can't poll.
+
+    Distinguishes "reachable via mesh" (a neighbor can route to it) from "really
+    down" (a neighbor hears it on RF but cannot reach it). Bounded per cycle and
+    rate-limited per node via config, and runs in a background task so it never
+    blocks the scan.
+    """
+    if not (config.MESH_PROBE_ENABLED and config.RF_STATS_ENABLED):
+        return []
+
+    candidates = database.get_via_mesh_candidates(
+        config.MESH_PROBE_COOLDOWN_SECONDS, config.MESH_PROBE_MAX_PER_CYCLE
+    )
+    results = []
+    for cand in candidates:
+        node = cand['node']
+        neighbor = cand['neighbor']
+        target = cand.get('target_ip') or node  # IP routes regardless of DNS
+        result = ping_via_aredn(target, source_node_ip=cand.get('neighbor_ip'))
+        loss = (result or {}).get('loss')
+        reachable = bool(result) and (loss is None or loss < 100)
+        response_ms = (result or {}).get('avg')
+        database.record_mesh_probe(node, neighbor, reachable, response_ms=response_ms)
+        results.append((node, neighbor, reachable))
+        logger.info("Mesh probe: %s via %s -> %s",
+                    node, neighbor, 'reachable' if reachable else 'UNREACHABLE')
+        if socketio:
+            socketio.emit('mesh_probe_result', {
+                'node': node, 'prober': neighbor, 'reachable': reachable
+            })
+    if results:
+        logger.info("Completed %d mesh reachability probe(s)", len(results))
+    return results
 
 
 def get_rf_stats_summary():

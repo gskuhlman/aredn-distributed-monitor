@@ -182,18 +182,109 @@ def init_db():
             ('signal', 'TEXT'),
             ('noise', 'TEXT'),
             ('tx_rate', 'TEXT'),
-            ('rx_rate', 'TEXT')
+            ('rx_rate', 'TEXT'),
+            ('rev_snr', 'TEXT'),
+            ('blocked', 'INTEGER'),
+            ('blocked_reason', 'TEXT'),
+            ('lqm_pending', 'TEXT'),
+            ('raw_tracker', 'TEXT')
         ):
             try:
                 cursor.execute(f'ALTER TABLE links ADD COLUMN {column} {definition}')
             except sqlite3.OperationalError:
                 pass  # Column already exists
 
-        # Add jitter column to link_history
-        try:
-            cursor.execute('ALTER TABLE link_history ADD COLUMN jitter REAL')
-        except sqlite3.OperationalError:
-            pass  # Column already exists
+        # link_history additive columns (one snapshot row per scan/probe sample)
+        for column, definition in (
+            ('jitter', 'REAL'),
+            ('rev_snr', 'REAL'),
+            ('blocked', 'INTEGER'),
+            ('blocked_reason', 'TEXT'),
+            ('raw_tracker', 'TEXT'),
+            ("sample_type", "TEXT DEFAULT 'scan'")
+        ):
+            try:
+                cursor.execute(f'ALTER TABLE link_history ADD COLUMN {column} {definition}')
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+        # nodes additive health columns (latest snapshot; time series in node_health_history)
+        for column, definition in (
+            ('uptime', 'TEXT'),
+            ('uptime_seconds', 'INTEGER'),
+            ('load1', 'REAL'),
+            ('load5', 'REAL'),
+            ('load15', 'REAL'),
+            ('mem_free', 'INTEGER'),
+            ('mem_total', 'INTEGER'),
+            ('channel_busy', 'REAL')
+        ):
+            try:
+                cursor.execute(f'ALTER TABLE nodes ADD COLUMN {column} {definition}')
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+        # Per-poll node health time series (uptime/load/memory for reboot + load
+        # spike correlation). Captured even for degraded bare-sysinfo polls.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS node_health_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME NOT NULL,
+                node_name TEXT NOT NULL,
+                reachable INTEGER DEFAULT 1,
+                degraded INTEGER DEFAULT 0,
+                response_ms INTEGER,
+                uptime_seconds INTEGER,
+                load1 REAL,
+                load5 REAL,
+                load15 REAL,
+                mem_free INTEGER,
+                mem_total INTEGER,
+                channel_busy REAL
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_node_health_node ON node_health_history(node_name, timestamp DESC)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_node_health_timestamp ON node_health_history(timestamp DESC)')
+
+        # `probe_via` is NULL for direct scanner polls; for a neighbor-relayed
+        # mesh-reachability probe it holds the neighbor that did the pinging.
+        for column, definition in (('probe_via', 'TEXT'),):
+            try:
+                cursor.execute(f'ALTER TABLE node_health_history ADD COLUMN {column} {definition}')
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+        # Structured link state-change log: one row per up/down/blocked/unblocked
+        # transition. Tiny and the authoritative source for the flap report.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS link_state_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME NOT NULL,
+                source_node TEXT NOT NULL,
+                target_node TEXT NOT NULL,
+                link_type TEXT,
+                state TEXT NOT NULL,
+                quality INTEGER,
+                snr TEXT,
+                rev_snr TEXT,
+                blocked_reason TEXT,
+                detail TEXT
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_link_state_pair ON link_state_log(source_node, target_node, timestamp DESC)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_link_state_timestamp ON link_state_log(timestamp DESC)')
+
+        # `origin` distinguishes a real peer flap reported by a node we polled
+        # (node_reported) from a state change our scanner only inferred because
+        # it could not reach the source node (scanner_inferred). Only the latter
+        # is excluded from node-reported flaps/hr.
+        for column, definition in (('origin', "TEXT DEFAULT 'node_reported'"),):
+            try:
+                cursor.execute(f'ALTER TABLE link_state_log ADD COLUMN {column} {definition}')
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+        # Backfill historic rows: only the known timeout string was scanner-inferred.
+        cursor.execute("UPDATE link_state_log SET origin = 'scanner_inferred' WHERE detail = 'link timeout' AND origin = 'node_reported'")
 
 
 def delete_node(name):
@@ -569,9 +660,12 @@ def mark_orphan_nodes_inactive():
 def upsert_link(source_node, target_node, link_type, quality=0, snr=None, distance=None,
                 mac_address=None, canonical_ip=None, identity_status=None,
                 routability_status=None, lqm_status_message=None,
-                signal=None, noise=None, tx_rate=None, rx_rate=None):
+                signal=None, noise=None, tx_rate=None, rx_rate=None,
+                rev_snr=None, blocked=None, blocked_reason=None,
+                lqm_pending=None, raw_tracker=None):
     """Insert or update a link"""
     now = local_timestamp()
+    blocked_int = None if blocked is None else (1 if blocked else 0)
     with get_connection() as conn:
         cursor = conn.cursor()
 
@@ -599,6 +693,11 @@ def upsert_link(source_node, target_node, link_type, quality=0, snr=None, distan
                     noise = ?,
                     tx_rate = ?,
                     rx_rate = ?,
+                    rev_snr = ?,
+                    blocked = ?,
+                    blocked_reason = ?,
+                    lqm_pending = ?,
+                    raw_tracker = COALESCE(?, raw_tracker),
                     last_seen = ?,
                     stable_since = ?,
                     drop_count = drop_count + 1,
@@ -607,6 +706,7 @@ def upsert_link(source_node, target_node, link_type, quality=0, snr=None, distan
             ''', (link_type, quality, snr, distance, mac_address, canonical_ip,
                   identity_status, routability_status, lqm_status_message,
                   signal, noise, tx_rate, rx_rate,
+                  rev_snr, blocked_int, blocked_reason, lqm_pending, raw_tracker,
                   now, now, source_node, target_node))
         else:
             # Normal upsert
@@ -614,8 +714,9 @@ def upsert_link(source_node, target_node, link_type, quality=0, snr=None, distan
                 INSERT INTO links (source_node, target_node, link_type, quality, snr, distance,
                                  mac_address, canonical_ip, identity_status, routability_status,
                                  lqm_status_message, signal, noise, tx_rate, rx_rate,
+                                 rev_snr, blocked, blocked_reason, lqm_pending, raw_tracker,
                                  first_seen, last_seen, stable_since)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_node, target_node) DO UPDATE SET
                     link_type = excluded.link_type,
                     quality = excluded.quality,
@@ -630,11 +731,17 @@ def upsert_link(source_node, target_node, link_type, quality=0, snr=None, distan
                     noise = COALESCE(excluded.noise, noise),
                     tx_rate = COALESCE(excluded.tx_rate, tx_rate),
                     rx_rate = COALESCE(excluded.rx_rate, rx_rate),
+                    rev_snr = COALESCE(excluded.rev_snr, rev_snr),
+                    blocked = excluded.blocked,
+                    blocked_reason = excluded.blocked_reason,
+                    lqm_pending = excluded.lqm_pending,
+                    raw_tracker = COALESCE(excluded.raw_tracker, raw_tracker),
                     last_seen = ?,
                     status = 'good'
             ''', (source_node, target_node, link_type, quality, snr, distance,
                   mac_address, canonical_ip, identity_status, routability_status,
                   lqm_status_message, signal, noise, tx_rate, rx_rate,
+                  rev_snr, blocked_int, blocked_reason, lqm_pending, raw_tracker,
                   now, now, now, now))
 
 
@@ -971,6 +1078,9 @@ EVENT_LINK_DROPPED = 'link_dropped'
 EVENT_LINK_REMOVED = 'link_removed'
 EVENT_LINK_RESTORED = 'link_restored'
 EVENT_FREQUENCY_CHANGE = 'frequency_change'
+EVENT_LINK_BLOCKED = 'link_blocked'
+EVENT_LINK_UNBLOCKED = 'link_unblocked'
+EVENT_NODE_REBOOT = 'node_reboot'
 
 
 def trim_connectivity_log(days=None):
@@ -1079,18 +1189,23 @@ def clear_old_events(days=30):
 
 def insert_link_history(source_node, target_node, link_type, quality=None, snr=None,
                         ping_min=None, ping_avg=None, ping_max=None, ping_loss=None,
-                        jitter=None, throughput_tx=None, throughput_rx=None):
+                        jitter=None, throughput_tx=None, throughput_rx=None,
+                        rev_snr=None, blocked=None, blocked_reason=None,
+                        raw_tracker=None, sample_type='scan'):
     """Insert a new link history record"""
     now = local_timestamp()
+    blocked_int = None if blocked is None else (1 if blocked else 0)
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO link_history (timestamp, source_node, target_node, link_type,
                                      quality, snr, ping_min, ping_avg, ping_max, ping_loss,
-                                     jitter, throughput_tx, throughput_rx)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     jitter, throughput_tx, throughput_rx,
+                                     rev_snr, blocked, blocked_reason, raw_tracker, sample_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (now, source_node, target_node, link_type, quality, snr,
-              ping_min, ping_avg, ping_max, ping_loss, jitter, throughput_tx, throughput_rx))
+              ping_min, ping_avg, ping_max, ping_loss, jitter, throughput_tx, throughput_rx,
+              rev_snr, blocked_int, blocked_reason, raw_tracker, sample_type))
         return cursor.lastrowid
 
 
@@ -1265,6 +1380,505 @@ def update_link_history_throughput(source_node, target_node, throughput_tx, thro
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (now, source_node, target_node, link['link_type'],
                       link['quality'], link['snr'], throughput_tx, throughput_rx))
+
+
+# ============ Node Health Time Series ============
+
+def _coalesce_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def update_node_health(name, health=None, reachable=True, degraded=False, response_ms=None):
+    """Store a node-health sample and detect reboots.
+
+    Updates the latest health columns on ``nodes`` and appends a row to
+    ``node_health_history``. Returns a dict describing a detected reboot
+    (or None) by comparing the new uptime against the previously stored value.
+    """
+    health = health or {}
+    now = local_timestamp()
+    new_uptime = health.get('uptime_seconds')
+    reboot = None
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT uptime_seconds FROM nodes WHERE name = ?', (name,))
+        row = cursor.fetchone()
+        prior_uptime = row['uptime_seconds'] if row else None
+
+        # A reboot shows up as uptime going backwards. Allow a little slack for
+        # clock jitter / rounding so we do not false-positive on small dips.
+        if (prior_uptime is not None and new_uptime is not None
+                and new_uptime + 30 < prior_uptime):
+            reboot = {'prior_uptime_seconds': prior_uptime, 'uptime_seconds': new_uptime}
+
+        if reachable:
+            cursor.execute('''
+                UPDATE nodes SET
+                    uptime = COALESCE(?, uptime),
+                    uptime_seconds = COALESCE(?, uptime_seconds),
+                    load1 = COALESCE(?, load1),
+                    load5 = COALESCE(?, load5),
+                    load15 = COALESCE(?, load15),
+                    mem_free = COALESCE(?, mem_free),
+                    mem_total = COALESCE(?, mem_total),
+                    channel_busy = COALESCE(?, channel_busy)
+                WHERE name = ?
+            ''', (health.get('uptime'), new_uptime, health.get('load1'),
+                  health.get('load5'), health.get('load15'), health.get('mem_free'),
+                  health.get('mem_total'), health.get('channel_busy'), name))
+
+        cursor.execute('''
+            INSERT INTO node_health_history (timestamp, node_name, reachable, degraded,
+                                             response_ms, uptime_seconds, load1, load5,
+                                             load15, mem_free, mem_total, channel_busy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (now, name, 1 if reachable else 0, 1 if degraded else 0, response_ms,
+              new_uptime, health.get('load1'), health.get('load5'), health.get('load15'),
+              health.get('mem_free'), health.get('mem_total'), health.get('channel_busy')))
+
+    return reboot
+
+
+def get_node_health_history(name, hours=24):
+    """Get the node health time series for a node within the window."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM node_health_history
+            WHERE node_name = ? AND timestamp > ?
+            ORDER BY timestamp ASC, id ASC
+        ''', (name, cutoff))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_last_reachable(node_name):
+    """Return the most recent timestamp this scanner reached the node, or None."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT MAX(timestamp) AS ts FROM node_health_history
+            WHERE node_name = ? AND reachable = 1
+        ''', (node_name,))
+        row = cursor.fetchone()
+        return row['ts'] if row and row['ts'] else None
+
+
+def was_reachable_within(node_name, seconds):
+    """Whether this scanner reached the node within the last `seconds`.
+
+    Distinguishes a real peer flap (source node reachable, but it reports a peer
+    down) from the scanner merely losing its path to the source node.
+    """
+    last = get_last_reachable(node_name)
+    if not last:
+        return False
+    last_dt = _parse_local_timestamp(last)
+    if last_dt is None:
+        return False
+    return (datetime.now() - last_dt).total_seconds() <= seconds
+
+
+def record_mesh_probe(node_name, prober, reachable, response_ms=None):
+    """Record a neighbor-relayed reachability probe as a node_health_history row.
+
+    ``prober`` is the neighbor that did the pinging (stored in ``probe_via``).
+    This is distinct from a direct scanner poll (probe_via NULL).
+    """
+    now = local_timestamp()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO node_health_history (timestamp, node_name, reachable, degraded,
+                                             response_ms, probe_via)
+            VALUES (?, ?, ?, 0, ?, ?)
+        ''', (now, node_name, 1 if reachable else 0, response_ms, prober))
+        return cursor.lastrowid
+
+
+def get_recent_mesh_probes(within_seconds):
+    """Latest neighbor-relayed probe per node within the window.
+
+    Returns {node_name: {'reachable': bool, 'prober': str, 'timestamp': str}}.
+    """
+    cutoff = (datetime.now() - timedelta(seconds=within_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT node_name, reachable, probe_via, timestamp
+            FROM node_health_history
+            WHERE probe_via IS NOT NULL AND timestamp > ?
+            ORDER BY timestamp ASC, id ASC
+        ''', (cutoff,))
+        latest = {}
+        for row in cursor.fetchall():
+            latest[row['node_name']] = {
+                'reachable': bool(row['reachable']),
+                'prober': row['probe_via'],
+                'timestamp': row['timestamp'],
+            }
+        return latest
+
+
+def get_via_mesh_candidates(cooldown_seconds, limit):
+    """Nodes the scanner can't poll but a reachable neighbor reports a live link to.
+
+    Returns up to ``limit`` dicts {node, neighbor, neighbor_ip, target_ip},
+    skipping nodes probed within ``cooldown_seconds``. The neighbor is an active
+    node (recently polled) with a 'good' link to the candidate.
+    """
+    cutoff = (datetime.now() - timedelta(seconds=cooldown_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # Active nodes (recently polled) with their IP, for choosing a prober.
+        cursor.execute("SELECT name, ip FROM nodes WHERE is_active = 1")
+        active = {row['name']: row['ip'] for row in cursor.fetchall()}
+        # Recently probed nodes to skip (cooldown).
+        cursor.execute('''
+            SELECT node_name, MAX(timestamp) AS ts FROM node_health_history
+            WHERE probe_via IS NOT NULL GROUP BY node_name
+        ''')
+        recently_probed = {row['node_name'] for row in cursor.fetchall()
+                           if row['ts'] and row['ts'] > cutoff}
+
+        cursor.execute('''
+            SELECT source_node, target_node, canonical_ip
+            FROM links
+            WHERE status = 'good'
+        ''')
+        candidates = {}
+        for row in cursor.fetchall():
+            src, tgt = row['source_node'], row['target_node']
+            # The candidate is whichever end is NOT active; the prober is the active end.
+            if src in active and tgt not in active:
+                cand, neighbor = tgt, src
+            elif tgt in active and src not in active:
+                cand, neighbor = src, tgt
+            else:
+                continue
+            if cand in recently_probed or cand in candidates:
+                continue
+            target_ip = get_node(cand)
+            candidates[cand] = {
+                'node': cand,
+                'neighbor': neighbor,
+                'neighbor_ip': active.get(neighbor),
+                'target_ip': row['canonical_ip'] or (target_ip.get('ip') if target_ip else None),
+            }
+            if len(candidates) >= limit:
+                break
+        return list(candidates.values())
+
+
+def get_reach_status_map(names):
+    """Per-node reachability for the given names (the single source of truth used
+    by both the network graph and the node detail page).
+
+    Returns {name: {'reach_status', 'mesh_probe_status', 'mesh_prober'}} where
+    reach_status is polled / via_mesh / down / link_only. A node the scanner
+    can't poll is via_mesh when a recently-polled neighbor reports a live link to
+    it, unless a neighbor probe FAILED (hears RF but can't route), which escalates
+    it to down.
+    """
+    wanted = {(n or '').lower() for n in names}
+    if not wanted:
+        return {}
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, is_active FROM nodes")
+        rows = cursor.fetchall()
+        all_node_names = {r['name'] for r in rows}
+        active = {r['name'] for r in rows if r['is_active'] == 1}
+        cursor.execute("SELECT source_node, target_node FROM links WHERE status = 'good'")
+        good = cursor.fetchall()
+
+    seen_by_active = set()
+    for r in good:
+        if r['source_node'] in active:
+            seen_by_active.add(r['target_node'])
+        if r['target_node'] in active:
+            seen_by_active.add(r['source_node'])
+
+    mesh_probes = get_recent_mesh_probes(config.MESH_PROBE_FRESH_SECONDS)
+
+    result = {}
+    for name in wanted:
+        probe = mesh_probes.get(name)
+        if probe:
+            mps = 'confirmed' if probe['reachable'] else 'failed'
+            prober = probe['prober']
+        else:
+            mps, prober = 'none', None
+        if name not in all_node_names:
+            rs = 'link_only'
+        elif name in active:
+            rs = 'polled'
+        elif name in seen_by_active:
+            rs = 'down' if mps == 'failed' else 'via_mesh'
+        else:
+            rs = 'down'
+        result[name] = {'reach_status': rs, 'mesh_probe_status': mps, 'mesh_prober': prober}
+    return result
+
+
+def get_ip_name_map():
+    """Map known IP addresses to AREDN node names (for traceroute hop labels).
+
+    Combines polled node IPs with neighbor-reported canonical IPs so traceroute
+    hops shown only as IPs can be labeled with the node name we know.
+    """
+    mapping = {}
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, ip FROM nodes WHERE ip IS NOT NULL AND ip != ''")
+        for row in cursor.fetchall():
+            mapping[row['ip']] = row['name']
+        cursor.execute("SELECT target_node, canonical_ip FROM links WHERE canonical_ip IS NOT NULL AND canonical_ip != ''")
+        for row in cursor.fetchall():
+            mapping.setdefault(row['canonical_ip'], row['target_node'])
+    return mapping
+
+
+def cleanup_node_health(hours):
+    """Remove node health samples older than the retention window."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM node_health_history WHERE timestamp < ?', (cutoff,))
+        return cursor.rowcount
+
+
+# ============ Link State Log & Flap Reporting ============
+
+def log_link_state(source_node, target_node, state, link_type=None, quality=None,
+                   snr=None, rev_snr=None, blocked_reason=None, detail=None,
+                   origin='node_reported'):
+    """Record a single link state transition.
+
+    ``state``: up/down/blocked/unblocked, plus scanner_unreachable (the scanner
+    lost its path to the source node, so we cannot speak to the peer link).
+    ``origin``: node_reported (a polled node's own LQM) vs scanner_inferred
+    (our scanner inferred it without the node confirming).
+    """
+    now = local_timestamp()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO link_state_log (timestamp, source_node, target_node, link_type,
+                                        state, quality, snr, rev_snr, blocked_reason, detail, origin)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (now, source_node, target_node, link_type, state, quality,
+              str(snr) if snr is not None else None,
+              str(rev_snr) if rev_snr is not None else None,
+              blocked_reason, detail, origin))
+        return cursor.lastrowid
+
+
+def cleanup_link_state_log(days):
+    """Remove link state-log rows older than the retention window."""
+    cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM link_state_log WHERE timestamp < ?', (cutoff,))
+        return cursor.rowcount
+
+
+def get_link_flap_report(hours=24, node=None, min_transitions=1):
+    """Summarize link flapping over a window from the structured state log.
+
+    Returns one row per directional link with transition counts and the most
+    common block reason, ordered by total transitions (flappiest first).
+
+    ``flaps_per_hour`` counts only node-reported peer downs. Scanner-inferred
+    downs (we couldn't reach the source node) are reported separately as
+    ``scanner_unreachable``/``inferred_downs`` and are NOT peer flaps.
+    """
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    params = [cutoff]
+    node_filter = ''
+    if node:
+        node_filter = 'AND (source_node = ? OR target_node = ?)'
+        params.extend([node, node])
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f'''
+            SELECT source_node, target_node, link_type,
+                   COUNT(*) AS transitions,
+                   SUM(CASE WHEN state = 'down' THEN 1 ELSE 0 END) AS downs,
+                   SUM(CASE WHEN state = 'down' AND origin = 'node_reported' THEN 1 ELSE 0 END) AS node_reported_downs,
+                   SUM(CASE WHEN state = 'down' AND origin = 'scanner_inferred' THEN 1 ELSE 0 END) AS inferred_downs,
+                   SUM(CASE WHEN state = 'scanner_unreachable' THEN 1 ELSE 0 END) AS scanner_unreachable,
+                   SUM(CASE WHEN state = 'up' THEN 1 ELSE 0 END) AS ups,
+                   SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END) AS blocks,
+                   SUM(CASE WHEN state = 'unblocked' THEN 1 ELSE 0 END) AS unblocks,
+                   MAX(timestamp) AS last_change
+            FROM link_state_log
+            WHERE timestamp > ? {node_filter}
+            GROUP BY source_node, target_node, link_type
+            HAVING transitions >= ?
+            ORDER BY transitions DESC
+        ''', (*params, min_transitions))
+        rows = [dict(row) for row in cursor.fetchall()]
+
+        # Attach the dominant block reason per pair for quick root-cause hints.
+        for row in rows:
+            cursor.execute('''
+                SELECT blocked_reason, COUNT(*) AS n
+                FROM link_state_log
+                WHERE timestamp > ? AND source_node = ? AND target_node = ?
+                AND blocked_reason IS NOT NULL AND blocked_reason != ''
+                GROUP BY blocked_reason
+                ORDER BY n DESC
+                LIMIT 1
+            ''', (cutoff, row['source_node'], row['target_node']))
+            reason = cursor.fetchone()
+            row['top_block_reason'] = reason['blocked_reason'] if reason else None
+            window_hours = max(hours, 1)
+            # Peer flaps/hr = node-reported downs only.
+            row['flaps_per_hour'] = round(row['node_reported_downs'] / window_hours, 3)
+            row['inferred_flaps_per_hour'] = round(row['inferred_downs'] / window_hours, 3)
+
+        return rows
+
+
+def get_pair_flap_summary(node_a, node_b, hours=24):
+    """Summarize state transitions for a peer pair across both directions."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT
+                COUNT(*) AS transitions,
+                SUM(CASE WHEN state = 'down' THEN 1 ELSE 0 END) AS downs,
+                SUM(CASE WHEN state = 'down' AND origin = 'node_reported' THEN 1 ELSE 0 END) AS node_reported_downs,
+                SUM(CASE WHEN state = 'down' AND origin = 'scanner_inferred' THEN 1 ELSE 0 END) AS inferred_downs,
+                SUM(CASE WHEN state = 'scanner_unreachable' THEN 1 ELSE 0 END) AS scanner_unreachable,
+                SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END) AS blocks
+            FROM link_state_log
+            WHERE timestamp > ?
+            AND ((source_node = ? AND target_node = ?)
+                 OR (source_node = ? AND target_node = ?))
+        ''', (cutoff, node_a, node_b, node_b, node_a))
+        row = cursor.fetchone()
+        summary = {
+            'transitions': row['transitions'] or 0,
+            'downs': row['downs'] or 0,
+            'node_reported_downs': row['node_reported_downs'] or 0,
+            'inferred_downs': row['inferred_downs'] or 0,
+            'scanner_unreachable': row['scanner_unreachable'] or 0,
+            'blocks': row['blocks'] or 0,
+            'top_block_reason': None
+        }
+
+        cursor.execute('''
+            SELECT blocked_reason, COUNT(*) AS n
+            FROM link_state_log
+            WHERE timestamp > ?
+            AND ((source_node = ? AND target_node = ?)
+                 OR (source_node = ? AND target_node = ?))
+            AND blocked_reason IS NOT NULL AND blocked_reason != ''
+            GROUP BY blocked_reason
+            ORDER BY n DESC
+            LIMIT 1
+        ''', (cutoff, node_a, node_b, node_b, node_a))
+        reason = cursor.fetchone()
+        if reason:
+            summary['top_block_reason'] = reason['blocked_reason']
+        return summary
+
+
+def get_incident_samples(node_name, hours=24, limit=2000):
+    """Return high-rate incident-mode probe samples involving a node.
+
+    Rows are directional (source -> target), so forward/reverse latency can be
+    compared by the UI to isolate which direction is failing.
+    """
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT timestamp, source_node, target_node, ping_avg, ping_min,
+                   ping_max, ping_loss, jitter
+            FROM link_history
+            WHERE sample_type = 'incident'
+            AND (source_node = ? OR target_node = ?)
+            AND timestamp > ?
+            ORDER BY timestamp ASC
+            LIMIT ?
+        ''', (node_name, node_name, cutoff, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_link_state_log(source_node, target_node, hours=24, limit=1000):
+    """Get the raw state-change log for a specific directional link."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM link_state_log
+            WHERE source_node = ? AND target_node = ? AND timestamp > ?
+            ORDER BY timestamp ASC
+            LIMIT ?
+        ''', (source_node, target_node, cutoff, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_link_asymmetry_report(min_delta=3.0):
+    """Surface links whose two directions disagree on signal quality.
+
+    Uses both the within-row snr/rev_snr pair (A's RX vs B's RX as reported by
+    LQM) and, when available, the reverse-direction link row. Large gaps are a
+    classic flapping cause.
+    """
+    def _num(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT source_node, target_node, link_type, quality, snr, rev_snr
+            FROM links
+            WHERE status != 'removed' AND link_type = 'RF'
+        ''')
+        rows = {(r['source_node'], r['target_node']): dict(r) for r in cursor.fetchall()}
+
+    report = []
+    for (src, tgt), row in rows.items():
+        snr = _num(row.get('snr'))
+        rev_snr = _num(row.get('rev_snr'))
+        within_delta = abs(snr - rev_snr) if snr is not None and rev_snr is not None else None
+
+        reverse = rows.get((tgt, src))
+        cross_delta = None
+        if reverse is not None:
+            rev_local = _num(reverse.get('snr'))
+            if snr is not None and rev_local is not None:
+                cross_delta = abs(snr - rev_local)
+
+        deltas = [d for d in (within_delta, cross_delta) if d is not None]
+        if not deltas or max(deltas) < min_delta:
+            continue
+
+        report.append({
+            'source_node': src,
+            'target_node': tgt,
+            'snr': snr,
+            'rev_snr': rev_snr,
+            'within_row_delta': within_delta,
+            'cross_direction_delta': cross_delta,
+            'max_delta': max(deltas),
+        })
+
+    report.sort(key=lambda item: item['max_delta'], reverse=True)
+    return report
 
 
 # ============ Utility Functions ============
@@ -1449,16 +2063,28 @@ def get_network_graph_data():
     # Get reference firmware version
     reference_firmware = get_starting_node_firmware()
 
+    # Per-node reachability (shared derivation, also used by the node page):
+    # polled / via_mesh / down / link_only, refined by neighbor mesh probes.
+    reach_map = get_reach_status_map([n['name'] for n in nodes])
+
     # Build node data for vis.js
     vis_nodes = []
 
     for node in nodes:
         link_only = node.get('is_link_only', False)
-        firmware = node.get('firmware_version', '')
+        # Coalesce with `or` rather than dict defaults: these columns can be
+        # present-but-NULL, which a default argument would not catch.
+        firmware = node.get('firmware_version') or ''
         firmware_mismatch = reference_firmware and firmware and firmware != reference_firmware
         rf_freq = node.get('rf_frequency', '')
         node_name = node['name']
         supernode = node.get('is_supernode', False)
+
+        # Reachability status (shared derivation in get_reach_status_map).
+        info = reach_map.get(node_name, {})
+        reach_status = info.get('reach_status', 'polled')
+        mesh_probe_status = info.get('mesh_probe_status', 'none')
+        mesh_prober = info.get('mesh_prober')
 
         # Get services for this node and build icon string
         services = [] if link_only else get_node_services(node_name)
@@ -1481,9 +2107,21 @@ def get_network_graph_data():
                 'Common causes: no routable canonical IP in LQM, depth/supernode boundary, DNS issue, or unreachable node.'
             ]
         else:
-            title_parts = [node_name, node.get('model', 'Unknown model'), f"Firmware: {firmware}"]
+            title_parts = [node_name, node.get('model') or 'Unknown model', f"Firmware: {firmware or 'Unknown'}"]
         if supernode:
             title_parts.append("** SUPERNODE **")
+        reach_label = {
+            'polled': 'Reachability: polled by scanner',
+            'via_mesh': 'Reachability: reachable via mesh (a neighbor reports it; scanner cannot poll it)',
+            'down': 'Reachability: down / unseen (no reachable node reports a live link)',
+            'link_only': 'Reachability: link-only (never pollable; only seen in a neighbor LQM)'
+        }.get(reach_status)
+        if reach_label and not link_only:
+            title_parts.append(reach_label)
+        if mesh_probe_status == 'confirmed':
+            title_parts.append(f"Mesh probe: {mesh_prober} CAN reach it (confirmed via mesh)")
+        elif mesh_probe_status == 'failed':
+            title_parts.append(f"Mesh probe: {mesh_prober} hears it on RF but CANNOT route to it (likely down)")
         if services:
             title_parts.append("Services: " + ', '.join([s.get('name', '') for s in services]))
         title = '\n'.join(title_parts)
@@ -1503,6 +2141,9 @@ def get_network_graph_data():
             'is_selected': node_name in selected_node_names,
             'is_inactive': node.get('is_inactive', False),
             'is_link_only': link_only,
+            'reach_status': reach_status,
+            'mesh_probe_status': mesh_probe_status,
+            'mesh_prober': mesh_prober,
             'reported_links': node.get('reported_links', []),
             'identity_status': node.get('identity_status'),
             'routability_status': node.get('routability_status'),
@@ -1540,6 +2181,12 @@ def get_network_graph_data():
             if link.get('snr') and existing.get('snr'):
                 if link['snr'] < existing['snr']:
                     link_pairs[pair]['snr'] = link['snr']
+            # A link blocked in EITHER direction is blocked for display.
+            if link.get('blocked'):
+                existing['blocked'] = link.get('blocked')
+                existing['blocked_reason'] = link.get('blocked_reason')
+            existing['drop_count'] = max(existing.get('drop_count', 0) or 0,
+                                         link.get('drop_count', 0) or 0)
 
     for pair, link in link_pairs.items():
         link_type = link['link_type'].upper()
@@ -1601,8 +2248,33 @@ def get_network_graph_data():
             'signal': link.get('signal'),
             'noise': link.get('noise'),
             'tx_rate': link.get('tx_rate'),
-            'rx_rate': link.get('rx_rate')
+            'rx_rate': link.get('rx_rate'),
+            'rev_snr': link.get('rev_snr'),
+            'blocked': bool(link.get('blocked')),
+            'blocked_reason': link.get('blocked_reason'),
+            'watched': (config.is_watched_node(link['source_node'])
+                        or config.is_watched_node(link['target_node'])),
+            'verified': True
         }
+
+        # A dropped link is only "unverified" when the scanner cannot reach
+        # EITHER endpoint: nobody we polled actually told us it is down, we just
+        # lost our route. Distinguish that (gray dashed) from a node-reported
+        # drop (red). If a polled node is on either end, the drop is trusted.
+        if (link.get('status') == 'dropped'
+                and link['source_node'] not in active_node_names
+                and link['target_node'] not in active_node_names):
+            edge['verified'] = False
+            edge['color'] = {'color': '#7f8c8d', 'highlight': '#7f8c8d'}
+            edge['dashes'] = [2, 4]
+            edge['title'] += "\nUNVERIFIED: scanner can't reach either end (true state unknown)"
+
+        # LQM-blocked links get an orange dashed overlay so they stand out from
+        # both healthy (green) and dropped (red) links on the graph.
+        if edge['blocked']:
+            edge['color'] = {'color': '#e67e22', 'highlight': '#e67e22'}
+            edge['dashes'] = [6, 4]
+            edge['title'] += f"\nLQM BLOCKED: {link.get('blocked_reason') or 'unspecified'}"
 
         # Only add length if specified (don't send null)
         if length is not None:

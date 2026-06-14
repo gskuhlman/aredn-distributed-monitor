@@ -562,7 +562,9 @@ function initTabSwitching() {
     const networkView = document.getElementById('network-view');
     const rfStatsView = document.getElementById('rf-stats-view');
     const nodesView = document.getElementById('nodes-view');
+    const diagnosticsView = document.getElementById('diagnostics-view');
     const legend = document.querySelector('.legend');
+    const allViews = [networkView, rfStatsView, nodesView, diagnosticsView];
 
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -572,27 +574,27 @@ function initTabSwitching() {
             tabBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
 
-            // Switch views
+            // Hide all views, then activate the selected one.
+            allViews.forEach(v => v && v.classList.remove('active'));
+            if (legend) legend.style.display = tab === 'network' ? 'block' : 'none';
+
             if (tab === 'network') {
                 networkView.classList.add('active');
-                rfStatsView.classList.remove('active');
-                nodesView.classList.remove('active');
-                if (legend) legend.style.display = 'block';
             } else if (tab === 'rf-stats') {
-                networkView.classList.remove('active');
                 rfStatsView.classList.add('active');
-                nodesView.classList.remove('active');
-                if (legend) legend.style.display = 'none';
                 RFStats.init();
                 RFStats.loadRFLinks();
             } else if (tab === 'nodes') {
-                networkView.classList.remove('active');
-                rfStatsView.classList.remove('active');
                 nodesView.classList.add('active');
-                if (legend) legend.style.display = 'none';
                 if (typeof NodesModule !== 'undefined') {
                     NodesModule.init();
                     NodesModule.loadNodes();
+                }
+            } else if (tab === 'diagnostics') {
+                if (diagnosticsView) diagnosticsView.classList.add('active');
+                if (typeof DiagnosticsModule !== 'undefined') {
+                    DiagnosticsModule.init();
+                    DiagnosticsModule.load();
                 }
             }
         });

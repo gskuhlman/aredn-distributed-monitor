@@ -3,8 +3,10 @@ Network Scanner for AREDN Network Monitor
 Handles node discovery and polling
 """
 
+import json
 import requests
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from time import monotonic
 from urllib.parse import urlparse
@@ -50,6 +52,24 @@ def fetch_node_info(url):
     except ValueError as e:
         logger.warning(f"Invalid JSON from {url}: {e}")
         return None
+
+
+def fetch_node_with_fallback(url):
+    """Fetch full sysinfo, falling back to bare sysinfo when the full request
+    fails/times out. Returns (data, degraded, response_ms). Pure I/O — safe to
+    run concurrently across nodes; no DB access here.
+    """
+    started = monotonic()
+    data = fetch_node_info(url)
+    degraded = False
+    if not data:
+        # The full sysinfo (lqm+hosts+services) can hang on a struggling node; a
+        # bare sysinfo answering means the node is up but degraded, not down.
+        data = fetch_node_info(build_sysinfo_url(url, full=False))
+        degraded = data is not None
+        if degraded:
+            logger.warning(f"Full sysinfo failed, bare sysinfo succeeded (degraded): {url}")
+    return data, degraded, int((monotonic() - started) * 1000)
 
 
 def is_supernode(data):
@@ -322,6 +342,12 @@ def process_links(data, source_node):
                             'details': f"{link_type} link to {hostname} dropped (reported disconnected)",
                             'severity': 'warning'
                         })
+                        database.log_link_state(
+                            source_node, hostname, 'down', link_type=link_type,
+                            quality=quality, snr=snr,
+                            rev_snr=observations.tracker_rev_snr(tracker),
+                            detail='reported disconnected', origin='node_reported'
+                        )
                         logger.info(f"Link reported disconnected: {source_node} -> {hostname}")
                 continue
 
@@ -329,6 +355,10 @@ def process_links(data, source_node):
 
             # Check if this is a new link or restored link
             existing_link = database.get_link(source_node, hostname)
+
+            rev_snr = observations.tracker_rev_snr(tracker)
+            block_info = observations.tracker_block_info(tracker)
+            raw_tracker = json.dumps(tracker, default=str) if config.STORE_RAW_TRACKER else None
 
             if existing_link is None:
                 # New link
@@ -338,6 +368,11 @@ def process_links(data, source_node):
                     'details': f"New {link_type} link to {hostname} (Q:{quality}%)",
                     'severity': 'info'
                 })
+                database.log_link_state(
+                    source_node, hostname, 'up', link_type=link_type,
+                    quality=quality, snr=snr, rev_snr=rev_snr,
+                    blocked_reason=block_info['blocked_reason'], detail='new link'
+                )
                 logger.info(f"New link: {source_node} <-> {hostname} ({link_type})")
             elif existing_link.get('status') in ('dropped', 'removed'):
                 # Link restored
@@ -347,7 +382,45 @@ def process_links(data, source_node):
                     'details': f"{link_type} link to {hostname} restored (Q:{quality}%)",
                     'severity': 'info'
                 })
+                database.log_link_state(
+                    source_node, hostname, 'up', link_type=link_type,
+                    quality=quality, snr=snr, rev_snr=rev_snr,
+                    blocked_reason=block_info['blocked_reason'], detail='restored'
+                )
                 logger.info(f"Link restored: {source_node} <-> {hostname}")
+
+            # LQM block-state transitions are a primary flap cause: emit an event
+            # and log the transition only when the state actually changes.
+            new_blocked = block_info['blocked']
+            if new_blocked is not None and existing_link is not None:
+                prev_blocked = existing_link.get('blocked')
+                prev_blocked = None if prev_blocked is None else bool(prev_blocked)
+                if prev_blocked != new_blocked:
+                    if new_blocked:
+                        events.append({
+                            'type': database.EVENT_LINK_BLOCKED,
+                            'node': source_node,
+                            'details': f"LQM blocked link to {hostname} "
+                                       f"({block_info['blocked_reason'] or 'unspecified'})",
+                            'severity': 'warning'
+                        })
+                        database.log_link_state(
+                            source_node, hostname, 'blocked', link_type=link_type,
+                            quality=quality, snr=snr, rev_snr=rev_snr,
+                            blocked_reason=block_info['blocked_reason']
+                        )
+                        logger.info(f"LQM blocked: {source_node} -> {hostname} ({block_info['blocked_reason']})")
+                    else:
+                        events.append({
+                            'type': database.EVENT_LINK_UNBLOCKED,
+                            'node': source_node,
+                            'details': f"LQM unblocked link to {hostname}",
+                            'severity': 'info'
+                        })
+                        database.log_link_state(
+                            source_node, hostname, 'unblocked', link_type=link_type,
+                            quality=quality, snr=snr, rev_snr=rev_snr
+                        )
 
             database.upsert_link(
                 source_node=source_node,
@@ -364,7 +437,12 @@ def process_links(data, source_node):
                 signal=tracker.get('signal'),
                 noise=tracker.get('noise'),
                 tx_rate=tracker.get('tx_rate'),
-                rx_rate=tracker.get('rx_rate')
+                rx_rate=tracker.get('rx_rate'),
+                rev_snr=rev_snr,
+                blocked=new_blocked,
+                blocked_reason=block_info['blocked_reason'],
+                lqm_pending=str(block_info['pending']) if block_info['pending'] is not None else None,
+                raw_tracker=raw_tracker
             )
 
         # ALWAYS add routable nodes to discovery queue (regardless of link type)
@@ -389,6 +467,10 @@ def process_links(data, source_node):
             'details': f"{link['type']} link to {link['target']} dropped",
             'severity': 'warning'
         })
+        database.log_link_state(
+            link['source'], link['target'], 'down',
+            link_type=link['type'], detail='absent from scan', origin='node_reported'
+        )
 
     if dropped_count > 0:
         logger.info(f"Marked {dropped_count} missing links from {source_node} as dropped")
@@ -433,8 +515,10 @@ def discover_network(start_url=None, max_depth=None):
 
     visited_urls = set()
     visited_nodes = set()
-    # Queue now contains tuples of (url, depth)
-    queue = [(start_url, 0)]
+    # Queue contains tuples of (url, depth, target_hint). target_hint is the
+    # neighbor-reported LQM hostname for a discovered node, so a FAILED poll can
+    # be recorded under the real node name instead of the URL/IP-derived slug.
+    queue = [(start_url, 0, None)]
     nodes_found = 0
     links_found = 0
     errors = []
@@ -446,51 +530,41 @@ def discover_network(start_url=None, max_depth=None):
     attempted_nodes = 0
     reachable_nodes = 0
 
-    while queue:
-        url, depth = queue.pop(0)
-
-        # Normalize URL for comparison
-        normalized = url.lower()
-        if normalized in visited_urls:
-            continue
-        visited_urls.add(normalized)
-
-        logger.info(f"Scanning (depth {depth}): {url}")
+    def process_result(url, depth, target_hint, data, degraded, response_ms):
+        """Process one fetched node serially (all DB writes happen here, on the
+        scan thread). Returns the next-level (url, depth, hint) tuples to queue."""
+        nonlocal attempted_nodes, reachable_nodes, nodes_found, links_found
+        nonlocal max_depth_reached, starting_node_error
         attempted_nodes += 1
+        logger.info(f"Scanned (depth {depth}): {url}")
 
-        # Fetch node data
-        fetch_started = monotonic()
-        data = fetch_node_info(url)
-        degraded = False
-        if not data:
-            # The full sysinfo request makes the node collect LQM, hosts, and
-            # service data, which can hang for tens of seconds on a struggling
-            # node. A bare sysinfo.json answering means the node is up but
-            # degraded, not down.
-            bare_url = build_sysinfo_url(url, full=False)
-            data = fetch_node_info(bare_url)
-            degraded = data is not None
-            if degraded:
-                logger.warning(f"Full sysinfo failed, bare sysinfo succeeded (degraded): {url}")
-        response_ms = int((monotonic() - fetch_started) * 1000)
         if not data:
             error_msg = f"Failed to fetch: {url}"
             errors.append(error_msg)
+            # Prefer the neighbor-reported hostname so failures are keyed to the
+            # real node name; fall back to the URL slug for the seed node. Note
+            # target_from_url yields a useless "10" for bare IP URLs, which is
+            # exactly the case the hint fixes.
+            failed_target = (target_hint or '').lower() or observations.target_from_url(url)
             observation_docs.append(
                 observations.build_failed_node_observation(
-                    target=observations.target_from_url(url),
+                    target=failed_target,
                     collector_id=config.COLLECTOR_ID,
                     collector_site=config.COLLECTOR_SITE,
                     observed_at=observed_at,
                     message=error_msg
                 )
             )
-            # Check if this is the starting node (depth 0 and first failure)
+            # Record an unreachable health sample so the scanner-to-node downtime
+            # is visible in the time series under the real node name.
+            if config.NODE_HEALTH_ENABLED:
+                database.update_node_health(
+                    failed_target, reachable=False, response_ms=response_ms
+                )
             if depth == 0 and starting_node_error is None:
                 starting_node_error = f"Starting node unreachable: {url}"
                 logger.error(starting_node_error)
-                break
-            continue
+            return []
 
         # Process the node
         node_name, node_events = process_node_data(data, refresh_services=not degraded)
@@ -498,7 +572,7 @@ def discover_network(start_url=None, max_depth=None):
 
         if not node_name:
             errors.append(f"Invalid node data from: {url}")
-            continue
+            return []
 
         # Emit degraded/recovered events only on transitions
         if degraded:
@@ -520,6 +594,26 @@ def discover_network(start_url=None, max_depth=None):
             })
 
         reachable_nodes += 1
+
+        # Capture node health (uptime/load/memory) and detect reboots. Works on
+        # degraded bare-sysinfo responses too, which still carry the sysinfo
+        # block -- a load/memory spike is often what caused the degradation.
+        if config.NODE_HEALTH_ENABLED:
+            health = observations.node_health_fields(data)
+            reboot = database.update_node_health(
+                node_name, health, reachable=True, degraded=degraded,
+                response_ms=response_ms
+            )
+            if reboot:
+                all_events.append({
+                    'type': database.EVENT_NODE_REBOOT,
+                    'node': node_name,
+                    'details': "Node rebooted (uptime reset to "
+                               f"{reboot['uptime_seconds']}s from {reboot['prior_uptime_seconds']}s)",
+                    'severity': 'warning'
+                })
+                logger.info(f"Reboot detected on {node_name}")
+
         observation_docs.append(
             observations.build_node_observation(
                 data=data,
@@ -539,7 +633,8 @@ def discover_network(start_url=None, max_depth=None):
                 source_node=node_name,
                 collector_id=config.COLLECTOR_ID,
                 collector_site=config.COLLECTOR_SITE,
-                observed_at=observed_at
+                observed_at=observed_at,
+                include_raw=config.STORE_RAW_TRACKER
             )
         )
         observation_docs.extend(
@@ -572,14 +667,40 @@ def discover_network(start_url=None, max_depth=None):
         all_events.extend(link_events)
         links_found += len(discovered)
 
-        # Add new nodes to queue only if:
-        # 1. We haven't reached max depth
-        # 2. This node is NOT a supernode (don't traverse past supernodes)
+        # Queue next-level nodes (unless at max depth or past a supernode).
+        next_nodes = []
         if depth < max_depth and not supernode:
             for node_info in discovered:
                 node_url = node_info['url']
                 if node_url.lower() not in visited_urls:
-                    queue.append((node_url, depth + 1))
+                    next_nodes.append((node_url, depth + 1, node_info.get('hostname')))
+        return next_nodes
+
+    # BFS by depth "waves": fetch every node in the current wave concurrently
+    # (I/O-bound), then process the results serially. Serial polling of a large
+    # mesh made the scan cycle far longer than LINK_TIMEOUT, which marked healthy
+    # nodes unreachable simply because the scan couldn't revisit them in time.
+    while queue:
+        wave = []
+        for item in queue:
+            normalized = item[0].lower()
+            if normalized in visited_urls:
+                continue
+            visited_urls.add(normalized)
+            wave.append(item)
+        queue = []
+        if not wave:
+            break
+
+        logger.info(f"Scanning wave of {len(wave)} node(s) (concurrency {config.SCAN_CONCURRENCY})")
+        workers = max(1, min(config.SCAN_CONCURRENCY, len(wave)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            fetched = list(pool.map(
+                lambda it: (it, fetch_node_with_fallback(it[0])), wave
+            ))
+
+        for (url, depth, target_hint), (data, degraded, response_ms) in fetched:
+            queue.extend(process_result(url, depth, target_hint, data, degraded, response_ms))
 
     logger.info(f"Discovery complete: {nodes_found} nodes, {links_found} links, max depth reached: {max_depth_reached}")
 
@@ -689,6 +810,9 @@ def update_link_statuses():
     events = []
 
     # Log events for dropped links
+    # Allow one extra poll interval of grace so a single missed scan does not
+    # immediately count as "scanner lost the node".
+    reachable_grace = config.LINK_TIMEOUT + config.POLL_INTERVAL
     for link in dropped_links:
         events.append({
             'type': database.EVENT_LINK_DROPPED,
@@ -696,6 +820,21 @@ def update_link_statuses():
             'details': f"{link['type']} link to {link['target']} dropped",
             'severity': 'warning'
         })
+        # A timeout is only a peer flap if the source node was actually reachable.
+        # If the scanner lost its path to the source node, this is a
+        # scanner-to-node problem, not the peer link flapping.
+        if database.was_reachable_within(link['source'], reachable_grace):
+            database.log_link_state(
+                link['source'], link['target'], 'down',
+                link_type=link['type'], detail='link timeout',
+                origin='scanner_inferred'
+            )
+        else:
+            database.log_link_state(
+                link['source'], link['target'], 'scanner_unreachable',
+                link_type=link['type'], detail='source unreachable (scanner lost node)',
+                origin='scanner_inferred'
+            )
 
     dropped = database.mark_stale_links_dropped(config.LINK_TIMEOUT)
     removed = database.remove_old_dropped_links(remove_after_seconds)

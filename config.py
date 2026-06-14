@@ -53,8 +53,15 @@ MAX_DEPTH = env_int("MAX_DEPTH", 5)
 # Database file path
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "aredn_monitor.db")
 
-# Request timeout for node queries (seconds)
-REQUEST_TIMEOUT = env_int("REQUEST_TIMEOUT_SECONDS", 30)
+# Request timeout for node queries (seconds). Kept modest because a slow/dead
+# node otherwise stalls its scan wave; the bare-sysinfo fallback catches nodes
+# that are merely slow to assemble the full response.
+REQUEST_TIMEOUT = env_int("REQUEST_TIMEOUT_SECONDS", 15)
+
+# How many nodes to poll concurrently within a BFS depth level. Serial polling
+# of a large mesh makes the scan cycle far longer than LINK_TIMEOUT, which marks
+# healthy nodes "unreachable" just because the scan can't revisit them in time.
+SCAN_CONCURRENCY = env_int("SCAN_CONCURRENCY", 12)
 
 # Web server settings
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -93,3 +100,65 @@ QUALITY_THRESHOLD_IPERF = 50
 
 # History retention
 HISTORY_RETENTION_HOURS = 24  # How long to keep historical data
+
+# ============ Diagnostics / Incident Mode ============
+
+# Persist the full raw LQM tracker dict per link sample so reports can mine
+# fields we have not promoted to columns yet. Trackers are small.
+STORE_RAW_TRACKER = env_bool("STORE_RAW_TRACKER", True)
+
+# Capture per-poll node health (uptime, load, memory) into node_health_history.
+NODE_HEALTH_ENABLED = env_bool("NODE_HEALTH_ENABLED", True)
+NODE_HEALTH_RETENTION_HOURS = env_int("NODE_HEALTH_RETENTION_HOURS", 24 * 14)
+
+# Structured link state-change log (used by the flap report). Kept longer than
+# RF history because it is tiny (one row per transition, not per sample).
+LINK_STATE_LOG_RETENTION_DAYS = env_int("LINK_STATE_LOG_RETENTION_DAYS", 30)
+
+# Incident mode: when a watched node's link drops or goes marginal, sample that
+# one link hard (bidirectionally) for a short window instead of standing down.
+INCIDENT_MODE_ENABLED = env_bool("INCIDENT_MODE_ENABLED", True)
+
+# Comma-separated node-name substrings to watch closely (e.g. "w0gq-col").
+# Empty string watches nothing; "*" watches every node.
+def _parse_watched(raw):
+    return [item.strip().lower() for item in (raw or "").split(",") if item.strip()]
+
+WATCHED_NODES = _parse_watched(os.environ.get("WATCHED_NODES", "w0gq-col"))
+
+# A link at/under this quality is "marginal" and worth incident probing.
+INCIDENT_MARGINAL_QUALITY = env_int("INCIDENT_MARGINAL_QUALITY", 70)
+
+# Mesh reachability probes: when the scanner can't poll a node but a reachable
+# neighbor reports a live link to it, ask that neighbor to ping it. A success
+# confirms "reachable via mesh"; a failure (neighbor hears it on RF but can't
+# route to it) is strong evidence the node is really down/wedged.
+MESH_PROBE_ENABLED = env_bool("MESH_PROBE_ENABLED", True)
+# Cap probes per scan cycle and re-probe interval, to avoid flooding the mesh.
+MESH_PROBE_MAX_PER_CYCLE = env_int("MESH_PROBE_MAX_PER_CYCLE", 8)
+MESH_PROBE_COOLDOWN_SECONDS = env_int("MESH_PROBE_COOLDOWN_SECONDS", 300)
+# A mesh probe result is "recent" (trusted for status) for this long.
+MESH_PROBE_FRESH_SECONDS = env_int("MESH_PROBE_FRESH_SECONDS", 900)
+# Total incident capture window and gap between probe rounds, in seconds.
+INCIDENT_DURATION = env_int("INCIDENT_DURATION_SECONDS", 90)
+INCIDENT_PROBE_INTERVAL = env_int("INCIDENT_PROBE_INTERVAL_SECONDS", 5)
+INCIDENT_PING_COUNT = env_int("INCIDENT_PING_COUNT", 3)
+
+
+# ============ Incident Report (deterministic + optional AI summary) ============
+
+# The deterministic evidence bundle always works offline. The AI narrative is
+# opt-in and never in the live scan/outage path or the status-decision path.
+INCIDENT_REPORT_AI_ENABLED = env_bool("INCIDENT_REPORT_AI_ENABLED", False)
+INCIDENT_REPORT_MODEL = os.environ.get("INCIDENT_REPORT_MODEL", "claude-sonnet-4-6")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+
+def is_watched_node(node_name):
+    """Return True when this node should get incident-mode attention."""
+    if not node_name:
+        return False
+    if "*" in WATCHED_NODES:
+        return True
+    name = node_name.lower()
+    return any(token in name for token in WATCHED_NODES)

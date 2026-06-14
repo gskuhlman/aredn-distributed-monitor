@@ -6,6 +6,15 @@ const NodePage = {
 
     async init() {
         document.getElementById('node-scan-now')?.addEventListener('click', () => this.scanNow());
+        document.getElementById('node-incident-report-btn')?.addEventListener('click', () => this.generateIncidentReport());
+        const traceSource = document.getElementById('trace-source');
+        if (traceSource && !traceSource.value) traceSource.value = this.nodeName;
+        document.getElementById('trace-run')?.addEventListener('click', () => {
+            const src = (document.getElementById('trace-source')?.value || '').trim() || this.nodeName;
+            const tgt = (document.getElementById('trace-target')?.value || '').trim();
+            if (!tgt) { this.showToast('error', 'Traceroute', 'Enter a target node or IP'); return; }
+            this.runTraceroute(src, tgt, document.getElementById('trace-run'));
+        });
         document.getElementById('node-log-search')?.addEventListener('input', () => this.renderLog());
         document.getElementById('node-selected-toggle')?.addEventListener('change', (event) => {
             this.setSelected(event.target.checked);
@@ -61,10 +70,12 @@ const NodePage = {
             selectedToggle.checked = Boolean(node.is_selected);
         }
         this.renderSummary();
+        this.renderNodeHealth();
         this.renderLinks();
         this.renderServices();
         this.renderCharts();
         this.renderLinkHealth();
+        this.renderIncidents();
         this.renderLog();
     },
 
@@ -125,6 +136,144 @@ const NodePage = {
         `;
     },
 
+    renderNodeHealth() {
+        const container = document.getElementById('node-health-summary');
+        if (!container) return;
+        this.initCharts();
+        const health = this.data.node_health || [];
+
+        if (!health.length) {
+            container.innerHTML = '<p class="log-empty">No node health samples yet. Uptime, load, and memory are captured each poll.</p>';
+            if (this.charts.load) { this.charts.load.data.datasets.forEach(d => d.data = []); this.charts.load.update('none'); }
+            if (this.charts.mem) { this.charts.mem.data.datasets[0].data = []; this.charts.mem.update('none'); }
+            return;
+        }
+
+        // Latest reachable sample for current values.
+        const latest = [...health].reverse().find(h => h.reachable) || health[health.length - 1];
+
+        // Reboots = uptime going backwards; degraded/unreachable counts over window.
+        let reboots = 0;
+        let prevUptime = null;
+        for (const h of health) {
+            if (h.uptime_seconds != null) {
+                if (prevUptime != null && h.uptime_seconds + 30 < prevUptime) reboots++;
+                prevUptime = h.uptime_seconds;
+            }
+        }
+        const degraded = health.filter(h => h.degraded).length;
+        const unreachable = health.filter(h => !h.reachable).length;
+
+        const memPct = (latest.mem_free != null && latest.mem_total)
+            ? ` (${Math.round(100 * latest.mem_free / latest.mem_total)}% free)` : '';
+
+        container.innerHTML = `
+            <table class="info-table">
+                <tr><td>Uptime:</td><td>${this.formatUptime(latest.uptime_seconds)}</td></tr>
+                <tr><td>Load (1/5/15):</td><td>${this.fmt(latest.load1)} / ${this.fmt(latest.load5)} / ${this.fmt(latest.load15)}</td></tr>
+                <tr><td>Free Memory:</td><td>${latest.mem_free != null ? latest.mem_free + ' KB' + memPct : 'N/A'}</td></tr>
+                <tr><td>Channel Busy:</td><td>${latest.channel_busy != null ? this.fmt(latest.channel_busy) + '%' : 'N/A'}</td></tr>
+                <tr><td>Reboots (window):</td><td>${reboots > 0 ? `<span class="health-val health-poor">${reboots}</span>` : '0'}</td></tr>
+                <tr><td>Degraded polls:</td><td>${degraded > 0 ? `<span class="health-val health-marginal">${degraded}</span>` : '0'}</td></tr>
+                <tr><td>Scanner unreachable polls:</td><td>${unreachable > 0 ? `<span class="health-val health-poor">${unreachable}</span>` : '0'}</td></tr>
+                <tr><td>Samples:</td><td>${health.length}</td></tr>
+            </table>`;
+
+        const load1 = health.filter(h => h.load1 != null).map(h => ({ x: new Date(h.timestamp), y: h.load1 }));
+        const load5 = health.filter(h => h.load5 != null).map(h => ({ x: new Date(h.timestamp), y: h.load5 }));
+        const load15 = health.filter(h => h.load15 != null).map(h => ({ x: new Date(h.timestamp), y: h.load15 }));
+        const mem = health.filter(h => h.mem_free != null).map(h => ({ x: new Date(h.timestamp), y: h.mem_free }));
+
+        if (this.charts.load) {
+            this.charts.load.data.datasets[0].data = load1;
+            this.charts.load.data.datasets[1].data = load5;
+            this.charts.load.data.datasets[2].data = load15;
+            this.charts.load.update('none');
+        }
+        if (this.charts.mem) {
+            this.charts.mem.data.datasets[0].data = mem;
+            this.charts.mem.update('none');
+        }
+    },
+
+    renderIncidents() {
+        const container = document.getElementById('node-incident-probes');
+        if (!container) return;
+        const samples = this.data.incident_samples || [];
+        if (!samples.length) {
+            container.innerHTML = '<p class="log-empty">No incident probes recorded. These run automatically when a watched link drops, is LQM-blocked, or goes marginal.</p>';
+            return;
+        }
+
+        // Show most recent first, capped for readability.
+        const rows = [...samples].reverse().slice(0, 60).map(s => {
+            const lossClass = s.ping_loss == null ? 'unknown' : (s.ping_loss >= 50 ? 'poor' : s.ping_loss > 0 ? 'marginal' : 'good');
+            return `<tr>
+                <td>${this.formatDate(s.timestamp)}</td>
+                <td>${this.escapeHtml(s.source_node)} &rarr; ${this.escapeHtml(s.target_node)}</td>
+                <td>${s.ping_avg != null ? this.fmt(s.ping_avg) + ' ms' : '-'}</td>
+                <td><span class="health-val health-${lossClass}">${s.ping_loss != null ? this.fmt(s.ping_loss) + '%' : '-'}</span></td>
+                <td>${s.jitter != null ? this.fmt(s.jitter) + ' ms' : '-'}</td>
+            </tr>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="table-scroll-wrapper">
+                <table class="info-table">
+                    <thead><tr><th>Time</th><th>Direction</th><th>Avg</th><th>Loss</th><th>Jitter</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+    },
+
+    async generateIncidentReport() {
+        const btn = document.getElementById('node-incident-report-btn');
+        const container = document.getElementById('node-incident-report');
+        if (!container) return;
+        const original = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = 'Generating...'; }
+        container.innerHTML = '<p class="log-empty">Analyzing collected data...</p>';
+        try {
+            const resp = await fetch(`/api/reports/incident/${encodeURIComponent(this.nodeName)}?hours=24`);
+            if (!resp.ok) throw new Error('Report failed');
+            const report = await resp.json();
+
+            const sevClass = { high: 'poor', medium: 'marginal', info: 'unknown' };
+            const findings = (report.findings || []).map(f =>
+                `<li><span class="health-val health-${sevClass[f.severity] || 'unknown'}">${this.escapeHtml(f.severity)}</span>
+                 <strong>${this.escapeHtml(f.cause)}</strong> &mdash; ${this.escapeHtml(f.evidence)}</li>`
+            ).join('');
+
+            const narrative = report.narrative
+                ? `<div class="incident-narrative"><h4>AI Summary</h4><p>${this.escapeHtml(report.narrative)}</p></div>`
+                : `<p class="health-footnote">AI summary ${report.ai_enabled ? 'unavailable (check API key / SDK)' : 'disabled'}; showing deterministic findings only.</p>`;
+
+            container.innerHTML = `
+                ${narrative}
+                <h4>Candidate causes</h4>
+                <ul class="incident-findings">${findings || '<li>No findings.</li>'}</ul>
+                <details><summary>Full report (markdown)</summary><pre class="incident-md">${this.escapeHtml(report.markdown || '')}</pre></details>
+            `;
+        } catch (error) {
+            container.innerHTML = `<p class="error">${this.escapeHtml(error.message)}</p>`;
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = original; }
+        }
+    },
+
+    fmt(value) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+        return String(Number(Number(value).toFixed(2)));
+    },
+
+    formatUptime(seconds) {
+        if (seconds === null || seconds === undefined) return 'N/A';
+        const d = Math.floor(seconds / 86400);
+        const h = Math.floor((seconds % 86400) / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        return `${d}d ${h}h ${m}m`;
+    },
+
     deduplicateLinks(links) {
         // Links are directional (A→B and B→A are separate rows).
         // Merge into one row per peer, preferring the row where this node is
@@ -181,6 +330,7 @@ const NodePage = {
                 ? 'N/A'
                 : `
                     <button class="btn btn-small btn-secondary" data-action="ping" data-source="${this.escapeAttr(this.data.node.name)}" data-target="${this.escapeAttr(other)}">Ping</button>
+                    <button class="btn btn-small btn-secondary" data-action="traceroute" data-source="${this.escapeAttr(this.data.node.name)}" data-target="${this.escapeAttr(other)}">Trace</button>
                     <button class="btn btn-small btn-secondary" data-action="iperf" data-source="${this.escapeAttr(this.data.node.name)}" data-target="${this.escapeAttr(other)}">iPerf3</button>
                 `;
             return `
@@ -219,7 +369,14 @@ const NodePage = {
             </div>
         `;
         container.querySelectorAll('[data-action]').forEach(button => {
-            button.addEventListener('click', () => this.runLinkTest(button.dataset.source, button.dataset.target, button.dataset.action, button));
+            button.addEventListener('click', () => {
+                const action = button.dataset.action;
+                if (action === 'traceroute') {
+                    this.runTraceroute(button.dataset.source, button.dataset.target, button);
+                } else {
+                    this.runLinkTest(button.dataset.source, button.dataset.target, action, button);
+                }
+            });
         });
     },
 
@@ -339,11 +496,18 @@ const NodePage = {
             const stability = h.stability || {};
             const flapping = h.flapping || {};
             const asymmetry = h.rate_asymmetry || {};
+            const block = h.lqm_block || {};
+            const snrAsym = h.snr_asymmetry || {};
 
             return `<tr>
                 <td><a href="/nodes/${encodeURIComponent(h.peer)}">${this.escapeHtml(h.peer)}</a></td>
                 <td>${this.escapeHtml(h.link_type)}</td>
+                <td>${this.reachCell((this.data.peer_reach || {})[h.peer])}</td>
                 <td><span class="health-badge health-grade-${grade.rating || 'unknown'}">${this.escapeHtml(grade.grade || '?')}</span></td>
+                <td>${this.blockCell(block)}</td>
+                <td>${this.flapCell(flapping)}</td>
+                <td>${this.scannerCell(flapping)}</td>
+                <td>${this.snrAsymCell(snrAsym)}</td>
                 <td>${this.healthCell(ping.latency_avg, 'ms', ping.latency_rating)}</td>
                 <td>${this.healthCell(ping.jitter_avg, 'ms', ping.jitter_rating)}</td>
                 <td>${this.healthCell(ping.loss_avg, '%', ping.loss_rating)}</td>
@@ -353,7 +517,6 @@ const NodePage = {
                 <td>${this.healthCell(stability.quality_stddev, '%', stability.rating)}</td>
                 <td>${this.trendCell(stability.quality_trend)}</td>
                 <td>${this.trendCell(stability.snr_trend)}</td>
-                <td>${this.flapCell(flapping)}</td>
                 <td>${this.healthCell(asymmetry.ratio, '', asymmetry.rating)}</td>
             </tr>`;
         }).join('');
@@ -365,7 +528,12 @@ const NodePage = {
                         <tr>
                             <th>Peer</th>
                             <th>Type</th>
+                            <th>Reachability</th>
                             <th>Grade</th>
+                            <th>LQM Blocked</th>
+                            <th>Node-reported flaps</th>
+                            <th>Scanner-to-node</th>
+                            <th>SNR Asym</th>
                             <th>Latency</th>
                             <th>Jitter</th>
                             <th>Loss</th>
@@ -375,7 +543,6 @@ const NodePage = {
                             <th>RF Stability</th>
                             <th>Quality Trend</th>
                             <th>SNR Trend</th>
-                            <th>Flapping/24h</th>
                             <th>TX/RX Ratio</th>
                         </tr>
                     </thead>
@@ -383,12 +550,15 @@ const NodePage = {
                 </table>
             </div>
             <div class="health-footnote">
-                <p><strong>Flapping/24h</strong> counts link drop/restore events in the last 24 hours and classifies the cause:</p>
+                <p><strong>LQM Blocked</strong> shows whether AREDN's Link Quality Manager is currently blocking the link and why (signal, distance, dtd, dup, quality, user). A blocked link is the most direct explanation for flapping &mdash; the node itself is tearing the link down.</p>
+                <p><strong>SNR Asym</strong> is the gap between the SNR you hear from the peer and the SNR the peer hears from you (rev_snr). A large gap ("you hear them, they can't hear you") commonly drives one-directional flapping and is invisible in a single SNR figure.</p>
+                <p><strong>Node-reported flaps</strong> counts peer link drops that a node we successfully polled reported about itself (from its LQM data) in the window. This is the real flap signal. The chip classifies the heuristic cause:</p>
                 <ul>
                     <li><strong>Node outage</strong> &mdash; link drops coincided with the source or peer node going offline (reboot, power loss, unreachable). DTD and Xlink (wired) drops are always attributed to the node since physical cables do not independently flap.</li>
                     <li><strong>RF instability</strong> &mdash; the RF link dropped with no corresponding node outage, indicating actual wireless signal issues such as interference, marginal SNR, or environmental factors.</li>
                     <li><strong>Mixed</strong> (e.g. "3 link / 2 node") &mdash; some drops were caused by node outages and others by independent link instability.</li>
                 </ul>
+                <p><strong>Scanner-to-node</strong> counts times <em>this scanner</em> could not reach the node, so a link looked down only because we lost our path to it &mdash; not because the peer link flapped. A high number here with low node-reported flaps means the problem is the collector's route to this node, not the node's RF links. (See also "Scanner unreachable polls" under Node Health.)</p>
                 <p><strong>VoIP MOS</strong> is an estimated Mean Opinion Score (ITU-T E-model) from 1.0&ndash;4.5 computed from average latency, jitter, and packet loss. Scores above 4.0 are good for voice; below 3.5 most users will notice degradation.</p>
                 <p><strong>RF Stability</strong> is the standard deviation of link quality over the measurement window. Low stddev with no dips below 50% is rated good; high variance or frequent quality dips indicates an unstable RF environment.</p>
             </div>
@@ -408,11 +578,69 @@ const NodePage = {
     },
 
     flapCell(flapping) {
-        if (!flapping || flapping.flap_count === undefined) return '<span class="health-val health-unknown">-</span>';
-        if (flapping.flap_count === 0) return '<span class="health-val health-good">0</span>';
-        const cause = flapping.cause_label || '';
-        const title = `${flapping.flap_count} events: ${flapping.node_flaps || 0} node, ${flapping.link_flaps || 0} link`;
-        return `<span class="health-val health-${flapping.rating || 'unknown'}" title="${this.escapeAttr(title)}">${flapping.flap_count} <span class="flap-cause flap-${flapping.cause || 'unknown'}">${this.escapeHtml(cause)}</span></span>`;
+        if (!flapping) return '<span class="health-val health-unknown">-</span>';
+        // Headline = node-reported peer downs (de-conflated). Fall back to the
+        // event-based flap_count only when the pair summary is unavailable.
+        const count = (flapping.logged_downs !== undefined && flapping.logged_downs !== null)
+            ? flapping.logged_downs : flapping.flap_count;
+        if (count === undefined || count === null) return '<span class="health-val health-unknown">-</span>';
+        const reason = flapping.top_block_reason
+            ? ` <span class="flap-cause flap-link" title="Dominant LQM block reason">${this.escapeHtml(flapping.top_block_reason)}</span>`
+            : '';
+        const cause = flapping.cause_label
+            ? ` <span class="flap-cause flap-${flapping.cause || 'unknown'}" title="Cause heuristic from connectivity events">${this.escapeHtml(flapping.cause_label)}</span>`
+            : '';
+        if (!count && !reason) return `<span class="health-val health-good">0</span>${cause}`;
+        const rating = count >= 8 ? 'poor' : count >= 3 ? 'marginal' : (flapping.rating || 'good');
+        const title = `${count} node-reported peer down(s) in window`;
+        return `<span class="health-val health-${rating}" title="${this.escapeAttr(title)}">${count}${cause}${reason}</span>`;
+    },
+
+    scannerCell(flapping) {
+        if (!flapping) return '<span class="health-val health-unknown">-</span>';
+        // Times this scanner could not reach the node — NOT a peer flap.
+        const lost = (flapping.scanner_unreachable || 0) + (flapping.inferred_downs || 0);
+        if (!lost) return '<span class="health-val health-good">0</span>';
+        const title = `${flapping.scanner_unreachable || 0} scanner-unreachable + ${flapping.inferred_downs || 0} inferred down — the scanner lost its path to this node (not a peer flap)`;
+        return `<span class="health-val health-marginal" title="${this.escapeAttr(title)}">${lost}</span>`;
+    },
+
+    reachCell(reach) {
+        if (!reach) return '<span class="health-val health-unknown">-</span>';
+        let rating = 'unknown', label = reach.reach_status || '?';
+        if (reach.reach_status === 'polled') { rating = 'good'; label = 'polled'; }
+        else if (reach.reach_status === 'via_mesh') {
+            rating = reach.mesh_probe_status === 'confirmed' ? 'good' : 'marginal';
+            label = reach.mesh_probe_status === 'confirmed' ? 'via mesh ✓' : 'via mesh';
+        }
+        else if (reach.reach_status === 'down') {
+            rating = 'poor';
+            label = reach.mesh_probe_status === 'failed' ? 'down (no route)' : 'down';
+        }
+        else if (reach.reach_status === 'link_only') { rating = 'unknown'; label = 'link-only'; }
+        let title = '';
+        if (reach.mesh_prober) {
+            const verb = reach.mesh_probe_status === 'confirmed' ? 'can reach it'
+                : reach.mesh_probe_status === 'failed' ? 'hears RF but cannot route to it' : '';
+            if (verb) title = `mesh probe: ${reach.mesh_prober} ${verb}`;
+        }
+        return `<span class="health-val health-${rating}" title="${this.escapeAttr(title)}">${this.escapeHtml(label)}</span>`;
+    },
+
+    blockCell(block) {
+        if (!block || block.blocked === null || block.blocked === undefined) {
+            return '<span class="health-val health-unknown">-</span>';
+        }
+        if (!block.blocked) return '<span class="health-val health-good">No</span>';
+        return `<span class="health-val health-poor" title="LQM is blocking this link">BLOCKED: ${this.escapeHtml(block.reason || 'unspecified')}</span>`;
+    },
+
+    snrAsymCell(asym) {
+        if (!asym || asym.delta === null || asym.delta === undefined) {
+            return '<span class="health-val health-unknown">-</span>';
+        }
+        const title = asym.details || '';
+        return `<span class="health-val health-${asym.rating || 'unknown'}" title="${this.escapeAttr(title)}">${this.escapeHtml(String(asym.delta))} dB</span>`;
     },
 
     initCharts() {
@@ -469,6 +697,30 @@ const NodePage = {
             },
             options: baseOptions
         });
+
+        const loadCanvas = document.getElementById('node-page-load-chart');
+        if (loadCanvas) {
+            this.charts.load = new Chart(loadCanvas, {
+                type: 'line',
+                data: {
+                    datasets: [
+                        { label: '1 min', borderColor: '#e74c3c', data: [], ...thinLine, borderWidth: 2 },
+                        { label: '5 min', borderColor: '#f39c12', data: [], ...thinLine },
+                        { label: '15 min', borderColor: '#27ae60', data: [], ...thinLine }
+                    ]
+                },
+                options: baseOptions
+            });
+        }
+
+        const memCanvas = document.getElementById('node-page-mem-chart');
+        if (memCanvas) {
+            this.charts.mem = new Chart(memCanvas, {
+                type: 'line',
+                data: { datasets: [{ label: 'Free KB', borderColor: '#16a085', data: [], ...thinLine, borderWidth: 2 }] },
+                options: baseOptions
+            });
+        }
     },
 
     async runLinkTest(source, target, type, button) {
@@ -489,6 +741,50 @@ const NodePage = {
             button.disabled = false;
             button.textContent = original;
         }
+    },
+
+    async runTraceroute(source, target, button) {
+        const original = button ? button.textContent : '';
+        if (button) { button.disabled = true; button.textContent = 'Tracing...'; }
+        const container = document.getElementById('node-traceroute-results');
+        if (container) {
+            container.innerHTML = `<p class="loading">Tracing ${this.escapeHtml(source)} &rarr; ${this.escapeHtml(target)}&hellip;</p>`;
+        }
+        try {
+            const response = await fetch(
+                `/api/rf-stats/test/${encodeURIComponent(source)}/${encodeURIComponent(target)}?type=traceroute`,
+                { method: 'POST' }
+            );
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.error || 'Traceroute failed');
+            this.renderTraceroute(source, target, data.result);
+            this.showToast('success', 'Traceroute Complete', `${source} → ${target}`);
+        } catch (error) {
+            if (container) container.innerHTML = `<p class="error">${this.escapeHtml(error.message)}</p>`;
+            this.showToast('error', 'Traceroute Failed', error.message);
+        } finally {
+            if (button) { button.disabled = false; button.textContent = original; }
+        }
+    },
+
+    renderTraceroute(source, target, result) {
+        const container = document.getElementById('node-traceroute-results');
+        if (!container) return;
+        const hops = (result && result.hops) || [];
+        const rows = hops.map(h => `
+            <tr>
+                <td>${h.hop}</td>
+                <td>${h.timeout ? '<span class="health-val health-poor">* * *</span>' : this.escapeHtml(h.host || h.ip || '?')}</td>
+                <td>${this.escapeHtml(h.ip || '')}</td>
+                <td>${h.ms !== null && h.ms !== undefined ? this.fmt(h.ms) + ' ms' : '-'}</td>
+            </tr>`).join('');
+        container.innerHTML = `
+            <p class="trace-head">From <strong>${this.escapeHtml(result.source || source)}</strong>
+               to <strong>${this.escapeHtml(result.target || target)}</strong> &mdash; ${hops.length} hop(s)</p>
+            <table class="info-table">
+                <thead><tr><th>#</th><th>Host</th><th>IP</th><th>RTT</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="4" class="log-empty">No hops returned</td></tr>'}</tbody>
+            </table>`;
     },
 
     addTestResult(type, source, target, result, error = null) {
@@ -593,9 +889,25 @@ const NodePage = {
     },
 
     getNodeStatusText(node) {
-        if (node.is_link_only) {
+        const reach = this.data && this.data.reach;
+        if (node.is_link_only || (reach && reach.reach_status === 'link_only')) {
             return node.observed_status === 'removed' ? 'Link-only / removed' : 'Link-only / not pollable';
         }
+        if (reach) {
+            const prober = reach.mesh_prober;
+            if (reach.reach_status === 'polled') return 'Polled (scanner reached it)';
+            if (reach.reach_status === 'via_mesh') {
+                return reach.mesh_probe_status === 'confirmed'
+                    ? `Reachable via mesh — confirmed by ${prober}`
+                    : "Reachable via mesh (a neighbor reports it; scanner can't poll it)";
+            }
+            if (reach.reach_status === 'down') {
+                return reach.mesh_probe_status === 'failed'
+                    ? `Down — ${prober} hears it on RF but can't route to it`
+                    : 'Down / unseen (no reachable node reports a live link)';
+            }
+        }
+        // Fallback before reachability data is available.
         return node.is_active === 1 ? 'Active' : 'Inactive';
     },
 

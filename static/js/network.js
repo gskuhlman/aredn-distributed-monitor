@@ -152,6 +152,18 @@ const NODE_COLORS = {
         border: '#999999',
         highlight: { background: '#EEEEEE', border: '#999999' }
     },
+    // Scanner can't poll it, but a neighbor still reports a live link to it.
+    viaMesh: {
+        background: '#76D7C4',
+        border: '#16A085',
+        highlight: { background: '#A3E4D7', border: '#16A085' }
+    },
+    // Scanner can't poll it AND no reachable node reports a live link.
+    down: {
+        background: '#CCCCCC',
+        border: '#e74c3c',
+        highlight: { background: '#DDDDDD', border: '#e74c3c' }
+    },
     linkOnly: {
         background: '#FADBD8',
         border: '#C0392B',
@@ -264,19 +276,41 @@ function initNetwork() {
         if (params.nodes.length > 0) {
             const nodeId = params.nodes[0];
             const positions = network.getPositions([nodeId]);
+            const pos = positions[nodeId];
 
             // Update node with position AND fixed property to prevent movement
             nodesDataset.update({
                 id: nodeId,
-                x: positions[nodeId].x,
-                y: positions[nodeId].y,
+                x: pos.x,
+                y: pos.y,
                 fixed: { x: true, y: true }
             });
 
-            // Save to localStorage
+            // Save to localStorage (fast local cache) AND to the server so the
+            // placement is permanent: it survives the node being dropped,
+            // rediscovered, or hidden by a filter, on any browser, until the
+            // node is moved again or "Reset Node Positions" is pressed.
             saveNodePositions();
+            persistNodePosition(nodeId, pos.x, pos.y);
         }
     });
+}
+
+/**
+ * Persist a single node's position to the server (durable layout).
+ * Merges into serverPositions so it is re-applied whenever the node reappears.
+ */
+async function persistNodePosition(nodeId, x, y) {
+    serverPositions[nodeId] = { x, y };
+    try {
+        await fetch('/api/node-positions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ positions: { [nodeId]: { x, y } } })
+        });
+    } catch (e) {
+        console.error('Failed to persist node position to server:', e);
+    }
 }
 
 /**
@@ -436,7 +470,12 @@ function renderNodeDetails(data) {
                         onclick="toggleNodePing('${node.name}')" ${!node.ip ? 'disabled' : ''}>
                     ${isCurrentlyPinging ? 'Stop Ping' : 'Ping'}
                 </button>
+                <button id="trace-btn" class="btn btn-secondary"
+                        onclick="runNodeTraceroute('${node.name}')" ${!node.ip ? 'disabled' : ''}>
+                    Traceroute
+                </button>
                 <div id="ping-output" class="ping-output ${isCurrentlyPinging ? '' : 'hidden'}"></div>
+                <div id="trace-output" class="ping-output hidden"></div>
             </div>
         </div>
     `;
@@ -758,6 +797,39 @@ function startNodePing(nodeName) {
 }
 
 /**
+ * Run a traceroute FROM the scanner TO a node (default vantage point) and
+ * render the hops with hostname + IP.
+ */
+async function runNodeTraceroute(nodeName) {
+    const out = document.getElementById('trace-output');
+    const btn = document.getElementById('trace-btn');
+    if (out) {
+        out.classList.remove('hidden');
+        out.innerHTML = '<div class="ping-line ping-info">Running traceroute from scanner…</div>';
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Tracing...'; }
+    try {
+        const response = await fetch(`/api/traceroute/${encodeURIComponent(nodeName)}`, { method: 'POST' });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Traceroute failed');
+        const hops = (data.result && data.result.hops) || [];
+        const lines = hops.map(h => {
+            if (h.timeout) return `<div class="ping-line ping-fail">${h.hop} * * *</div>`;
+            const named = (h.host && h.host !== h.ip)
+                ? `${escapeHtml(h.host)} (${escapeHtml(h.ip || '?')})`
+                : escapeHtml(h.ip || '?');
+            const ms = (h.ms !== null && h.ms !== undefined) ? ` — ${h.ms} ms` : '';
+            return `<div class="ping-line ping-success">${h.hop} ${named}${ms}</div>`;
+        }).join('');
+        out.innerHTML = `<div class="ping-line ping-info">scanner → ${escapeHtml(nodeName)} (${hops.length} hop(s))</div>` + lines;
+    } catch (error) {
+        if (out) out.innerHTML = `<div class="ping-line ping-fail">${escapeHtml(error.message)}</div>`;
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Traceroute'; }
+    }
+}
+
+/**
  * Stop continuous ping
  */
 function stopNodePing() {
@@ -875,7 +947,7 @@ function updateNetwork(data, options = {}) {
             nodesDataset.update({
                 id: nodeId,
                 color: NODE_COLORS.dropped,
-                label: existingNode.label + '\n(offline)',
+                label: existingNode.label + '\n(gone — no longer reported)',
                 opacity: 0.6
             });
         }
@@ -920,19 +992,30 @@ function updateNetwork(data, options = {}) {
     );
     nodesDataset.remove(nodesToRemove);
 
-    // Add or update nodes with appropriate coloring
+    // Add or update nodes with appropriate coloring. Color reflects
+    // reachability (reach_status from the server), not just whether OUR scanner
+    // could poll the node:
+    //   polled    – scanner reached it
+    //   via_mesh  – scanner can't poll it, but a neighbor reports a live link
+    //   down      – scanner can't poll it AND no reachable node reports it
+    //   link_only – never pollable; only seen in a neighbor's LQM
     for (const node of data.nodes) {
-        if (node.is_link_only) {
+        const reach = node.reach_status || (node.is_link_only ? 'link_only' : (node.is_inactive ? 'down' : 'polled'));
+        if (reach === 'link_only' || node.is_link_only) {
             node.color = NODE_COLORS.linkOnly;
             if (!node.label.includes('(link-only)')) {
                 node.label = node.label + '\n(link-only)';
             }
             node.opacity = 0.85;
-        } else if (node.is_inactive) {
-            // Inactive node (not polled recently but has links)
-            node.color = NODE_COLORS.inactive;
-            node.label = node.label + '\n(inactive)';
-            node.opacity = 0.7;
+        } else if (reach === 'down') {
+            node.color = NODE_COLORS.down;
+            node.label = node.label + '\n(down)';
+            node.opacity = 0.6;
+        } else if (reach === 'via_mesh') {
+            node.color = NODE_COLORS.viaMesh;
+            // A neighbor that was asked to ping it and succeeded confirms the mesh path.
+            node.label = node.label + (node.mesh_probe_status === 'confirmed' ? '\n(via mesh ✓)' : '\n(via mesh)');
+            node.opacity = 0.85;
         } else if (node.is_supernode) {
             node.color = NODE_COLORS.supernode;
             node.size = 35;  // Make supernodes larger
@@ -1176,6 +1259,16 @@ function initSocket() {
     socket.on('new_event', (data) => {
         console.log('New event:', data);
         addEventToLog(data);
+    });
+
+    // Incident-mode notifications for watched links under high-rate probing
+    socket.on('incident_started', (data) => {
+        showToast('warning', 'Incident Probe Started',
+            `High-rate probing ${data.source} ↔ ${data.target}`);
+    });
+    socket.on('incident_complete', (data) => {
+        showToast('info', 'Incident Probe Complete',
+            `${data.source} ↔ ${data.target} (${data.rounds} rounds)`);
     });
 
     // Setup RF Stats socket handlers if available

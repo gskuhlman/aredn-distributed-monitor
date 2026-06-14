@@ -22,6 +22,7 @@ const NodesModule = {
     initEventListeners() {
         const searchInput = document.getElementById('nodes-search');
         const statusFilter = document.getElementById('nodes-status-filter');
+        const typeFilter = document.getElementById('nodes-type-filter');
         const sortSelect = document.getElementById('nodes-sort');
         const closeDetail = document.getElementById('close-node-detail');
 
@@ -30,6 +31,9 @@ const NodesModule = {
         }
         if (statusFilter) {
             statusFilter.addEventListener('change', () => this.filterNodes());
+        }
+        if (typeFilter) {
+            typeFilter.addEventListener('change', () => this.filterNodes());
         }
         if (sortSelect) {
             sortSelect.addEventListener('change', () => this.filterNodes());
@@ -143,9 +147,31 @@ const NodesModule = {
         return visible;
     },
 
+    // Map an edge link_type to one of our coarse filter buckets.
+    linkTypeBucket(linkType) {
+        const t = String(linkType || '').toUpperCase();
+        if (t === 'RF') return 'rf';
+        if (t === 'WIREGUARD' || t === 'WG') return 'wireguard';
+        if (t === 'TUN' || t === 'TUNNEL' || t === 'VTUN') return 'tunnel';
+        return null;
+    },
+
+    // Node names that participate in at least one link of the given bucket.
+    nodesWithLinkType(bucket) {
+        const names = new Set();
+        for (const edge of this.networkData.edges || []) {
+            if (this.linkTypeBucket(edge.link_type) === bucket) {
+                if (edge.from) names.add(edge.from);
+                if (edge.to) names.add(edge.to);
+            }
+        }
+        return names;
+    },
+
     filterNodes() {
         const search = (document.getElementById('nodes-search')?.value || '').toLowerCase();
         const status = document.getElementById('nodes-status-filter')?.value || 'all';
+        const typeFilter = document.getElementById('nodes-type-filter')?.value || 'all';
         const sortBy = document.getElementById('nodes-sort')?.value || 'alpha';
 
         const now = Date.now();
@@ -153,6 +179,7 @@ const NodesModule = {
         const ms7d = 7 * ms24h;
         const selectedNames = status === 'selected' ? this.getSelectedNodeNames() : null;
         const selectedConnectedNames = status === 'selected-connected' ? this.getSelectedConnectedNodeNames() : null;
+        const typeNames = typeFilter !== 'all' ? this.nodesWithLinkType(typeFilter) : null;
 
         this.filteredNodes = this.nodes.filter(node => {
             const name = (node.name || '').toLowerCase();
@@ -197,7 +224,9 @@ const NodesModule = {
                 matchesStatus = (now - lastSeen) < ms7d;
             }
 
-            return matchesSearch && matchesStatus;
+            const matchesType = !typeNames || typeNames.has(node.name);
+
+            return matchesSearch && matchesStatus && matchesType;
         });
 
         // Sort
@@ -346,8 +375,13 @@ const NodesModule = {
         container.innerHTML = '<p class="loading">Loading...</p>';
 
         try {
-            const response = await fetch(`/api/nodes/detail/${encodeURIComponent(this.selectedNode)}`);
+            const [response, flapsResp] = await Promise.all([
+                fetch(`/api/nodes/detail/${encodeURIComponent(this.selectedNode)}`),
+                fetch(`/api/reports/flaps?node=${encodeURIComponent(this.selectedNode)}&hours=24`)
+            ]);
             const data = await response.json();
+            const flaps = flapsResp.ok ? ((await flapsResp.json()).links || []) : [];
+            const flapMap = this.buildFlapMap(flaps, this.selectedNode);
 
             const node = data.node;
             const services = data.services || [];
@@ -406,11 +440,12 @@ const NodesModule = {
                     <div class="node-detail-section">
                         <h3>Connected Nodes (${links.length})</h3>
                         <table class="info-table">
-                            <tr><th>Node</th><th>Type</th><th>Quality</th><th>SNR</th><th>Signal</th><th>Noise</th><th>MAC</th><th>Routability</th><th>Status</th><th>Last Seen</th></tr>
+                            <tr><th>Node</th><th>Type</th><th>Quality</th><th>SNR</th><th>Signal</th><th>Noise</th><th>MAC</th><th>Routability</th><th>Status</th><th>Node-reported flaps</th><th>Scanner-to-node</th><th>Last Seen</th></tr>
                 `;
                 for (const link of links) {
                     const otherNode = link.source_node === node.name ? link.target_node : link.source_node;
                     const qualityClass = this.getQualityClass(link.quality);
+                    const fm = flapMap[otherNode] || { node_reported: 0, scanner: 0 };
                     html += `
                         <tr>
                             <td><strong>${this.escapeHtml(otherNode)}</strong></td>
@@ -422,6 +457,8 @@ const NodesModule = {
                             <td>${this.escapeHtml(link.mac_address || 'N/A')}</td>
                             <td>${this.escapeHtml(link.routability_status || 'unknown')}</td>
                             <td>${this.escapeHtml(link.status || 'good')}</td>
+                            <td>${this.flapCountCell(fm.node_reported, 'node-reported peer down(s)')}</td>
+                            <td>${this.flapCountCell(fm.scanner, 'time(s) the scanner could not reach this node (not a peer flap)', true)}</td>
                             <td>${link.last_seen ? new Date(link.last_seen).toLocaleString() : 'N/A'}</td>
                         </tr>
                     `;
@@ -720,6 +757,29 @@ const NodesModule = {
             console.error('Error deleting node:', error);
             showToast('error', 'Delete Failed', 'Network error');
         }
+    },
+
+    // Aggregate the flap report (directional rows) into per-peer totals for the
+    // selected node, separating node-reported peer flaps from scanner-to-node loss.
+    buildFlapMap(flaps, nodeName) {
+        const map = {};
+        for (const l of flaps) {
+            let peer = null;
+            if (l.source_node === nodeName) peer = l.target_node;
+            else if (l.target_node === nodeName) peer = l.source_node;
+            else continue;
+            const e = map[peer] || { node_reported: 0, scanner: 0 };
+            e.node_reported += l.node_reported_downs || 0;
+            e.scanner += (l.scanner_unreachable || 0) + (l.inferred_downs || 0);
+            map[peer] = e;
+        }
+        return map;
+    },
+
+    flapCountCell(count, title, marginalOnly = false) {
+        if (!count) return '<span class="health-val health-good">0</span>';
+        const rating = marginalOnly ? 'marginal' : (count >= 8 ? 'poor' : count >= 3 ? 'marginal' : 'good');
+        return `<span class="health-val health-${rating}" title="${this.escapeAttr(count + ' ' + title)}">${count}</span>`;
     },
 
     getQualityClass(quality) {

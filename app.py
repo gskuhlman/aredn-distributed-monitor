@@ -22,6 +22,7 @@ import database
 import scanner
 import rf_stats
 import link_health
+import incident_report
 import couch_client
 
 # Configure logging
@@ -187,6 +188,15 @@ def scheduled_scan():
         # Record RF link stats (quality/SNR) to history
         if config.RF_STATS_ENABLED:
             rf_stats.record_rf_link_stats()
+
+        # Kick off high-rate incident probing for any watched link in trouble.
+        if config.INCIDENT_MODE_ENABLED:
+            rf_stats.maybe_run_incident_probes(socketio)
+
+        # Ask neighbors to confirm reachability of nodes we couldn't poll, so we
+        # can tell "reachable via mesh" from "really down". Background task.
+        if config.MESH_PROBE_ENABLED:
+            socketio.start_background_task(rf_stats.probe_mesh_reachability, socketio)
 
         # Emit notifications for dropped links
         for link in result.get('dropped_links', []):
@@ -378,15 +388,28 @@ def api_get_node_full(name):
     hours = request.args.get('hours', 24, type=int)
     event_limit = request.args.get('event_limit', 500, type=int)
 
+    all_links = database.get_node_all_links(node_name)
+    # Reachability for this node AND its peers (one shared derivation).
+    names = {node_name}
+    for l in all_links:
+        names.add(l['source_node'])
+        names.add(l['target_node'])
+    reach_map = database.get_reach_status_map(list(names))
+
     return jsonify({
         'node': node,
         'services': database.get_node_services(node_name),
         'active_links': database.get_node_links(node_name),
-        'all_links': database.get_node_all_links(node_name),
+        'all_links': all_links,
         'connectivity_log': database.get_node_observed_events(node_name, limit=event_limit),
         'quality_history': database.get_node_history(node_name, hours=hours),
         'ping_history': database.get_node_ping_history(node_name, hours=hours),
-        'link_health': link_health.analyze_node_links(node_name, hours=hours)
+        'link_health': link_health.analyze_node_links(node_name, hours=hours),
+        'node_health': database.get_node_health_history(node_name, hours=hours),
+        'incident_samples': database.get_incident_samples(node_name, hours=hours),
+        'flap_report': database.get_link_flap_report(hours=hours, node=node_name),
+        'reach': reach_map.get(node_name),
+        'peer_reach': reach_map
     })
 
 
@@ -709,6 +732,52 @@ def api_get_rf_stats_summary():
     return jsonify(summary)
 
 
+# ============ Diagnostic Reports ============
+
+@app.route('/api/reports/flaps')
+def api_report_flaps():
+    """Flap-rate report: transitions per link with the dominant LQM block reason."""
+    hours = request.args.get('hours', 24, type=int)
+    node = request.args.get('node', type=str)
+    min_transitions = request.args.get('min_transitions', 1, type=int)
+    if node:
+        node = node.lower()
+    report = database.get_link_flap_report(
+        hours=hours, node=node, min_transitions=min_transitions
+    )
+    return jsonify({'hours': hours, 'node': node, 'links': report})
+
+
+@app.route('/api/reports/asymmetry')
+def api_report_asymmetry():
+    """Links whose two directions disagree on signal (asymmetry report)."""
+    min_delta = request.args.get('min_delta', 3.0, type=float)
+    return jsonify({'min_delta': min_delta, 'links': database.get_link_asymmetry_report(min_delta=min_delta)})
+
+
+@app.route('/api/reports/link-state/<source>/<target>')
+def api_report_link_state(source, target):
+    """Raw state-change log for a single directional link."""
+    hours = request.args.get('hours', 24, type=int)
+    log = database.get_link_state_log(source.lower(), target.lower(), hours=hours)
+    return jsonify(log)
+
+
+@app.route('/api/node/<name>/health')
+def api_node_health(name):
+    """Node health time series (uptime/load/memory) for charts and reports."""
+    hours = request.args.get('hours', 24, type=int)
+    return jsonify(database.get_node_health_history(name.lower(), hours=hours))
+
+
+@app.route('/api/reports/incident/<name>')
+def api_report_incident(name):
+    """Incident report for a node: deterministic evidence + optional AI summary."""
+    hours = request.args.get('hours', 24, type=int)
+    report = incident_report.build_report(name.lower(), hours=hours)
+    return jsonify(report)
+
+
 @app.route('/api/ping/<node_name>', methods=['POST'])
 def api_ping_node(node_name):
     """Simple ping to a node - used by node panel and RF stats"""
@@ -735,6 +804,22 @@ def api_ping_node(node_name):
         })
 
     return jsonify({'error': 'Ping failed'}), 500
+
+
+@app.route('/api/traceroute/<node_name>', methods=['POST'])
+def api_traceroute_node(node_name):
+    """Traceroute FROM the scanner (this host) TO a node - used by the node panel."""
+    node_name = node_name.lower()
+    node = database.get_node(node_name)
+    if not node:
+        return jsonify({'error': f'Node "{node_name}" not found'}), 404
+
+    target = node.get('ip') or node_name
+    result = rf_stats.traceroute_local(target)
+    if result:
+        result['node'] = node_name
+        return jsonify({'success': True, 'result': result})
+    return jsonify({'error': 'Traceroute failed or target unreachable'}), 500
 
 
 @app.route('/api/rf-stats/test/<source>/<target>', methods=['POST'])
@@ -801,6 +886,16 @@ def api_trigger_rf_test(source, target):
             )
             return jsonify({'success': True, 'result': result})
         return jsonify({'error': 'iPerf test failed - target may not be reachable'}), 500
+
+    elif test_type == 'traceroute':
+        # Run the trace FROM the source node (arbitrary vantage point) toward the
+        # target, using the source node's own traceroute CGI.
+        source_node = database.get_node(source)
+        source_ip = source_node.get('ip') if source_node else None
+        result = rf_stats.traceroute_via_aredn(target, source_node_ip=source_ip)
+        if result:
+            return jsonify({'success': True, 'result': result})
+        return jsonify({'error': 'Traceroute failed - source node unreachable or target invalid'}), 500
 
     return jsonify({'error': 'Invalid test type'}), 400
 

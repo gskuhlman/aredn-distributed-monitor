@@ -39,6 +39,21 @@
             </section>
 
             <section class="node-page-section">
+                <h2>Node Health</h2>
+                <div id="node-health-summary"></div>
+                <div class="node-page-charts">
+                    <div class="chart-card">
+                        <h4>Load Average</h4>
+                        <canvas id="node-page-load-chart"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h4>Free Memory (KB)</h4>
+                        <canvas id="node-page-mem-chart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section class="node-page-section">
                 <h2>Recent Link Metrics</h2>
                 <div class="node-page-charts">
                     <div class="chart-card">
@@ -68,7 +83,30 @@
             </section>
 
             <section class="node-page-section">
+                <h2>Incident Probes</h2>
+                <p class="health-footnote">High-rate bidirectional pings captured automatically while a watched link is dropped, LQM-blocked, or marginal. Forward and reverse rows isolate which direction is failing.</p>
+                <div id="node-incident-probes"></div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Incident Report</h2>
+                <p class="health-footnote">Deterministic root-cause analysis from the collected data. If the AI summary is enabled, a plain-English narrative is added on top.</p>
+                <button id="node-incident-report-btn" class="btn btn-primary">Generate Report</button>
+                <div id="node-incident-report"></div>
+            </section>
+
+            <section class="node-page-section">
                 <h2>Test Results</h2>
+                <div class="traceroute-tool">
+                    <h3 class="subsection-heading-inline">Traceroute</h3>
+                    <p class="health-footnote">Runs from the chosen node's own traceroute tool, so you can trace from any node toward any target and see where the route dies. Defaults to this node.</p>
+                    <div class="traceroute-form">
+                        <label>From <input type="text" id="trace-source" class="form-input" placeholder="source node"></label>
+                        <label>To <input type="text" id="trace-target" class="form-input" placeholder="node name or IP"></label>
+                        <button id="trace-run" class="btn btn-secondary">Run Traceroute</button>
+                    </div>
+                    <div id="node-traceroute-results"></div>
+                </div>
                 <div class="test-results-grid">
                     <div>
                         <h3 class="subsection-heading-inline">Ping</h3>
