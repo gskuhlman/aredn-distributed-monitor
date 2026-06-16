@@ -64,7 +64,7 @@ def list_endpoints():
     return endpoints
 
 
-def ping_all_endpoints(count=2, timeout=2, max_workers=8):
+def ping_all_endpoints(count=2, timeout=2, max_workers=16):
     """Ping every VOIP device IP from the collector (concurrently) for a quick
     reachability sweep. Returns one result per device.
 

@@ -323,6 +323,19 @@
                                     <tbody id="diag-asym-body"></tbody>
                                 </table>
                             </div>
+                            <div class="health-footnote">
+                                <p><strong>What this shows.</strong> An RF link should be roughly equal in both directions. This section lists links where the two directions disagree on signal quality (largest gap first). Δ values are in dB; a gap of <strong>3&ndash;6 dB is marginal</strong> and <strong>&gt;6 dB is poor</strong>.</p>
+                                <ul>
+                                    <li><strong>SNR</strong> &mdash; the signal-to-noise ratio the <em>source</em> node hears from the peer (how well we receive them).</li>
+                                    <li><strong>Rev SNR</strong> &mdash; the reverse direction: the SNR the <em>peer</em> hears from the source (how well they receive us), as reported in the source's LQM.</li>
+                                    <li><strong>Within-row Δ</strong> &mdash; |SNR &minus; Rev SNR| from one node's own LQM (the two directions of the link as that node sees them).</li>
+                                    <li><strong>Cross-dir Δ</strong> &mdash; the gap between each node's <em>own</em> received SNR of the other, available only when both ends were polled (an independent cross-check).</li>
+                                    <li><strong>Max Δ</strong> &mdash; the larger of the two; the headline asymmetry used for ranking.</li>
+                                </ul>
+                                <p><strong>The problem &amp; likely causes.</strong> A large gap means one direction is much weaker &mdash; classically "we hear them fine but they can't hear us" (or vice-versa). Common causes: mismatched transmit power between the ends, different antenna gain or aiming, a one-sided obstruction or interference source, a degraded radio/feedline on one end, or a hidden-node / near-far situation.</p>
+                                <p><strong>Potential fixes.</strong> Re-aim or upgrade the antenna on the <em>weaker</em> end; equalize TX power between the two radios; clear or work around an obstruction and hunt one-sided interference (check the noise floor on the weak side); verify the distance setting and both radios' health. If it persists, reposition the weaker end.</p>
+                                <p><strong>Impact on throughput &amp; latency.</strong> A radio link is only as good as its <em>worse</em> direction: the modulation/data rate is negotiated down to what the weak path supports, driving retransmits, higher latency and jitter, and lower throughput. Because TCP ACKs travel the reverse path, a weak return direction caps end-to-end TCP speed even if the forward path is strong. Severe asymmetry also makes LQM penalize or block the link, which shows up as flapping &mdash; and it degrades VOIP into one-way audio or choppy calls.</p>
+                            </div>
                         </div>
                     </div>
                 </div>

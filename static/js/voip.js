@@ -71,11 +71,16 @@ const VOIPModule = {
 
     async pingAll() {
         const btn = document.getElementById('voip-ping-all');
+        if (btn && btn.disabled) return;  // a sweep is already running
         const original = btn ? btn.textContent : '';
+        const n = (this.endpoints || []).length;
         if (btn) { btn.disabled = true; btn.textContent = 'Pinging...'; }
-        this.setStatus('Pinging all endpoints...');
+        this.setStatus(`Pinging ${n} endpoint(s)...`);
+        // Self-recover so the button never appears stuck if the server is slow/down.
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 90000);
         try {
-            const resp = await fetch('/api/voip/ping-all', { method: 'POST' });
+            const resp = await fetch('/api/voip/ping-all', { method: 'POST', signal: controller.signal });
             const data = await resp.json();
             const byIp = {};
             (data.results || []).forEach(r => { if (r.ip) byIp[r.ip] = r; });
@@ -95,8 +100,9 @@ const VOIPModule = {
             const reached = (data.results || []).filter(r => r.reachable).length;
             this.setStatus(`Pinged ${data.results ? data.results.length : 0} endpoint(s); ${reached} reachable`);
         } catch (e) {
-            this.setStatus('Ping all failed');
+            this.setStatus(e.name === 'AbortError' ? 'Ping all timed out (still running on the server?)' : 'Ping all failed');
         } finally {
+            clearTimeout(timer);
             if (btn) { btn.disabled = false; btn.textContent = original; }
         }
     },
