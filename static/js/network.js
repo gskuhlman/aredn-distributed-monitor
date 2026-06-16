@@ -549,6 +549,20 @@ function renderNodeDetails(data) {
         html += '</ul></div>';
     }
 
+    // Scan depth: BFS hop distance from the seed at which this node was found.
+    const depth = node.scan_depth;
+    const depthText = (depth !== null && depth !== undefined)
+        ? `${depth} hop${depth === 1 ? '' : 's'} from seed`
+        : 'Unknown';
+    html += `
+        <div class="node-info node-scan-depth">
+            <h3>Scan</h3>
+            <table class="info-table">
+                <tr><td>Scan Depth:</td><td>${depthText}</td></tr>
+            </table>
+        </div>
+    `;
+
     panelContent.innerHTML = html;
     bindPanelSelectedToggle(node.name);
 }

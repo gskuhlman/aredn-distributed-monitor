@@ -39,6 +39,21 @@ LATENCY_MARGINAL = 100.0  # ms
 LOSS_GOOD = 1.0       # %
 LOSS_MARGINAL = 5.0   # %
 
+# One-way delay budget (ITU-T G.114) for interactive voice.
+G114_DELAY_GOOD = 150.0    # ms one-way - users don't notice
+G114_DELAY_MAX = 400.0     # ms one-way - upper bound for acceptable calls
+
+# Codec models: on-the-wire bitrate (incl. IP/UDP/RTP overhead @ ~20ms ptime) and
+# E-model equipment impairment (Ie) + packet-loss robustness (Bpl) from ITU-T G.113.
+# 'mixed' is deliberately conservative: G.711 bitrate for capacity (worst case) and
+# G.729 Ie/Bpl for MOS (least loss-tolerant) so we never over-promise.
+CODECS = {
+    'g711':  {'label': 'G.711',  'bitrate_kbps': 87, 'ie': 0,  'bpl': 4.3},
+    'g729':  {'label': 'G.729',  'bitrate_kbps': 31, 'ie': 11, 'bpl': 19.0},
+    'opus':  {'label': 'Opus',   'bitrate_kbps': 45, 'ie': 1,  'bpl': 30.0},
+    'mixed': {'label': 'Mixed',  'bitrate_kbps': 87, 'ie': 11, 'bpl': 19.0},
+}
+
 FLAP_WINDOW_HOURS = 24
 FLAP_THRESHOLD_WARNING = 3   # state changes in window
 FLAP_THRESHOLD_CRITICAL = 8
@@ -78,9 +93,19 @@ def _safe_float(value, default=None):
 
 # ============ VoIP MOS Score ============
 
-def compute_mos(latency_ms, jitter_ms, loss_pct):
+def codec_params(name):
+    """Return the codec model dict, resolving unknown names to 'mixed'."""
+    return CODECS.get((name or 'mixed').lower(), CODECS['mixed'])
+
+
+def compute_mos(latency_ms, jitter_ms, loss_pct, codec=None):
     """
     Estimate Mean Opinion Score using a simplified ITU-T E-model (G.107).
+
+    ``codec=None`` keeps the original loss model (back-compatible for existing
+    callers). When a codec name is given, the packet-loss term uses the E-model
+    equipment-impairment form with that codec's Ie/Bpl, so a loss-tolerant codec
+    (Opus) scores higher than a sensitive one (G.729) at the same loss.
 
     Returns a score from 1.0 (unusable) to 4.5 (excellent).
     """
@@ -95,10 +120,19 @@ def compute_mos(latency_ms, jitter_ms, loss_pct):
     # R-factor calculation (simplified E-model)
     r = 93.2 - (effective_latency / 40.0)
 
-    # Packet loss impact (exponential degradation)
-    if loss_pct > 0:
-        r -= 2.5 * loss_pct  # Each % loss costs ~2.5 R-factor points
-        r -= 0.1 * (loss_pct ** 1.5)  # Accelerating penalty for high loss
+    if codec is None:
+        # Original flat loss model.
+        if loss_pct > 0:
+            r -= 2.5 * loss_pct
+            r -= 0.1 * (loss_pct ** 1.5)
+    else:
+        # Codec-aware effective equipment impairment (ITU-T G.107):
+        #   Ie_eff = Ie + (95 - Ie) * Ppl / (Ppl/BurstR + Bpl)   (BurstR=1, random loss)
+        params = codec_params(codec)
+        ie, bpl = params['ie'], params['bpl']
+        r -= ie
+        if loss_pct > 0:
+            r -= (95 - ie) * loss_pct / (loss_pct + bpl)
 
     # Jitter penalty beyond what's covered by effective latency
     if jitter > 10:
@@ -116,6 +150,21 @@ def compute_mos(latency_ms, jitter_ms, loss_pct):
         mos = 1.0 + 0.035 * r + r * (r - 60) * (100 - r) * 7e-6
 
     return round(max(1.0, min(4.5, mos)), 2)
+
+
+def g114_delay_rating(one_way_ms):
+    """Rate one-way mouth-to-ear delay against the ITU-T G.114 budget."""
+    if one_way_ms is None:
+        return {'rating': 'unknown', 'one_way_ms': None,
+                'budget_ms': G114_DELAY_GOOD, 'max_ms': G114_DELAY_MAX, 'label': 'No data'}
+    if one_way_ms <= G114_DELAY_GOOD:
+        rating, label = 'good', 'Within budget'
+    elif one_way_ms <= G114_DELAY_MAX:
+        rating, label = 'marginal', 'Noticeable delay'
+    else:
+        rating, label = 'poor', 'Exceeds acceptable delay'
+    return {'rating': rating, 'one_way_ms': round(one_way_ms, 1),
+            'budget_ms': G114_DELAY_GOOD, 'max_ms': G114_DELAY_MAX, 'label': label}
 
 
 def mos_rating(mos):

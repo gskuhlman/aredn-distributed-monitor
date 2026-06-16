@@ -154,6 +154,21 @@ INCIDENT_REPORT_MODEL = os.environ.get("INCIDENT_REPORT_MODEL", "claude-sonnet-4
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 
+# ============ VOIP Diagnostics ============
+
+# Default voice codec for MOS + capacity math; the UI can override per test.
+# 'mixed' is conservative (G.711 bitrate for capacity, G.729 loss model for MOS).
+VOIP_CODEC = os.environ.get("VOIP_CODEC", "mixed")
+# Per-call on-the-wire bitrate (kbps) by codec, for concurrent-call capacity.
+VOIP_CODEC_KBPS = {'g711': 87, 'g729': 31, 'opus': 45, 'mixed': 87}
+# Fraction of measured throughput usable for calls (leave headroom for signaling/jitter).
+VOIP_CAPACITY_HEADROOM = float(os.environ.get("VOIP_CAPACITY_HEADROOM", "0.75"))
+# Path MTU at/under which to warn (wireguard tunnels often need ~1420; RTP fragments below).
+VOIP_WG_SAFE_MTU = env_int("VOIP_WG_SAFE_MTU", 1400)
+# DF-bit ping payload sizes (descending) for the path-MTU sweep; +28 = IP+ICMP header.
+VOIP_MTU_PROBE_SIZES = [1472, 1450, 1422, 1400, 1372, 1280]
+
+
 def is_watched_node(node_name):
     """Return True when this node should get incident-mode attention."""
     if not node_name:

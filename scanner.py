@@ -490,7 +490,7 @@ def normalize_start_url(url):
     return url
 
 
-def discover_network(start_url=None, max_depth=None):
+def discover_network(start_url=None, max_depth=None, record_depth=True):
     """
     Discover the network starting from a node.
     Uses BFS traversal to find all connected nodes.
@@ -573,6 +573,11 @@ def discover_network(start_url=None, max_depth=None):
         if not node_name:
             errors.append(f"Invalid node data from: {url}")
             return []
+
+        # Record discovery depth (hops from the seed) on full scans only; a
+        # targeted single-node scan starts at depth 0 and must not overwrite it.
+        if record_depth:
+            database.set_node_scan_depth(node_name, depth)
 
         # Emit degraded/recovered events only on transitions
         if degraded:
@@ -967,7 +972,7 @@ def run_targeted_scan(target, max_depth=0):
     logger.info("Starting targeted scan for %s", target)
     scan_started = monotonic()
     start_url = normalize_start_url(target)
-    result = discover_network(start_url=start_url, max_depth=max_depth)
+    result = discover_network(start_url=start_url, max_depth=max_depth, record_depth=False)
 
     all_events = result.get('events', [])
     for event in all_events:

@@ -29,6 +29,7 @@
                     <button class="tab-btn" data-tab="rf-stats">RF Stats</button>
                     <button class="tab-btn" data-tab="nodes">Nodes</button>
                     <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
+                    <button class="tab-btn" data-tab="voip">VOIP</button>
                 </nav>
             </div>
             <div class="header-controls">
@@ -327,6 +328,48 @@
                 </div>
             </div>
 
+            <!-- VOIP View -->
+            <div id="voip-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="nodes-header">
+                        <div class="nodes-header-left">
+                            <label class="header-checkbox">From
+                                <select id="voip-source" class="form-input"></select>
+                            </label>
+                            <input type="text" id="voip-source-ip" class="form-input" placeholder="or IP/host">
+                            <label class="header-checkbox">To
+                                <select id="voip-target" class="form-input"></select>
+                            </label>
+                            <input type="text" id="voip-target-ip" class="form-input" placeholder="or IP/host">
+                            <select id="voip-codec" class="form-input">
+                                <option value="mixed">Codec: Mixed</option>
+                                <option value="opus">Codec: Opus</option>
+                                <option value="g729">Codec: G.729</option>
+                                <option value="g711">Codec: G.711</option>
+                            </select>
+                            <button id="voip-run" class="btn btn-primary">Run Call Test</button>
+                            <button id="voip-ping-all" class="btn btn-secondary">Ping All</button>
+                        </div>
+                        <div class="nodes-count"><span id="voip-status">Idle</span></div>
+                    </div>
+                    <div class="diag-scroll">
+                        <div class="diag-section">
+                            <h3>Call quality <small class="form-hint">live end-to-end test between two endpoints</small></h3>
+                            <div id="voip-result"><p class="log-empty">Pick a source and target endpoint, then Run Call Test.</p></div>
+                        </div>
+                        <div class="diag-section">
+                            <h3>VOIP Endpoints <small class="form-hint">phones &amp; PBX detected on the mesh</small></h3>
+                            <div class="table-scroll-wrapper">
+                                <table class="info-table">
+                                    <thead><tr><th>Node</th><th>Device</th><th>Type</th><th>IP</th><th>Reachable</th><th>Latency</th><th>Jitter</th><th>MOS</th></tr></thead>
+                                    <tbody id="voip-endpoints-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Side panel for node details -->
             <aside id="side-panel" class="side-panel hidden">
                 <div class="panel-header">
@@ -530,5 +573,6 @@
     <script src="{{ url_for('static', filename='js/rf-stats.js') }}"></script>
     <script src="{{ url_for('static', filename='js/nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/diagnostics.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
 </body>
 </html>

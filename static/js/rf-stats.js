@@ -563,8 +563,9 @@ function initTabSwitching() {
     const rfStatsView = document.getElementById('rf-stats-view');
     const nodesView = document.getElementById('nodes-view');
     const diagnosticsView = document.getElementById('diagnostics-view');
+    const voipView = document.getElementById('voip-view');
     const legend = document.querySelector('.legend');
-    const allViews = [networkView, rfStatsView, nodesView, diagnosticsView];
+    const allViews = [networkView, rfStatsView, nodesView, diagnosticsView, voipView];
 
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -595,6 +596,12 @@ function initTabSwitching() {
                 if (typeof DiagnosticsModule !== 'undefined') {
                     DiagnosticsModule.init();
                     DiagnosticsModule.load();
+                }
+            } else if (tab === 'voip') {
+                if (voipView) voipView.classList.add('active');
+                if (typeof VOIPModule !== 'undefined') {
+                    VOIPModule.init();
+                    VOIPModule.load();
                 }
             }
         });

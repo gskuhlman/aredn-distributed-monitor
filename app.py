@@ -23,6 +23,8 @@ import scanner
 import rf_stats
 import link_health
 import incident_report
+import troubleshoot
+import voip
 import couch_client
 
 # Configure logging
@@ -772,10 +774,50 @@ def api_node_health(name):
 
 @app.route('/api/reports/incident/<name>')
 def api_report_incident(name):
-    """Incident report for a node: deterministic evidence + optional AI summary."""
+    """Problem report for a node: deterministic findings + optional AI summary."""
     hours = request.args.get('hours', 24, type=int)
     report = incident_report.build_report(name.lower(), hours=hours)
     return jsonify(report)
+
+
+@app.route('/api/troubleshoot/<name>', methods=['POST'])
+def api_troubleshoot(name):
+    """Actively troubleshoot a node: enumerate problems and run live probes."""
+    hours = request.args.get('hours', 24, type=int)
+    result = troubleshoot.troubleshoot_node(name.lower(), hours=hours)
+    if result.get('error'):
+        return jsonify(result), 404
+    return jsonify({'success': True, 'result': result})
+
+
+@app.route('/api/voip/endpoints')
+def api_voip_endpoints():
+    """List VOIP endpoints (phones/PBX) for the Call-Quality view."""
+    return jsonify(voip.list_endpoints())
+
+
+@app.route('/api/voip/ping-all', methods=['POST'])
+def api_voip_ping_all():
+    """Ping every VOIP endpoint device from the collector for a reachability sweep."""
+    return jsonify({'results': voip.ping_all_endpoints()})
+
+
+@app.route('/api/voip/call-quality/<source>/<target>', methods=['POST'])
+def api_voip_call_quality(source, target):
+    """Run live end-to-end VOIP diagnostics between two endpoints."""
+    codec = request.args.get('codec')
+    result = voip.run_call_quality(source.lower(), target.lower(), codec=codec)
+    if result.get('error'):
+        return jsonify(result), 404
+    return jsonify({'success': True, 'result': result})
+
+
+@app.route('/api/voip/last/<source>/<target>')
+def api_voip_last(source, target):
+    """Return the cached last VOIP test for a pair+codec (instant repaint)."""
+    codec = voip._resolve_codec(request.args.get('codec'))
+    cached = database.get_voip_test(source.lower(), target.lower(), codec)
+    return jsonify({'result': cached})
 
 
 @app.route('/api/ping/<node_name>', methods=['POST'])

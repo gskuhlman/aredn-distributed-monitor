@@ -89,10 +89,14 @@
             </section>
 
             <section class="node-page-section">
-                <h2>Incident Report</h2>
-                <p class="health-footnote">Deterministic root-cause analysis from the collected data. If the AI summary is enabled, a plain-English narrative is added on top.</p>
-                <button id="node-incident-report-btn" class="btn btn-primary">Generate Report</button>
+                <h2>Problem Report &amp; Troubleshooting</h2>
+                <p class="health-footnote"><strong>Report Problems</strong> lists every detected problem with the node and explains it (read-only; adds an AI narrative when enabled). <strong>Troubleshoot</strong> actively probes each problem &mdash; live pings, a traceroute, and neighbor-relayed pings &mdash; to localize and confirm it.</p>
+                <div class="report-actions">
+                    <button id="node-incident-report-btn" class="btn btn-primary">Report Problems</button>
+                    <button id="node-troubleshoot-btn" class="btn btn-secondary">Troubleshoot</button>
+                </div>
                 <div id="node-incident-report"></div>
+                <div id="node-troubleshoot"></div>
             </section>
 
             <section class="node-page-section">

@@ -488,7 +488,8 @@ def run_iperf_test(target_ip, duration=5, bandwidth_limit='10M',
         response = requests.get(iperf_url, timeout=30)
 
         if response.status_code != 200:
-            logger.warning(f"AREDN iperf API returned status {response.status_code}")
+            logger.warning("AREDN iperf API returned status %s (%s -> %s)",
+                           response.status_code, source_host, server)
             return None
 
         # Parse the HTML response to extract throughput
@@ -498,7 +499,8 @@ def run_iperf_test(target_ip, duration=5, bandwidth_limit='10M',
         # Check for error
         lowered = output.lower()
         if 'server error' in lowered or 'no such server' in lowered or 'unable to connect' in lowered:
-            logger.warning("AREDN iperf failed: %s", re.sub(r'<[^>]+>', ' ', output)[:300])
+            detail = ' '.join(re.sub(r'<[^>]+>', ' ', output).split())[:200]
+            logger.warning("AREDN iperf failed (%s -> %s): %s", source_host, server, detail)
             return None
 
         # Parse iperf output to extract throughput
@@ -539,11 +541,11 @@ def run_iperf_test(target_ip, duration=5, bandwidth_limit='10M',
                 'rx_mbps': rx_mbps
             }
 
-        logger.warning(f"Could not parse iperf output from AREDN API")
+        logger.warning("Could not parse iperf output from AREDN API (%s -> %s)", source_host, server)
         return None
 
     except requests.Timeout:
-        logger.warning(f"AREDN iperf API timeout for {target_ip}")
+        logger.warning("AREDN iperf API timeout (%s -> %s)", source_host, server)
         return None
     except requests.RequestException as e:
         logger.error(f"AREDN iperf API request error: {e}")

@@ -217,7 +217,8 @@ def init_db():
             ('load15', 'REAL'),
             ('mem_free', 'INTEGER'),
             ('mem_total', 'INTEGER'),
-            ('channel_busy', 'REAL')
+            ('channel_busy', 'REAL'),
+            ('scan_depth', 'INTEGER')
         ):
             try:
                 cursor.execute(f'ALTER TABLE nodes ADD COLUMN {column} {definition}')
@@ -273,6 +274,27 @@ def init_db():
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_link_state_pair ON link_state_log(source_node, target_node, timestamp DESC)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_link_state_timestamp ON link_state_log(timestamp DESC)')
+
+        # Cache of the most recent on-demand VOIP call-quality test per pair+codec.
+        # Current-state cache only (like link_history ping/throughput), NOT an
+        # append-only observation -- interactive diagnostics stay out of CouchDB.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS voip_test_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_node TEXT NOT NULL,
+                target_node TEXT NOT NULL,
+                codec TEXT NOT NULL,
+                ran_at DATETIME NOT NULL,
+                mos REAL, mos_label TEXT,
+                latency_ms REAL, jitter_ms REAL, loss_pct REAL,
+                one_way_ms REAL, g114_rating TEXT,
+                worst_segment TEXT, worst_segment_type TEXT,
+                capacity_mbps REAL, max_calls INTEGER,
+                path_mtu INTEGER, mtu_warning INTEGER,
+                result_json TEXT,
+                UNIQUE(source_node, target_node, codec)
+            )
+        ''')
 
         # `origin` distinguishes a real peer flap reported by a node we polled
         # (node_reported) from a state change our scanner only inferred because
@@ -546,6 +568,13 @@ def upsert_node(name, ip=None, description=None, model=None,
                 is_supernode = excluded.is_supernode
         ''', (name, ip, description, model, firmware_version, lat, lon,
               rf_frequency, rf_channel, now, now, is_supernode, now))
+
+
+def set_node_scan_depth(name, depth):
+    """Record the BFS hop distance from the seed at which this node was found."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('UPDATE nodes SET scan_depth = ? WHERE name = ?', (depth, name))
 
 
 def get_node(name):
@@ -1938,6 +1967,139 @@ def get_starting_node_firmware():
         cursor.execute('SELECT firmware_version FROM nodes WHERE is_active = 1 ORDER BY first_seen LIMIT 1')
         row = cursor.fetchone()
         return row['firmware_version'] if row else None
+
+
+def _voip_service_type(name):
+    """Classify a service name as a VOIP endpoint type (mirrors get_service_icon)."""
+    n = (name or '').lower()
+    if 'pbx' in n or 'asterisk' in n or 'freepbx' in n:
+        return 'pbx'
+    if 'phone' in n or 'voip' in n or 'sip' in n or 'extension' in n or 'direct ip' in n:
+        return 'phone'
+    return None
+
+
+def get_voip_endpoints():
+    """List VOIP devices (phones/PBX) hosted on the mesh — one row per device, so
+    a node with multiple VOIP services appears multiple times. Sorted by node,
+    then PBX-before-phone, then device name."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT s.node_name, s.name AS service_name, s.link, s.ip AS service_ip,
+                   n.ip AS node_ip, n.is_active, n.last_seen
+            FROM services s
+            LEFT JOIN nodes n ON n.name = s.node_name
+        ''')
+        endpoints = {}
+        for row in cursor.fetchall():
+            etype = _voip_service_type(row['service_name'])
+            if not etype:
+                continue
+            # One row per (node, device name) so multiple devices per node are kept.
+            key = (row['node_name'], (row['service_name'] or '').lower())
+            if key in endpoints:
+                continue
+            endpoints[key] = {
+                'node': row['node_name'],
+                'type': etype,
+                'device': row['service_name'],
+                'device_ip': row['service_ip'] or row['node_ip'],
+                'node_ip': row['node_ip'],
+                'link': row['link'],
+                'is_active': row['is_active'],
+                'last_seen': row['last_seen'],
+            }
+        type_rank = {'pbx': 0, 'phone': 1}
+        return sorted(endpoints.values(),
+                      key=lambda e: (e['node'], type_rank.get(e['type'], 2), (e['device'] or '').lower()))
+
+
+def get_canonical_ip_for_node(name):
+    """Best routable address for a node: its br-lan IP, else a neighbor's canonical_ip."""
+    node = get_node(name)
+    if node and node.get('ip'):
+        return node['ip']
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT canonical_ip FROM links
+            WHERE target_node = ? AND canonical_ip IS NOT NULL AND canonical_ip != ''
+            LIMIT 1
+        ''', (name,))
+        row = cursor.fetchone()
+        return row['canonical_ip'] if row else None
+
+
+def get_node_name_by_ip(ip):
+    """Find the AREDN node name owning an IP (node br-lan IP, else canonical_ip)."""
+    if not ip:
+        return None
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT name FROM nodes WHERE ip = ? LIMIT 1', (ip,))
+        row = cursor.fetchone()
+        if row:
+            return row['name']
+        cursor.execute('''
+            SELECT target_node FROM links
+            WHERE canonical_ip = ? AND target_node IS NOT NULL LIMIT 1
+        ''', (ip,))
+        row = cursor.fetchone()
+        return row['target_node'] if row else None
+
+
+def save_voip_test(source_node, target_node, codec, result):
+    """Upsert the latest VOIP test result for a pair+codec (current-state cache)."""
+    import json as _json
+    e2e = result.get('end_to_end') or {}
+    g114 = result.get('g114') or {}
+    cap = result.get('capacity') or {}
+    mtu = result.get('mtu') or {}
+    worst = (result.get('segments') or {}).get('worst') or {}
+    now = local_timestamp()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO voip_test_results (source_node, target_node, codec, ran_at,
+                mos, mos_label, latency_ms, jitter_ms, loss_pct, one_way_ms, g114_rating,
+                worst_segment, worst_segment_type, capacity_mbps, max_calls,
+                path_mtu, mtu_warning, result_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_node, target_node, codec) DO UPDATE SET
+                ran_at=excluded.ran_at, mos=excluded.mos, mos_label=excluded.mos_label,
+                latency_ms=excluded.latency_ms, jitter_ms=excluded.jitter_ms, loss_pct=excluded.loss_pct,
+                one_way_ms=excluded.one_way_ms, g114_rating=excluded.g114_rating,
+                worst_segment=excluded.worst_segment, worst_segment_type=excluded.worst_segment_type,
+                capacity_mbps=excluded.capacity_mbps, max_calls=excluded.max_calls,
+                path_mtu=excluded.path_mtu, mtu_warning=excluded.mtu_warning,
+                result_json=excluded.result_json
+        ''', (source_node, target_node, codec, now,
+              e2e.get('mos'), e2e.get('mos_label'), e2e.get('latency_ms'),
+              e2e.get('jitter_ms'), e2e.get('loss_pct'), g114.get('one_way_ms'), g114.get('rating'),
+              worst.get('label'), worst.get('bucket'), cap.get('capacity_mbps'), cap.get('max_calls'),
+              mtu.get('path_mtu'), 1 if mtu.get('mtu_warning') else 0,
+              _json.dumps(result, default=str)))
+
+
+def get_voip_test(source_node, target_node, codec):
+    """Get the cached VOIP test result (full JSON) for a pair+codec, or None."""
+    import json as _json
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT result_json, ran_at FROM voip_test_results
+            WHERE source_node = ? AND target_node = ? AND codec = ?
+        ''', (source_node, target_node, codec))
+        row = cursor.fetchone()
+        if not row or not row['result_json']:
+            return None
+        try:
+            data = _json.loads(row['result_json'])
+            data['ran_at'] = row['ran_at']
+            return data
+        except (ValueError, TypeError):
+            return None
 
 
 def get_service_icon(service_name):

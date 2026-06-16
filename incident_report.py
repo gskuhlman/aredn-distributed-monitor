@@ -123,10 +123,19 @@ def _condense_link_health(node_name, hours):
 def gather_evidence(node_name, hours=24):
     """Assemble a compact, pre-digested evidence bundle for a node (no AI)."""
     node = database.get_node(node_name)
+    reach = database.get_reach_status_map([node_name]).get(node_name) or {}
+    reference_fw = database.get_starting_node_firmware()
+    node_fw = (node or {}).get('firmware_version')
     return {
         'node': node_name,
         'window_hours': hours,
         'node_exists': node is not None,
+        'node_ip': (node or {}).get('ip'),
+        'is_active': (node or {}).get('is_active'),
+        'firmware': node_fw,
+        'firmware_mismatch': bool(reference_fw and node_fw and node_fw != reference_fw),
+        'reference_firmware': reference_fw,
+        'reach': reach,
         'flap_report': database.get_link_flap_report(hours=hours, node=node_name),
         'link_health': _condense_link_health(node_name, hours),
         'node_health': _node_health_summary(node_name, hours),
@@ -139,90 +148,137 @@ def gather_evidence(node_name, hours=24):
 
 
 def deterministic_findings(bundle):
-    """Rank candidate root causes from the evidence using plain rules."""
+    """Enumerate ALL detected problems for a node (not just flapping), each with a
+    plain-English explanation and a suggested next step. ``target`` names the peer
+    a link-level problem concerns (used by the troubleshooter to probe it)."""
     findings = []
     health = bundle['node_health']
+    reach = bundle.get('reach') or {}
+    rs = reach.get('reach_status')
 
+    # --- Node reachability ---
+    if rs == 'down':
+        findings.append({
+            'cause': 'node_down', 'severity': 'high', 'target': None,
+            'evidence': 'No reachable node reports a live link to it and the scanner '
+                        'cannot poll it -- the node appears down.',
+            'recommendation': 'Check power and RF at the node; verify its uplink neighbors are up.',
+        })
+    elif rs == 'via_mesh':
+        prober = reach.get('mesh_prober')
+        findings.append({
+            'cause': 'collector_cannot_poll', 'severity': 'medium', 'target': None,
+            'evidence': 'A neighbor reports a live link, but this scanner cannot poll the '
+                        'node directly -- a routing/path problem from the collector, not the node.'
+                        + (f' (neighbor {prober} probe pending/failed)' if prober else ''),
+            'recommendation': 'Traceroute from the collector and from a neighbor to find where '
+                              'the route breaks; consider a collector closer to this node.',
+        })
+
+    # --- Node health ---
     if health['reboots']:
         findings.append({
-            'cause': 'node_reboots',
-            'severity': 'high',
-            'evidence': f"{health['reboots']} reboot(s) detected in the window "
-                        "(uptime reset). Flaps coinciding with these are the node "
-                        "restarting, not the RF link.",
+            'cause': 'node_reboots', 'severity': 'high', 'target': None,
+            'evidence': f"{health['reboots']} reboot(s) detected (uptime reset) in the window.",
+            'recommendation': 'Check power stability, PoE, and firmware; correlate reboots with outages.',
         })
     if health['unreachable_polls']:
         findings.append({
-            'cause': 'node_unreachable',
-            'severity': 'high',
-            'evidence': f"{health['unreachable_polls']} poll(s) could not reach the node at all.",
+            'cause': 'node_unreachable', 'severity': 'high', 'target': None,
+            'evidence': f"{health['unreachable_polls']} poll(s) could not reach the node from the collector.",
+            'recommendation': 'Trace the collector-to-node path to find the failing hop.',
         })
     if health['max_load1'] is not None and health['max_load1'] >= 3.0:
         findings.append({
-            'cause': 'cpu_overload',
-            'severity': 'medium',
+            'cause': 'cpu_overload', 'severity': 'medium', 'target': None,
             'evidence': f"Peak 1-min load {health['max_load1']} suggests CPU pressure "
-                        "(can cause slow/degraded sysinfo and apparent drops).",
+                        "(slow/degraded sysinfo, apparent drops).",
+            'recommendation': 'Check for runaway processes or excessive services; consider hardware limits.',
+        })
+    if health['min_mem_free'] is not None and health['min_mem_free'] < 8000:
+        findings.append({
+            'cause': 'low_memory', 'severity': 'medium', 'target': None,
+            'evidence': f"Free memory dropped to {health['min_mem_free']} KB.",
+            'recommendation': 'Reduce services/tunnels on the node; watch for memory leaks.',
         })
     if health['max_channel_busy'] is not None and health['max_channel_busy'] >= 50:
         findings.append({
-            'cause': 'channel_congestion',
-            'severity': 'medium',
-            'evidence': f"Channel busy peaked at {health['max_channel_busy']}% "
-                        "(congestion/interference).",
+            'cause': 'channel_congestion', 'severity': 'medium', 'target': None,
+            'evidence': f"Channel busy peaked at {health['max_channel_busy']}% (congestion/interference).",
+            'recommendation': 'Check for co-channel users/interference; consider a different channel or width.',
         })
 
+    if bundle.get('firmware_mismatch'):
+        findings.append({
+            'cause': 'firmware_mismatch', 'severity': 'low', 'target': None,
+            'evidence': f"Firmware {bundle.get('firmware')} differs from the reference "
+                        f"{bundle.get('reference_firmware')}.",
+            'recommendation': 'Consider aligning firmware versions across the mesh.',
+        })
+
+    # --- Per-link problems ---
     for link in bundle['link_health']:
+        peer = link.get('peer')
         block = link.get('lqm_block') or {}
         if block.get('blocked'):
             findings.append({
-                'cause': 'lqm_blocked',
-                'severity': 'high',
-                'evidence': f"LQM is blocking {link['peer']} (reason: {block.get('reason')}). "
-                            "This is AREDN itself tearing the link down.",
+                'cause': 'lqm_blocked', 'severity': 'high', 'target': peer,
+                'evidence': f"LQM is blocking {peer} (reason: {block.get('reason')}) -- AREDN is "
+                            "tearing the link down.",
+                'recommendation': f"Address the block reason '{block.get('reason')}' (signal/distance/"
+                                  "dup/quality); check alignment, distance setting, or duplicate links.",
             })
         asym = link.get('snr_asymmetry') or {}
         if asym.get('rating') == 'poor':
             findings.append({
-                'cause': 'snr_asymmetry',
-                'severity': 'medium',
-                'evidence': f"{link['peer']}: {asym.get('details')} -- one direction is much weaker.",
+                'cause': 'snr_asymmetry', 'severity': 'medium', 'target': peer,
+                'evidence': f"{peer}: {asym.get('details')} -- one direction is much weaker.",
+                'recommendation': 'Improve the weaker side (antenna aim/power/obstruction) so both directions match.',
+            })
+        loss = link.get('loss_avg')
+        if loss is not None and loss >= 5:
+            findings.append({
+                'cause': 'high_loss', 'severity': 'medium', 'target': peer,
+                'evidence': f"{peer}: average packet loss {loss}% over the window.",
+                'recommendation': 'Check RF quality/interference on this link; confirm with a live ping.',
             })
 
     probes = bundle['incident_probes']
     for d in probes['directions']:
         if d.get('avg_loss_pct') is not None and d['avg_loss_pct'] >= 50:
             findings.append({
-                'cause': 'directional_loss',
-                'severity': 'high',
+                'cause': 'directional_loss', 'severity': 'high',
+                'target': d['target_node'] if d['source_node'] == bundle['node'] else d['source_node'],
                 'evidence': f"Incident probes show {d['avg_loss_pct']}% loss "
                             f"{d['source_node']} -> {d['target_node']} -- this direction is failing.",
+                'recommendation': 'Focus on the failing direction; check the transmitter on the source side.',
             })
 
     if not findings:
         findings.append({
-            'cause': 'insufficient_or_healthy',
-            'severity': 'info',
-            'evidence': 'No strong flap indicators in this window. Let the node poll '
-                        'through a few flap cycles, or widen the window.',
+            'cause': 'no_problems_detected', 'severity': 'info', 'target': None,
+            'evidence': 'No problems detected for this node in the window.',
+            'recommendation': 'None needed. Widen the window if you suspect intermittent issues.',
         })
 
-    sev_rank = {'high': 0, 'medium': 1, 'info': 2}
-    findings.sort(key=lambda f: sev_rank.get(f['severity'], 3))
+    sev_rank = {'high': 0, 'medium': 1, 'low': 2, 'info': 3}
+    findings.sort(key=lambda f: sev_rank.get(f['severity'], 4))
     return findings
 
 
 def render_markdown(bundle, findings, narrative=None):
     """Render the evidence + findings (and optional AI narrative) as markdown."""
-    lines = [f"# Incident report: {bundle['node']}",
+    lines = [f"# Problem report: {bundle['node']}",
              f"_Window: last {bundle['window_hours']}h_", ""]
 
     if narrative:
         lines += ["## Summary", narrative, ""]
 
-    lines.append("## Candidate causes (deterministic)")
+    lines.append("## Problems detected")
     for f in findings:
         lines.append(f"- **{f['cause']}** ({f['severity']}): {f['evidence']}")
+        if f.get('recommendation'):
+            lines.append(f"  - _Suggested:_ {f['recommendation']}")
     lines.append("")
 
     h = bundle['node_health']
@@ -270,10 +326,10 @@ def summarize(bundle, findings):
 
     system = (
         "You are a network engineer assistant for an AREDN mesh. You are given a "
-        "pre-computed JSON evidence bundle and deterministic findings for one node. "
-        "Write a concise plain-English root-cause summary (3-6 sentences). Only use "
-        "facts in the bundle. Do not invent metrics. Do not assign a status; the "
-        "system decides status separately."
+        "pre-computed JSON evidence bundle and the list of detected problems for one "
+        "node. Write a concise plain-English summary (3-6 sentences) explaining the "
+        "node's problems and their likely causes. Only use facts in the bundle. Do "
+        "not invent metrics. Do not assign a status; the system decides status separately."
     )
     payload = json.dumps({'evidence': bundle, 'findings': findings}, default=str)
     try:

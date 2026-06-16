@@ -473,11 +473,13 @@ body {
     bottom: 60px;
     left: 20px;
     background: white;
-    padding: 15px;
+    padding: 12px 14px;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    font-size: 0.85rem;
+    font-size: 0.8rem;
+    line-height: 1.25;
     z-index: 50;
+    max-width: 230px;
 }
 
 .legend h4 {
@@ -488,15 +490,17 @@ body {
 
 .legend-item {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
-    margin: 5px 0;
+    margin: 4px 0;
 }
 
 .legend-color {
     width: 20px;
     height: 4px;
     border-radius: 2px;
+    flex-shrink: 0;
+    margin-top: 6px;
 }
 
 .legend-note {
@@ -540,6 +544,8 @@ body {
     border-color: #555;
     display: inline-block;
     vertical-align: middle;
+    flex-shrink: 0;
+    margin-top: 8px;
 }
 
 .legend-line.rf {
@@ -579,6 +585,8 @@ body {
     height: 16px;
     border-radius: 50%;
     display: inline-block;
+    flex-shrink: 0;
+    margin-top: 1px;
 }
 
 .legend-node.normal {
@@ -1624,3 +1632,20 @@ body {
 .traceroute-form input { width: 220px; margin-left: 4px; }
 .trace-head { font-size: 0.85rem; color: #555; margin: 6px 0; }
 /* ============ End Traceroute tool ============ */
+
+/* ============ Problem report / Troubleshoot ============ */
+.report-actions { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.ts-step {
+    border: 1px solid #e9ecef;
+    border-left: 3px solid #95a5a6;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 8px 0;
+    background: #fbfcfd;
+}
+.ts-step-head { display: flex; align-items: center; gap: 8px; }
+.ts-detail { font-size: 0.85rem; color: #555; margin: 4px 0; }
+.ts-checks { margin: 4px 0 4px 18px; font-size: 0.85rem; }
+.ts-checks li { margin: 2px 0; }
+.ts-rec { font-size: 0.85rem; color: #2c3e50; margin: 4px 0 0; }
+/* ============ End Problem report / Troubleshoot ============ */

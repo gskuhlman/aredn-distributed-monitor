@@ -7,6 +7,7 @@ const NodePage = {
     async init() {
         document.getElementById('node-scan-now')?.addEventListener('click', () => this.scanNow());
         document.getElementById('node-incident-report-btn')?.addEventListener('click', () => this.generateIncidentReport());
+        document.getElementById('node-troubleshoot-btn')?.addEventListener('click', () => this.runTroubleshoot());
         const traceSource = document.getElementById('trace-source');
         if (traceSource && !traceSource.value) traceSource.value = this.nodeName;
         document.getElementById('trace-run')?.addEventListener('click', () => {
@@ -238,11 +239,13 @@ const NodePage = {
             if (!resp.ok) throw new Error('Report failed');
             const report = await resp.json();
 
-            const sevClass = { high: 'poor', medium: 'marginal', info: 'unknown' };
-            const findings = (report.findings || []).map(f =>
-                `<li><span class="health-val health-${sevClass[f.severity] || 'unknown'}">${this.escapeHtml(f.severity)}</span>
-                 <strong>${this.escapeHtml(f.cause)}</strong> &mdash; ${this.escapeHtml(f.evidence)}</li>`
-            ).join('');
+            const sevClass = { high: 'poor', medium: 'marginal', low: 'unknown', info: 'good' };
+            const findings = (report.findings || []).map(f => {
+                const rec = f.recommendation
+                    ? `<div class="ts-rec"><strong>Suggested:</strong> ${this.escapeHtml(f.recommendation)}</div>` : '';
+                return `<li><span class="health-val health-${sevClass[f.severity] || 'unknown'}">${this.escapeHtml(f.severity)}</span>
+                 <strong>${this.escapeHtml(f.cause)}</strong> &mdash; ${this.escapeHtml(f.evidence)}${rec}</li>`;
+            }).join('');
 
             const narrative = report.narrative
                 ? `<div class="incident-narrative"><h4>AI Summary</h4><p>${this.escapeHtml(report.narrative)}</p></div>`
@@ -250,8 +253,8 @@ const NodePage = {
 
             container.innerHTML = `
                 ${narrative}
-                <h4>Candidate causes</h4>
-                <ul class="incident-findings">${findings || '<li>No findings.</li>'}</ul>
+                <h4>Problems detected</h4>
+                <ul class="incident-findings">${findings || '<li>No problems detected.</li>'}</ul>
                 <details><summary>Full report (markdown)</summary><pre class="incident-md">${this.escapeHtml(report.markdown || '')}</pre></details>
             `;
         } catch (error) {
@@ -259,6 +262,53 @@ const NodePage = {
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = original; }
         }
+    },
+
+    async runTroubleshoot() {
+        const btn = document.getElementById('node-troubleshoot-btn');
+        const container = document.getElementById('node-troubleshoot');
+        if (!container) return;
+        const original = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = 'Troubleshooting...'; }
+        container.innerHTML = '<p class="loading">Running live probes (ping, traceroute, neighbor relay)…</p>';
+        try {
+            const resp = await fetch(`/api/troubleshoot/${encodeURIComponent(this.nodeName)}`, { method: 'POST' });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) throw new Error(data.error || 'Troubleshoot failed');
+            this.renderTroubleshoot(data.result);
+        } catch (error) {
+            container.innerHTML = `<p class="error">${this.escapeHtml(error.message)}</p>`;
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = original; }
+        }
+    },
+
+    renderTroubleshoot(result) {
+        const container = document.getElementById('node-troubleshoot');
+        if (!container) return;
+        const sevClass = { high: 'poor', medium: 'marginal', low: 'unknown', info: 'good' };
+        const steps = (result.steps || []).map(s => {
+            const checks = (s.checks || []).map(c =>
+                `<li><strong>${this.escapeHtml(c.action)}:</strong> ${this.escapeHtml(c.result)}</li>`
+            ).join('');
+            const checksHtml = checks ? `<ul class="ts-checks">${checks}</ul>` : '';
+            const rec = s.recommendation
+                ? `<p class="ts-rec"><strong>Next step:</strong> ${this.escapeHtml(s.recommendation)}</p>` : '';
+            return `
+                <div class="ts-step">
+                    <div class="ts-step-head">
+                        <span class="health-val health-${sevClass[s.severity] || 'unknown'}">${this.escapeHtml(s.severity)}</span>
+                        <strong>${this.escapeHtml(s.problem)}</strong>
+                    </div>
+                    <p class="ts-detail">${this.escapeHtml(s.detail || '')}</p>
+                    ${checksHtml}
+                    ${rec}
+                </div>`;
+        }).join('');
+        const reach = result.reachable_from_collector ? 'reachable from collector' : 'NOT reachable from collector';
+        container.innerHTML = `
+            <p class="trace-head">${this.escapeHtml(result.node)} &mdash; ${result.problem_count} problem(s); ${reach}</p>
+            ${steps || '<p class="log-empty">No problems to troubleshoot.</p>'}`;
     },
 
     fmt(value) {
