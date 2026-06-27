@@ -967,6 +967,53 @@ def probe_mesh_reachability(socketio=None):
     return results
 
 
+def ping_all_rf_links(count=3, timeout=2, max_workers=16):
+    """Ping every active RF link's target from the collector concurrently and
+    record the result to link history. On-demand counterpart to run_ping_round.
+
+    Uses eventlet.GreenPool (composes with ping_node's tpool offload); nesting
+    tpool inside a concurrent.futures ThreadPoolExecutor deadlocks under eventlet.
+    """
+    links = database.get_rf_links()
+    if not links:
+        return []
+
+    def probe(link):
+        src, tgt = link['source_node'], link['target_node']
+        target = database.get_node(tgt)
+        ip = target.get('ip') if target else None
+        base = {'source': src, 'target': tgt, 'ip': ip}
+        if not ip:
+            base.update({'reachable': False, 'avg': None, 'loss': None, 'jitter': None})
+            return base
+        try:
+            res = ping_node(ip, count=count, timeout=timeout)
+        except Exception as exc:
+            logger.warning("RF ping %s -> %s (%s) failed: %s", src, tgt, ip, exc)
+            res = None
+        if res:
+            try:
+                database.update_link_history_ping(
+                    src, tgt, res.get('min'), res.get('avg'), res.get('max'),
+                    res.get('loss'), jitter=res.get('jitter'))
+            except Exception as exc:
+                logger.warning("update_link_history_ping failed for %s->%s: %s", src, tgt, exc)
+        ok = bool(res) and (res.get('loss') if res.get('loss') is not None else 100) < 100
+        base.update({'reachable': ok, 'avg': (res or {}).get('avg'),
+                     'loss': (res or {}).get('loss'), 'jitter': (res or {}).get('jitter')})
+        return base
+
+    workers = max(1, min(max_workers, len(links)))
+    try:
+        import eventlet
+        pool = eventlet.GreenPool(workers)
+        return list(pool.imap(probe, links))
+    except ImportError:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return list(pool.map(probe, links))
+
+
 def get_rf_stats_summary():
     """Get summary of RF stats collection status"""
     rf_links = database.get_rf_links()

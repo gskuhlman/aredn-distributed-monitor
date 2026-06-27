@@ -71,10 +71,32 @@
                                     <button class="time-btn" data-hours="6">6H</button>
                                     <button class="time-btn" data-hours="12">12H</button>
                                     <button class="time-btn active" data-hours="24">24H</button>
+                                    <button class="time-btn" data-hours="168">7D</button>
                                 </div>
+                                <button id="rf-ping-all" class="btn btn-secondary">Ping All</button>
                             </div>
                             <div class="rf-stats-status">
+                                <span id="rf-ping-status"></span>
                                 <span id="rf-stats-link-count">0</span> RF links
+                            </div>
+                        </div>
+
+                        <!-- Filter/sort bar (shown on overview, hidden when a link is selected) -->
+                        <div id="rf-filters" class="rf-filters-bar">
+                            <div class="rf-filters-left">
+                                <input type="text" id="rf-search" class="form-input" placeholder="Search links...">
+                                <select id="rf-status-filter" class="form-input">
+                                    <option value="all">All Links</option>
+                                    <option value="selected">Selected Nodes</option>
+                                    <option value="selected-connected">Selected Nodes + Connected</option>
+                                </select>
+                                <select id="rf-sort" class="form-input">
+                                    <option value="alpha">Sort: Alpha</option>
+                                    <option value="last-seen">Sort: Last Seen</option>
+                                    <option value="quality">Sort: Quality</option>
+                                    <option value="snr">Sort: SNR</option>
+                                    <option value="ping">Sort: Ping</option>
+                                </select>
                             </div>
                         </div>
 

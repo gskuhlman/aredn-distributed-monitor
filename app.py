@@ -711,6 +711,13 @@ def api_get_rf_links():
     return jsonify(links)
 
 
+@app.route('/api/rf-stats/ping-all', methods=['POST'])
+def api_rf_ping_all():
+    """Ping every active RF link from the collector concurrently and record the
+    results, then return them so the overview table can repaint with fresh data."""
+    return jsonify({'results': rf_stats.ping_all_rf_links()})
+
+
 @app.route('/api/rf-stats/history/<source>/<target>')
 def api_get_link_history(source, target):
     """Get historical data for a specific link"""

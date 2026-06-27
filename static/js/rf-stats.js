@@ -9,6 +9,8 @@ const RFStats = {
     charts: {},
     timeRangeHours: 24,
     rfLinks: [],
+    filteredLinks: [],
+    networkData: { nodes: [], edges: [] },
     initialized: false,
 
     /**
@@ -187,6 +189,12 @@ const RFStats = {
             });
         });
 
+        // Ping All button
+        const pingAllBtn = document.getElementById('rf-ping-all');
+        if (pingAllBtn) {
+            pingAllBtn.addEventListener('click', () => this.pingAll());
+        }
+
         // Back button
         const backBtn = document.getElementById('rf-back-btn');
         if (backBtn) {
@@ -213,6 +221,20 @@ const RFStats = {
                 }
             });
         }
+
+        // Filter / sort controls (overview table)
+        const search = document.getElementById('rf-search');
+        const statusFilter = document.getElementById('rf-status-filter');
+        const sortSelect = document.getElementById('rf-sort');
+        if (search) {
+            search.addEventListener('input', () => this.filterLinks());
+        }
+        if (statusFilter) {
+            statusFilter.addEventListener('change', () => this.filterLinks());
+        }
+        if (sortSelect) {
+            sortSelect.addEventListener('change', () => this.filterLinks());
+        }
     },
 
     /**
@@ -220,15 +242,103 @@ const RFStats = {
      */
     async loadRFLinks() {
         try {
-            const response = await fetch('/api/rf-stats/links');
-            this.rfLinks = await response.json();
+            const [linksResp, netResp] = await Promise.all([
+                fetch('/api/rf-stats/links'),
+                fetch('/api/network')
+            ]);
+            this.rfLinks = await linksResp.json();
+            this.networkData = netResp.ok ? await netResp.json() : { nodes: [], edges: [] };
 
-            this.renderOverviewTable(this.rfLinks);
-
-            document.getElementById('rf-stats-link-count').textContent = this.rfLinks.length;
+            this.filterLinks();
 
         } catch (error) {
             console.error('Error loading RF links:', error);
+        }
+    },
+
+    // Selected node names, gathered from the network graph (mirrors NodesModule).
+    getSelectedNodeNames() {
+        const selected = new Set();
+        for (const node of this.networkData.nodes || []) {
+            if (node.is_selected && node.id) {
+                selected.add(node.id);
+            }
+        }
+        return selected;
+    },
+
+    getSelectedConnectedNodeNames() {
+        const selected = this.getSelectedNodeNames();
+        const visible = new Set(selected);
+
+        for (const edge of this.networkData.edges || []) {
+            const linkType = String(edge.link_type || '').toUpperCase();
+            if (linkType !== 'RF' && linkType !== 'DTD') continue;
+            if (selected.has(edge.from) || selected.has(edge.to)) {
+                visible.add(edge.from);
+                visible.add(edge.to);
+            }
+        }
+
+        return visible;
+    },
+
+    /**
+     * Apply the search / status / sort filters to the loaded RF links and
+     * repaint the overview table. Mirrors the nodes-page filter logic.
+     */
+    filterLinks() {
+        const search = (document.getElementById('rf-search')?.value || '').toLowerCase();
+        const status = document.getElementById('rf-status-filter')?.value || 'all';
+        const sortBy = document.getElementById('rf-sort')?.value || 'alpha';
+
+        const selectedNames = status === 'selected' ? this.getSelectedNodeNames() : null;
+        const selectedConnectedNames = status === 'selected-connected' ? this.getSelectedConnectedNodeNames() : null;
+
+        this.filteredLinks = (this.rfLinks || []).filter(link => {
+            const source = (link.source_node || '').toLowerCase();
+            const target = (link.target_node || '').toLowerCase();
+            const matchesSearch = !search ||
+                source.includes(search) || target.includes(search);
+
+            let matchesStatus = true;
+            if (status === 'selected') {
+                matchesStatus = selectedNames.has(link.source_node) || selectedNames.has(link.target_node);
+            } else if (status === 'selected-connected') {
+                matchesStatus = selectedConnectedNames.has(link.source_node) || selectedConnectedNames.has(link.target_node);
+            }
+
+            return matchesSearch && matchesStatus;
+        });
+
+        this.filteredLinks.sort((a, b) => {
+            if (sortBy === 'alpha') {
+                const aKey = `${a.source_node || ''}-${a.target_node || ''}`;
+                const bKey = `${b.source_node || ''}-${b.target_node || ''}`;
+                return aKey.localeCompare(bKey);
+            } else if (sortBy === 'last-seen') {
+                const aTime = a.last_seen ? new Date(a.last_seen).getTime() : 0;
+                const bTime = b.last_seen ? new Date(b.last_seen).getTime() : 0;
+                return bTime - aTime;
+            } else if (sortBy === 'quality') {
+                return (a.quality || 0) - (b.quality || 0);
+            } else if (sortBy === 'snr') {
+                return (a.snr || -999) - (b.snr || -999);
+            } else if (sortBy === 'ping') {
+                const aPing = a.ping_avg == null ? Infinity : a.ping_avg;
+                const bPing = b.ping_avg == null ? Infinity : b.ping_avg;
+                return aPing - bPing;
+            }
+            return 0;
+        });
+
+        this.renderOverviewTable(this.filteredLinks);
+
+        const countEl = document.getElementById('rf-stats-link-count');
+        if (countEl) {
+            const total = (this.rfLinks || []).length;
+            const shown = this.filteredLinks.length;
+            countEl.textContent = (shown === total) ? `${shown}` : `${shown}/${total}`;
         }
     },
 
@@ -248,8 +358,8 @@ const RFStats = {
         for (const link of links) {
             const qualityClass = this.getQualityClass(link.quality);
             const pingDisplay = link.ping_avg ? `${link.ping_avg.toFixed(1)} ms` : '--';
-            const throughputDisplay = link.throughput_tx ?
-                `${link.throughput_tx.toFixed(1)} / ${link.throughput_rx.toFixed(1)}` : '--';
+            const throughputDisplay = (link.throughput_tx !== null && link.throughput_tx !== undefined) ?
+                `${this.formatThroughput(link.throughput_tx)} / ${this.formatThroughput(link.throughput_rx)}` : '--';
 
             html += `
                 <tr class="rf-link-row"
@@ -279,6 +389,49 @@ const RFStats = {
     },
 
     /**
+     * Format an iperf throughput value (stored in Mbps) with a unit label.
+     * Sub-1 Mbps values are shown in Kbps so slow links are still legible.
+     */
+    formatThroughput(mbps) {
+        if (mbps === null || mbps === undefined) return '--';
+        if (mbps >= 1) return `${mbps.toFixed(1)} Mbps`;
+        return `${(mbps * 1000).toFixed(0)} Kbps`;
+    },
+
+    /**
+     * Ping every RF link from the collector and repaint the overview table.
+     * Mirrors the VOIP page's Ping All: server-side eventlet.GreenPool sweep
+     * with a self-recovering, time-bounded button so it never appears stuck.
+     */
+    async pingAll() {
+        const btn = document.getElementById('rf-ping-all');
+        if (btn && btn.disabled) return;  // a sweep is already running
+        const status = document.getElementById('rf-ping-status');
+        const original = btn ? btn.textContent : '';
+        const n = (this.rfLinks || []).length;
+        if (btn) { btn.disabled = true; btn.textContent = 'Pinging...'; }
+        if (status) status.textContent = `Pinging ${n} link(s)... `;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 90000);
+        try {
+            const resp = await fetch('/api/rf-stats/ping-all', { method: 'POST', signal: controller.signal });
+            const data = await resp.json();
+            const results = data.results || [];
+            const reached = results.filter(r => r.reachable).length;
+            // The server recorded the pings to link history; reload to repaint.
+            await this.loadRFLinks();
+            if (status) status.textContent = `Pinged ${results.length}; ${reached} reachable. `;
+        } catch (e) {
+            if (status) status.textContent = (e.name === 'AbortError')
+                ? 'Ping all timed out (still running on the server?). '
+                : 'Ping all failed. ';
+        } finally {
+            clearTimeout(timer);
+            if (btn) { btn.disabled = false; btn.textContent = original; }
+        }
+    },
+
+    /**
      * Select a link and show its charts
      */
     async selectLink(source, target) {
@@ -300,6 +453,8 @@ const RFStats = {
         // Show charts, hide overview table
         document.getElementById('rf-charts-grid').classList.remove('hidden');
         document.getElementById('rf-overview-table').classList.add('hidden');
+        const rfFilters = document.getElementById('rf-filters');
+        if (rfFilters) rfFilters.classList.add('hidden');
 
         // Load history data
         await this.loadLinkHistory(source, target);
@@ -326,6 +481,8 @@ const RFStats = {
         // Hide charts, show overview table
         document.getElementById('rf-charts-grid').classList.add('hidden');
         document.getElementById('rf-overview-table').classList.remove('hidden');
+        const rfFilters = document.getElementById('rf-filters');
+        if (rfFilters) rfFilters.classList.remove('hidden');
     },
 
     /**
