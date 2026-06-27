@@ -1281,28 +1281,75 @@ def get_rf_links():
 
 
 def get_rf_links_with_latest_stats():
-    """Get RF links with their most recent history stats"""
+    """Get RF links with their most recent ping and throughput stats.
+
+    Ping and throughput are written to link_history by separate probes, while
+    every scan inserts a fresh row with NULL ping/throughput. Joining only the
+    latest row would clear the display on each scan, so we independently pick the
+    most recent non-null ping and non-null throughput per link.
+    """
     with get_connection() as conn:
         cursor = conn.cursor()
-        # Get RF links with latest history entry
         cursor.execute('''
-            SELECT l.*, h.ping_avg, h.ping_loss, h.throughput_tx, h.throughput_rx,
-                   h.timestamp as last_test_time
+            SELECT l.*,
+                   p.ping_min, p.ping_avg, p.ping_max, p.ping_loss, p.jitter,
+                   p.timestamp as last_ping_time,
+                   t.throughput_tx, t.throughput_rx,
+                   t.timestamp as last_throughput_time
             FROM links l
             LEFT JOIN (
-                SELECT source_node, target_node, ping_avg, ping_loss,
-                       throughput_tx, throughput_rx, timestamp,
+                SELECT source_node, target_node, ping_min, ping_avg, ping_max,
+                       ping_loss, jitter, timestamp,
                        ROW_NUMBER() OVER (PARTITION BY source_node, target_node
-                                         ORDER BY timestamp DESC) as rn
+                                          ORDER BY timestamp DESC) as rn
                 FROM link_history
-            ) h ON l.source_node = h.source_node
-                AND l.target_node = h.target_node
-                AND h.rn = 1
+                WHERE ping_avg IS NOT NULL
+            ) p ON l.source_node = p.source_node
+                AND l.target_node = p.target_node
+                AND p.rn = 1
+            LEFT JOIN (
+                SELECT source_node, target_node, throughput_tx, throughput_rx,
+                       timestamp,
+                       ROW_NUMBER() OVER (PARTITION BY source_node, target_node
+                                          ORDER BY timestamp DESC) as rn
+                FROM link_history
+                WHERE throughput_tx IS NOT NULL
+            ) t ON l.source_node = t.source_node
+                AND l.target_node = t.target_node
+                AND t.rn = 1
             WHERE l.link_type = 'RF'
             AND l.status != 'removed'
             ORDER BY l.source_node, l.target_node
         ''')
         return [dict(row) for row in cursor.fetchall()]
+
+
+def clear_link_ping_throughput(links=None):
+    """Null out ping and throughput columns in link_history so the overview
+    table stops showing stale values. If `links` (a list of (source, target)
+    tuples) is given, only those links are cleared; otherwise all rows are."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if not links:
+            cursor.execute('''
+                UPDATE link_history
+                SET ping_min = NULL, ping_avg = NULL, ping_max = NULL,
+                    ping_loss = NULL, jitter = NULL,
+                    throughput_tx = NULL, throughput_rx = NULL
+            ''')
+            return cursor.rowcount
+        placeholders = ','.join('?,?' for _ in links)
+        flat = []
+        for src, tgt in links:
+            flat.extend([src, tgt])
+        cursor.execute(f'''
+            UPDATE link_history
+            SET ping_min = NULL, ping_avg = NULL, ping_max = NULL,
+                ping_loss = NULL, jitter = NULL,
+                throughput_tx = NULL, throughput_rx = NULL
+            WHERE (source_node, target_node) IN ({placeholders})
+        ''', flat)
+        return cursor.rowcount
 
 
 def get_latest_link_stats(source_node, target_node):

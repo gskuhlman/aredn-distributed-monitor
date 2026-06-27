@@ -1052,6 +1052,13 @@ body {
     padding: 8px 10px;
 }
 
+.rf-overview-table .rf-last-time {
+    color: #888;
+    font-size: 0.72rem;
+    display: inline;
+    margin-left: 4px;
+}
+
 .rf-overview-table h3 {
     margin-bottom: 15px;
     font-size: 1rem;

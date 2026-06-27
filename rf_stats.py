@@ -967,16 +967,41 @@ def probe_mesh_reachability(socketio=None):
     return results
 
 
-def ping_all_rf_links(count=3, timeout=2, max_workers=16):
-    """Ping every active RF link's target from the collector concurrently and
-    record the result to link history. On-demand counterpart to run_ping_round.
+def ping_all_rf_links(count=3, timeout=2, max_workers=16, links=None, clear_first=False):
+    """Ping RF link targets from the collector concurrently and record the result
+    to link history. On-demand counterpart to run_ping_round.
+
+    `links` may be a list of ``(source, target)`` pairs to restrict the sweep to a
+    caller-supplied set (e.g. only the filtered rows); otherwise all active RF
+    links are pinged. If `clear_first` is true, previous ping/throughput results
+    are nulled out before pinging so the overview shows only the fresh values.
 
     Uses eventlet.GreenPool (composes with ping_node's tpool offload); nesting
     tpool inside a concurrent.futures ThreadPoolExecutor deadlocks under eventlet.
     """
-    links = database.get_rf_links()
-    if not links:
+    if links is not None:
+        link_rows = []
+        with database.get_connection() as conn:
+            cursor = conn.cursor()
+            for src, tgt in links:
+                cursor.execute(
+                    'SELECT * FROM links WHERE source_node=? AND target_node=?',
+                    (src, tgt))
+                row = cursor.fetchone()
+                if row:
+                    link_rows.append(dict(row))
+        all_links = link_rows
+    else:
+        all_links = database.get_rf_links()
+    if not all_links:
         return []
+
+    if clear_first:
+        try:
+            database.clear_link_ping_throughput(
+                links=[(l['source_node'], l['target_node']) for l in all_links])
+        except Exception as exc:
+            logger.warning("clear_link_ping_throughput failed: %s", exc)
 
     def probe(link):
         src, tgt = link['source_node'], link['target_node']
@@ -1003,15 +1028,15 @@ def ping_all_rf_links(count=3, timeout=2, max_workers=16):
                      'loss': (res or {}).get('loss'), 'jitter': (res or {}).get('jitter')})
         return base
 
-    workers = max(1, min(max_workers, len(links)))
+    workers = max(1, min(max_workers, len(all_links)))
     try:
         import eventlet
         pool = eventlet.GreenPool(workers)
-        return list(pool.imap(probe, links))
+        return list(pool.imap(probe, all_links))
     except ImportError:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            return list(pool.map(probe, links))
+            return list(pool.map(probe, all_links))
 
 
 def get_rf_stats_summary():

@@ -195,6 +195,12 @@ const RFStats = {
             pingAllBtn.addEventListener('click', () => this.pingAll());
         }
 
+        // Clear Ping Times button
+        const clearPingBtn = document.getElementById('rf-clear-ping');
+        if (clearPingBtn) {
+            clearPingBtn.addEventListener('click', () => this.clearPingTimes());
+        }
+
         // Back button
         const backBtn = document.getElementById('rf-back-btn');
         if (backBtn) {
@@ -357,9 +363,18 @@ const RFStats = {
         let html = '';
         for (const link of links) {
             const qualityClass = this.getQualityClass(link.quality);
-            const pingDisplay = link.ping_avg ? `${link.ping_avg.toFixed(1)} ms` : '--';
-            const throughputDisplay = (link.throughput_tx !== null && link.throughput_tx !== undefined) ?
-                `${this.formatThroughput(link.throughput_tx)} / ${this.formatThroughput(link.throughput_rx)}` : '--';
+            const pingDisplay = link.ping_avg != null
+                ? `${link.ping_avg.toFixed(1)} ms`
+                : '--';
+            const pingTime = link.last_ping_time
+                ? this.formatRelTime(link.last_ping_time)
+                : '';
+            const throughputDisplay = (link.throughput_tx !== null && link.throughput_tx !== undefined)
+                ? `${this.formatThroughput(link.throughput_tx)} / ${this.formatThroughput(link.throughput_rx)}`
+                : '--';
+            const throughputTime = link.last_throughput_time
+                ? this.formatRelTime(link.last_throughput_time)
+                : '';
 
             html += `
                 <tr class="rf-link-row"
@@ -369,8 +384,8 @@ const RFStats = {
                     <td><strong>${link.source_node}</strong> &harr; <strong>${link.target_node}</strong></td>
                     <td class="${qualityClass}">${link.quality || 0}%</td>
                     <td>${link.snr || 'N/A'}</td>
-                    <td>${pingDisplay}</td>
-                    <td>${throughputDisplay}</td>
+                    <td>${pingDisplay}${pingTime ? ` <small class="rf-last-time">(${pingTime})</small>` : ''}</td>
+                    <td>${throughputDisplay}${throughputTime ? ` <small class="rf-last-time">(${throughputTime})</small>` : ''}</td>
                     <td>
                         <button class="btn btn-small btn-secondary"
                                 onclick="event.stopPropagation(); RFStats.triggerTest('${link.source_node}', '${link.target_node}', 'ping', this)">
@@ -389,6 +404,22 @@ const RFStats = {
     },
 
     /**
+     * Render a relative-time label like "2m ago" / "3h ago" / "just now".
+     */
+    formatRelTime(ts) {
+        const t = new Date(ts).getTime();
+        if (!t) return '';
+        const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+        if (sec < 60) return 'just now';
+        const min = Math.floor(sec / 60);
+        if (min < 60) return `${min}m ago`;
+        const hr = Math.floor(min / 60);
+        if (hr < 24) return `${hr}h ago`;
+        const d = Math.floor(hr / 24);
+        return `${d}d ago`;
+    },
+
+    /**
      * Format an iperf throughput value (stored in Mbps) with a unit label.
      * Sub-1 Mbps values are shown in Kbps so slow links are still legible.
      */
@@ -399,22 +430,29 @@ const RFStats = {
     },
 
     /**
-     * Ping every RF link from the collector and repaint the overview table.
-     * Mirrors the VOIP page's Ping All: server-side eventlet.GreenPool sweep
-     * with a self-recovering, time-bounded button so it never appears stuck.
+     * Ping the currently filtered RF links from the collector and repaint the
+     * overview table. Previous ping/throughput results for those links are
+     * cleared first so the table shows only the fresh values.
      */
     async pingAll() {
         const btn = document.getElementById('rf-ping-all');
         if (btn && btn.disabled) return;  // a sweep is already running
         const status = document.getElementById('rf-ping-status');
         const original = btn ? btn.textContent : '';
-        const n = (this.rfLinks || []).length;
+        // Ping only the links currently passing the filter/sort bar.
+        const links = (this.filteredLinks || this.rfLinks || []).map(l => [l.source_node, l.target_node]);
+        const n = links.length;
         if (btn) { btn.disabled = true; btn.textContent = 'Pinging...'; }
         if (status) status.textContent = `Pinging ${n} link(s)... `;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 90000);
         try {
-            const resp = await fetch('/api/rf-stats/ping-all', { method: 'POST', signal: controller.signal });
+            const resp = await fetch('/api/rf-stats/ping-all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ links, clear: true }),
+                signal: controller.signal
+            });
             const data = await resp.json();
             const results = data.results || [];
             const reached = results.filter(r => r.reachable).length;
@@ -427,6 +465,32 @@ const RFStats = {
                 : 'Ping all failed. ';
         } finally {
             clearTimeout(timer);
+            if (btn) { btn.disabled = false; btn.textContent = original; }
+        }
+    },
+
+    /**
+     * Null out stored ping and throughput results so the overview stops showing
+     * stale values, then repaint. Clears only the currently filtered links.
+     */
+    async clearPingTimes() {
+        const btn = document.getElementById('rf-clear-ping');
+        if (btn && btn.disabled) return;
+        const status = document.getElementById('rf-ping-status');
+        const original = btn ? btn.textContent : '';
+        const links = (this.filteredLinks || this.rfLinks || []).map(l => [l.source_node, l.target_node]);
+        if (btn) { btn.disabled = true; btn.textContent = 'Clearing...'; }
+        try {
+            await fetch('/api/rf-stats/clear-ping', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ links })
+            });
+            await this.loadRFLinks();
+            if (status) status.textContent = 'Cleared ping/throughput. ';
+        } catch (e) {
+            if (status) status.textContent = 'Clear failed. ';
+        } finally {
             if (btn) { btn.disabled = false; btn.textContent = original; }
         }
     },

@@ -713,9 +713,31 @@ def api_get_rf_links():
 
 @app.route('/api/rf-stats/ping-all', methods=['POST'])
 def api_rf_ping_all():
-    """Ping every active RF link from the collector concurrently and record the
-    results, then return them so the overview table can repaint with fresh data."""
-    return jsonify({'results': rf_stats.ping_all_rf_links()})
+    """Ping RF links from the collector concurrently and record the results, then
+    return them so the overview table can repaint with fresh data.
+
+    Optional JSON body ``{"links": [["src","tgt"], ...]}`` restricts the sweep to
+    a caller-supplied set (e.g. only the filtered rows); otherwise all active RF
+    links are pinged. Optional ``{"clear": true}`` nulls previous ping/throughput
+    results in history before pinging."""
+    body = request.get_json(silent=True) or {}
+    links = body.get('links')
+    do_clear = bool(body.get('clear', False))
+    return jsonify({'results': rf_stats.ping_all_rf_links(links=links, clear_first=do_clear)})
+
+
+@app.route('/api/rf-stats/clear-ping', methods=['POST'])
+def api_rf_clear_ping():
+    """Null out stored ping and throughput results so the overview stops showing
+    stale values. Optional JSON body ``{"links": [["src","tgt"], ...]}`` restricts
+    the clear to a caller-supplied set; otherwise all rows are cleared."""
+    body = request.get_json(silent=True) or {}
+    links = body.get('links')
+    pairs = None
+    if links:
+        pairs = [(s, t) for s, t in links]
+    cleared = database.clear_link_ping_throughput(links=pairs)
+    return jsonify({'success': True, 'cleared': cleared})
 
 
 @app.route('/api/rf-stats/history/<source>/<target>')
