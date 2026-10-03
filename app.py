@@ -25,6 +25,7 @@ import link_health
 import incident_report
 import troubleshoot
 import voip
+import voip_session
 import couch_client
 
 # Configure logging
@@ -847,6 +848,92 @@ def api_voip_last(source, target):
     codec = voip._resolve_codec(request.args.get('codec'))
     cached = database.get_voip_test(source.lower(), target.lower(), codec)
     return jsonify({'result': cached})
+
+
+# ---- Streamed VoIP sessions (two-ended / one-ended) ----
+
+@app.route('/api/voip/session/start', methods=['POST'])
+def api_voip_session_start():
+    """Start a streamed VoIP session (two-ended with agent, or one-ended)."""
+    data = request.get_json(silent=True) or {}
+    mode = (data.get('mode') or 'full').strip().lower()
+    if mode not in ('full', 'one_ended'):
+        return jsonify({'error': 'mode must be "full" or "one_ended"'}), 400
+    remote_host = (data.get('remote_host') or '').strip()
+    if not remote_host:
+        return jsonify({'error': 'remote_host is required'}), 400
+    source_label = (data.get('source') or 'collector').strip()
+    target_label = (data.get('target') or remote_host).strip()
+    agent_key = (data.get('agent_key') or '').strip()
+    pps = data.get('pps', config.VOIP_STREAM_PPS)
+    packet_bytes = data.get('packet_bytes', config.VOIP_STREAM_PACKET_BYTES)
+    source_node_ip = (data.get('source_node_ip') or '').strip() or None
+
+    if mode == 'full' and not agent_key:
+        return jsonify({'error': 'agent_key is required for a two-ended session'}), 400
+
+    session, err = voip_session.start_session(
+        mode, source_label, target_label, remote_host,
+        agent_key=agent_key, pps=pps, packet_bytes=packet_bytes,
+        source_node_ip=source_node_ip)
+    if err:
+        return jsonify({'error': err}), 409
+    return jsonify({'success': True, 'session': session.snapshot()})
+
+
+@app.route('/api/voip/session/stop', methods=['POST'])
+def api_voip_session_stop():
+    sid = voip_session.stop_session()
+    if sid is None:
+        return jsonify({'error': 'no session running'}), 404
+    return jsonify({'success': True, 'session_id': sid})
+
+
+@app.route('/api/voip/session/status')
+def api_voip_session_status():
+    s = voip_session.current_session()
+    if not s:
+        return jsonify({'running': False})
+    return jsonify(s.snapshot())
+
+
+@app.route('/api/voip/session/event', methods=['POST'])
+def api_voip_session_event():
+    s = voip_session.current_session()
+    if not s or s.done:
+        return jsonify({'error': 'no session running'}), 404
+    data = request.get_json(silent=True) or {}
+    tag = (data.get('tag') or '').strip().upper()
+    note = (data.get('note') or '').strip()
+    if not tag:
+        return jsonify({'error': 'tag required'}), 400
+    s.mark_event(tag, note)
+    return jsonify({'success': True})
+
+
+@app.route('/api/voip/session/refresh-routes', methods=['POST'])
+def api_voip_session_refresh_routes():
+    s = voip_session.current_session()
+    if not s or s.done:
+        return jsonify({'error': 'no session running'}), 404
+    s.force_route.set()
+    return jsonify({'success': True})
+
+
+@app.route('/api/voip/sessions')
+def api_voip_sessions():
+    return jsonify({'sessions': database.list_voip_sessions()})
+
+
+@app.route('/api/voip/session/<int:session_id>')
+def api_voip_session_detail(session_id):
+    s = database.get_voip_session(session_id)
+    if not s:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'session': s,
+                    'samples': database.get_voip_samples(session_id),
+                    'events': database.get_voip_events(session_id),
+                    'routes': database.get_voip_routes(session_id)})
 
 
 @app.route('/api/ping/<node_name>', methods=['POST'])

@@ -168,6 +168,20 @@ VOIP_WG_SAFE_MTU = env_int("VOIP_WG_SAFE_MTU", 1400)
 # DF-bit ping payload sizes (descending) for the path-MTU sweep; +28 = IP+ICMP header.
 VOIP_MTU_PROBE_SIZES = [1472, 1450, 1422, 1400, 1372, 1280]
 
+# ---- Two-ended / one-ended streamed sessions (ported from voip_diag) ----
+# Default stream characteristics resemble a 20ms-packtized RTP voice call.
+VOIP_AGENT_PORT = env_int("VOIP_AGENT_PORT", 8765)      # agent HTTP control port
+VOIP_PROBE_UDP_PORT = env_int("VOIP_PROBE_UDP_PORT", 8766)  # UDP stream + echo port
+VOIP_STREAM_PPS = env_int("VOIP_STREAM_PPS", 50)
+VOIP_STREAM_PACKET_BYTES = env_int("VOIP_STREAM_PACKET_BYTES", 172)
+# Route refresh cadence during a session (seconds).
+VOIP_SESSION_ROUTE_INTERVAL = env_int("VOIP_SESSION_ROUTE_INTERVAL", 30)
+# Max session wall-clock length; the UI start button enforces nothing, this is a
+# safety net so a forgotten test doesn't stream forever.
+VOIP_SESSION_MAX_SECONDS = env_int("VOIP_SESSION_MAX_SECONDS", 2 * 3600)
+# Only one streamed session runs at a time (it owns the UDP probe port).
+
+
 
 def is_watched_node(node_name):
     """Return True when this node should get incident-mode attention."""

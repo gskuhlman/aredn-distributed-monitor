@@ -1626,6 +1626,56 @@ body {
 }
 /* ============ End Diagnostics View ============ */
 
+/* ============ VoIP streamed session ============ */
+.voip-session-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.voip-session-form .form-input { width: auto; flex: 0 1 auto; }
+.voip-session-form input#voip-sess-remote { min-width: 200px; }
+.voip-session-form input#voip-sess-pps,
+.voip-session-form input#voip-sess-bytes { width: 70px; }
+.voip-session-metrics {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+.vs-metric {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 4px;
+    padding: 6px 10px;
+    min-width: 90px;
+    display: flex;
+    flex-direction: column;
+}
+.vs-label { font-size: 10px; text-transform: uppercase; opacity: 0.65; letter-spacing: 0.5px; }
+.vs-val { font-size: 15px; font-weight: 600; font-family: 'Consolas', monospace; }
+.voip-session-events {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+.vs-events-label { font-size: 12px; opacity: 0.7; margin-right: 4px; }
+.voip-session-log {
+    background: #1e1e1e;
+    color: #ddd;
+    font-family: 'Consolas', monospace;
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    max-height: 180px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+}
+/* ============ End VoIP streamed session ============ */
+
 /* ============ Incident Report ============ */
 .incident-narrative {
     background: rgba(52, 152, 219, 0.08);

@@ -146,6 +146,67 @@ def end_to_end_quality(a, b, codec):
     }
 
 
+def _segment_rf_enrichment(link):
+    """Flatten per-link RF/LQM fields the voip_diag tool surfaces for hop edges.
+
+    Uses the links row the scanner already persisted: base columns plus the
+    raw LQM tracker dict (rtt/avg_lq/tx_quality/babel_metric/...) when
+    STORE_RAW_TRACKER captured it. Returns None when there's nothing useful.
+    """
+    if not link:
+        return None
+    import json as _json
+    tracker = {}
+    raw = link.get('raw_tracker')
+    if raw:
+        try:
+            tracker = _json.loads(raw) if isinstance(raw, str) else dict(raw)
+        except (ValueError, TypeError):
+            tracker = {}
+
+    def f(key, *alt):
+        for k in (key,) + alt:
+            v = link.get(k)
+            if v is None:
+                v = tracker.get(k)
+            if v is not None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    pass
+        return None
+
+    out = {}
+    snr = f('snr')
+    if snr is None:
+        sig, noise = f('signal'), f('noise')
+        if sig is not None and noise is not None:
+            snr = sig - noise
+    if snr is not None:
+        out['snr_db'] = round(snr, 1)
+    rev = f('rev_snr')
+    if rev is not None:
+        out['rev_snr_db'] = round(rev, 1)
+    # Babel receive quality: tracker avg_lq/lq (percent).
+    rx = f('avg_lq', 'lq')
+    if rx is not None:
+        out['babel_rx_pct'] = round(rx, 1)
+    # LQM tracker RTT is microseconds; expose milliseconds.
+    rtt = f('rtt')
+    if rtt is not None:
+        out['link_rtt_ms'] = round(rtt / 1000.0, 2)
+    txq = f('tx_quality')
+    if txq is not None:
+        out['tx_quality_pct'] = round(txq, 1)
+    qual = f('quality')
+    if qual is not None:
+        out['quality_pct'] = round(qual, 1)
+    metric = f('babel_metric')
+    if metric is not None:
+        out['babel_metric'] = round(metric, 1)
+    return out or None
+
+
 def segment_attribution(a, b):
     """Trace A->B and tag each hop segment wireguard/RF/DTD; pick the worst."""
     a_ip = _addr(a)
@@ -186,12 +247,16 @@ def segment_attribution(a, b):
         delta = None
         if p0.get('ms') is not None and p1.get('ms') is not None:
             delta = round(max(0.0, p1['ms'] - p0['ms']), 1)
-        segments.append({
+        seg = {
             'from': p0['name'], 'to': p1['name'],
             'link_type': link_type, 'bucket': bucket,
             'rtt_delta_ms': delta, 'timeout': bool(p1.get('timeout')),
             'label': f"{p0['name']} → {p1['name']}",
-        })
+        }
+        rf = _segment_rf_enrichment(link)
+        if rf:
+            seg['rf'] = rf
+        segments.append(seg)
 
     # Worst segment: timeouts/loss first (prefer the variable media), else slowest hop.
     bucket_rank = {'rf': 0, 'wireguard': 1, 'wired': 2, 'unknown': 3}

@@ -394,6 +394,41 @@
                             <div id="voip-result"><p class="log-empty">Pick a source and target endpoint, then Run Call Test.</p></div>
                         </div>
                         <div class="diag-section">
+                            <h3>Streamed session <small class="form-hint">continuous two-ended / one-ended voice-like UDP probe with event marking</small></h3>
+                            <div class="voip-session-form">
+                                <select id="voip-sess-mode" class="form-input">
+                                    <option value="full">Two-ended (remote agent)</option>
+                                    <option value="one_ended">One-ended (collector only)</option>
+                                </select>
+                                <input type="text" id="voip-sess-remote" class="form-input" placeholder="remote host (agent PC / target)">
+                                <input type="password" id="voip-sess-key" class="form-input" placeholder="agent key">
+                                <input type="text" id="voip-sess-source" class="form-input" placeholder="source label (e.g. node name)">
+                                <input type="number" id="voip-sess-pps" class="form-input" value="50" min="1" max="200" title="packets/sec">
+                                <input type="number" id="voip-sess-bytes" class="form-input" value="172" min="28" max="1400" title="UDP bytes">
+                                <button id="voip-sess-start" class="btn btn-primary">Start Session</button>
+                                <button id="voip-sess-stop" class="btn btn-secondary" disabled>Stop</button>
+                                <button id="voip-sess-routes" class="btn btn-secondary" disabled>Refresh Routes</button>
+                            </div>
+                            <div class="voip-session-metrics" id="voip-sess-metrics">
+                                <div class="vs-metric"><span class="vs-label">A&#8594;B loss</span><span class="vs-val" id="vs-floss">&#8212;</span></div>
+                                <div class="vs-metric"><span class="vs-label">A&#8594;B jitter</span><span class="vs-val" id="vs-fjit">&#8212;</span></div>
+                                <div class="vs-metric"><span class="vs-label">B&#8594;A loss</span><span class="vs-val" id="vs-rloss">&#8212;</span></div>
+                                <div class="vs-metric"><span class="vs-label">B&#8594;A jitter</span><span class="vs-val" id="vs-rjit">&#8212;</span></div>
+                                <div class="vs-metric"><span class="vs-label">RTT</span><span class="vs-val" id="vs-rtt">&#8212;</span></div>
+                                <div class="vs-metric"><span class="vs-label">Route</span><span class="vs-val" id="vs-route">&#8212;</span></div>
+                                <div class="vs-metric"><span class="vs-label">Diagnosis</span><span class="vs-val" id="vs-diag">&#8212;</span></div>
+                            </div>
+                            <div class="voip-session-events">
+                                <span class="vs-events-label">Mark call condition:</span>
+                                <button class="btn btn-secondary vs-mark" data-tag="GOOD AUDIO">GOOD</button>
+                                <button class="btn btn-secondary vs-mark" data-tag="BAD AUDIO">BAD</button>
+                                <button class="btn btn-secondary vs-mark" data-tag="ONE-WAY AUDIO">ONE-WAY</button>
+                                <button class="btn btn-secondary vs-mark" data-tag="NO AUDIO">NO AUDIO</button>
+                                <input type="text" id="voip-sess-note" class="form-input" placeholder="note (optional)">
+                            </div>
+                            <div class="voip-session-log" id="voip-sess-log"><p class="log-empty">No session running. Start one to stream voice-like probes.</p></div>
+                        </div>
+                        <div class="diag-section">
                             <h3>VOIP Endpoints <small class="form-hint">phones &amp; PBX detected on the mesh</small></h3>
                             <div class="table-scroll-wrapper">
                                 <table class="info-table">
@@ -610,5 +645,6 @@
     <script src="{{ url_for('static', filename='js/nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/diagnostics.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
 </body>
 </html>

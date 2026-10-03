@@ -171,10 +171,22 @@ const VOIPModule = {
 
         let segHtml = '';
         if (seg.status === 'ok' && (seg.segments || []).length) {
+            const rfText = rf => {
+                if (!rf) return '';
+                const parts = [];
+                if (rf.snr_db !== undefined) parts.push(`SNR ${rf.snr_db} dB`);
+                if (rf.rev_snr_db !== undefined) parts.push(`rev ${rf.rev_snr_db} dB`);
+                if (rf.babel_rx_pct !== undefined) parts.push(`RX ${rf.babel_rx_pct}%`);
+                if (rf.tx_quality_pct !== undefined) parts.push(`TXQ ${rf.tx_quality_pct}%`);
+                if (rf.link_rtt_ms !== undefined) parts.push(`RTT ${rf.link_rtt_ms} ms`);
+                if (rf.babel_metric !== undefined) parts.push(`Babel ${rf.babel_metric}`);
+                return parts.join(' · ');
+            };
             const rows = seg.segments.map(s => {
                 const isWorst = seg.worst && s.from === seg.worst.from && s.to === seg.worst.to;
+                const rf = rfText(s.rf);
                 return `<tr${isWorst ? ' style="font-weight:600;background:#fdf2f2"' : ''}>
-                    <td>${this.esc(s.label)}</td>
+                    <td>${this.esc(s.label)}${rf ? `<div class="form-hint">${this.esc(rf)}</div>` : ''}</td>
                     <td>${this.esc(s.bucket)}${s.link_type ? ` (${this.esc(s.link_type)})` : ''}</td>
                     <td>${s.timeout ? '<span class="health-val health-poor">* timeout *</span>' : this.fmt(s.rtt_delta_ms, ' ms')}</td>
                 </tr>`;

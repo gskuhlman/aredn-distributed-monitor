@@ -308,6 +308,55 @@ def init_db():
         # Backfill historic rows: only the known timeout string was scanner-inferred.
         cursor.execute("UPDATE link_state_log SET origin = 'scanner_inferred' WHERE detail = 'link timeout' AND origin = 'node_reported'")
 
+        # ---- Streamed VoIP sessions (ported from voip_diag) ----
+        # Append-only session history (not CouchDB): each Start Test click opens a
+        # session row, samples/routes/events land while it runs, stop fills the
+        # ended_at + report. Interactive diagnostics stay local-only.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS voip_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mode TEXT NOT NULL,
+                source TEXT, target TEXT, remote_host TEXT,
+                pps REAL, packet_bytes INTEGER,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                report TEXT
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS voip_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                fwd_loss REAL, fwd_jitter REAL, fwd_late INTEGER,
+                rev_loss REAL, rev_jitter REAL, rev_late INTEGER,
+                rtt REAL, rtt_jitter REAL, echo_loss REAL,
+                route_asymmetric INTEGER, route_changed INTEGER,
+                severity TEXT, diagnosis TEXT
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_voip_samples_session ON voip_samples(session_id, ts)')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS voip_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                note TEXT
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_voip_events_session ON voip_events(session_id, ts)')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS voip_routes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                hop INTEGER, ip TEXT, name TEXT, rtt_ms REAL, timeout INTEGER
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_voip_routes_session ON voip_routes(session_id, ts, direction, hop)')
+
 
 def delete_node(name):
     """Delete a node and its link/service/history state."""
@@ -2147,6 +2196,107 @@ def get_voip_test(source_node, target_node, codec):
             return data
         except (ValueError, TypeError):
             return None
+
+
+# ---- Streamed VoIP session persistence (ported from voip_diag) ----
+
+
+def save_voip_session_start(mode, source, target, remote_host, pps, packet_bytes):
+    """Open a new streamed session; returns its session id."""
+    import datetime as _dt
+    ts = _dt.datetime.now().astimezone().isoformat(timespec="milliseconds")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO voip_sessions (mode, source, target, remote_host, pps, packet_bytes, started_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (mode, source, target, remote_host, pps, packet_bytes, ts))
+        return cursor.lastrowid
+
+
+def save_voip_session_finish(session_id, ended_at, report):
+    """Close out a session: stamp ended_at and persist the correlation report."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('UPDATE voip_sessions SET ended_at = ?, report = ? WHERE id = ?',
+                       (ended_at, report, session_id))
+
+
+def save_voip_sample(session_id, sample):
+    cols = ["ts", "fwd_loss", "fwd_jitter", "fwd_late",
+            "rev_loss", "rev_jitter", "rev_late",
+            "rtt", "rtt_jitter", "echo_loss",
+            "route_asymmetric", "route_changed", "severity", "diagnosis"]
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"INSERT INTO voip_samples (session_id, {','.join(cols)}) "
+            f"VALUES (?, {','.join('?' for _ in cols)})",
+            [session_id] + [sample.get(c) for c in cols],
+        )
+
+
+def add_voip_event(session_id, tag, note=""):
+    import datetime as _dt
+    ts = _dt.datetime.now().astimezone().isoformat(timespec="milliseconds")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO voip_events (session_id, ts, tag, note) VALUES (?, ?, ?, ?)',
+                       (session_id, ts, tag, note))
+
+
+def save_voip_route(session_id, ts, direction, route, names):
+    rows = []
+    for h in route.get('hops') or []:
+        ip = h.get('ip')
+        rows.append((session_id, ts, direction, h.get('hop'), ip,
+                     names.get(ip, "") if ip else "",
+                     h.get('rtt_ms') if h.get('rtt_ms') is not None else h.get('ms'),
+                     1 if h.get('timeout') else 0))
+    if not rows:
+        return
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.executemany(
+            'INSERT INTO voip_routes (session_id, ts, direction, hop, ip, name, rtt_ms, timeout) '
+            'VALUES (?,?,?,?,?,?,?,?)', rows)
+
+
+def get_voip_samples(session_id):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM voip_samples WHERE session_id = ? ORDER BY ts', (session_id,))
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_voip_events(session_id):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM voip_events WHERE session_id = ? ORDER BY ts', (session_id,))
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_voip_routes(session_id):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM voip_routes WHERE session_id = ? ORDER BY ts, direction, hop',
+                       (session_id,))
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def list_voip_sessions(limit=25):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM voip_sessions ORDER BY id DESC LIMIT ?', (limit,))
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_voip_session(session_id):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM voip_sessions WHERE id = ?', (session_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
 
 def get_service_icon(service_name):

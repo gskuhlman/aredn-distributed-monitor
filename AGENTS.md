@@ -3,8 +3,9 @@
 ## Commands
 
 - **Run the app:** `cd /home/w0gsk/aredn-distributed-monitor && source venv/bin/activate && python app.py`
-- **Validate syntax:** `python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py`
+- **Validate syntax:** `python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py`
 - **Bootstrap CouchDB:** `python couch_client.py` (requires `COUCH_URL` env var)
+- **Run the remote VoIP agent (far end):** `python agent.py [--port 8765] [--udp-port 8766] [--key KEY]` — copy `agent.py` + `voip_proto.py` to the remote PC, stdlib-only. Prints the agent key to enter in the web UI.
 
 ## Architecture
 
@@ -14,6 +15,10 @@
 - `observations.py` — Append-only CouchDB document builders.
 - `couch_client.py` — CouchDB client + bootstrap.
 - `rf_stats.py` — Ping and iPerf tests. Requires `iperf3` binary.
+- `voip.py` — On-demand VOIP call-quality (MOS, segment attribution, capacity, MTU).
+- `voip_proto.py` — Shared VoIP wire protocol (UDP stream/echo, StreamStats/RttStats, LQM merge helpers). **stdlib-only** — also imported by `agent.py`, keep it dependency-free.
+- `voip_session.py` — Streamed two-ended/one-ended session orchestration + correlation report.
+- `agent.py` — Remote VoIP agent for the far end (stdlib-only; run standalone, ship with `voip_proto.py`).
 - `config.py` — Central config with env var overrides.
 
 ## Key Config (env vars override `config.py`)
@@ -23,6 +28,7 @@
 - `COLLECTOR_ID` / `COLLECTOR_SITE` — Identity for distributed observations.
 - `HOST` / `PORT` — Bind address (default `0.0.0.0:5000`).
 - `DEBUG` — Keep `False`; eventlet + werkzeug reloader is unstable.
+- `VOIP_AGENT_PORT` / `VOIP_PROBE_UDP_PORT` — Remote agent ports (default `8765` HTTP control, `8766` UDP probe).
 
 ## Operational Gotchas
 

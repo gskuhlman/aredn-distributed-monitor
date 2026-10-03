@@ -23,7 +23,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now aredn-monitor
 
 # Validate Python syntax
-python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py
+python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py
 
 # Bootstrap CouchDB databases and indexes when COUCH_URL is configured
 python couch_client.py
@@ -41,6 +41,10 @@ There is no full test suite or linting currently configured.
 - `observations.py`: Storage-neutral builders for deterministic append-only observation documents.
 - `couch_client.py`: Small CouchDB client for health checks, database/index bootstrap, Mango `_find`, and `_bulk_docs`.
 - `rf_stats.py`: Ping tests and iPerf throughput benchmarks with queue-based processing.
+- `voip.py`: On-demand VOIP call-quality diagnostics (MOS, segment attribution, capacity, MTU).
+- `voip_proto.py`: Shared wire protocol + helpers for streamed VoIP sessions (stdlib-only; also imported by `agent.py`).
+- `voip_session.py`: Two-ended (remote agent) / one-ended streamed voice-like UDP session orchestration + correlation report.
+- `agent.py`: Standalone remote agent (stdlib-only) run on the far-end PC for two-ended sessions. Ship with `voip_proto.py`.
 - `config.py`: Central configuration and environment-variable overrides.
 
 ### Frontend Components
@@ -109,6 +113,13 @@ Distributed/readiness routes:
 - `GET /api/health`: app health and optional CouchDB connectivity
 - `GET /api/collectors`: known collectors from CouchDB heartbeats when configured, otherwise local runtime fallback
 
+VoIP session routes (streamed two-ended / one-ended probes):
+
+- `POST /api/voip/session/start`, `POST /api/voip/session/stop`
+- `GET /api/voip/session/status` (live metrics snapshot for polling UI)
+- `POST /api/voip/session/event`, `POST /api/voip/session/refresh-routes`
+- `GET /api/voip/sessions`, `GET /api/voip/session/<id>` (history + samples/events/routes)
+
 ## WebSocket Events
 
 Server emits:
@@ -145,6 +156,9 @@ Important settings in `config.py` and environment variables:
 - `COUCH_DB`: Replicated monitoring database.
 - `LOCAL_CONFIG_DB`: Local-only config database.
 - `STORE_RAW_SYSINFO`: Reserved for raw sysinfo retention.
+- `VOIP_AGENT_PORT` / `VOIP_PROBE_UDP_PORT`: remote agent control (8765) and UDP probe (8766) ports.
+- `VOIP_STREAM_PPS` / `VOIP_STREAM_PACKET_BYTES`: streamed-session defaults (50 pps x 172 bytes ≈ 20ms RTP).
+- `VOIP_SESSION_ROUTE_INTERVAL` / `VOIP_SESSION_MAX_SECONDS`: route-refresh cadence and session safety cap.
 
 Settings edited through `/api/settings` persist to SQLite and currently affect legacy scanner behavior.
 
