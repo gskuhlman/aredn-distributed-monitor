@@ -38,6 +38,13 @@
                     <input type="checkbox" id="filter-rf-only">
                     RF only
                 </label>
+                <select id="filter-infra" class="form-input" title="Infrastructure filter">
+                    <option value="all">All Infrastructure</option>
+                    <option value="permanent">Permanent</option>
+                    <option value="event">Event</option>
+                    <option value="permanent-event">Permanent + Event</option>
+                    <option value="untagged">Untagged</option>
+                </select>
                 <label class="header-checkbox">
                     <input type="checkbox" id="scan-selected-only">
                     Only selected nodes
@@ -91,6 +98,13 @@
                                     <option value="all">All Links</option>
                                     <option value="selected">Selected Nodes</option>
                                     <option value="selected-connected">Selected Nodes + Connected</option>
+                                </select>
+                                <select id="rf-infra-filter" class="form-input" title="Infrastructure filter">
+                                    <option value="all">All Infrastructure</option>
+                                    <option value="permanent">Permanent</option>
+                                    <option value="event">Event</option>
+                                    <option value="permanent-event">Permanent + Event</option>
+                                    <option value="untagged">Untagged</option>
                                 </select>
                                 <select id="rf-sort" class="form-input">
                                     <option value="alpha">Sort: Alpha</option>
@@ -171,6 +185,13 @@
                                 <option value="24h">Last 24 Hours</option>
                                 <option value="7d">Last 7 Days</option>
                                 <option value="inactive">Inactive</option>
+                            </select>
+                            <select id="nodes-infra-filter" class="form-input" title="Infrastructure filter">
+                                <option value="all">All Infrastructure</option>
+                                <option value="permanent">Permanent</option>
+                                <option value="event">Event</option>
+                                <option value="permanent-event">Permanent + Event</option>
+                                <option value="untagged">Untagged</option>
                             </select>
                             <select id="nodes-type-filter" class="form-input">
                                 <option value="all">All Link Types</option>
@@ -290,6 +311,13 @@
                                 <option value="7d">Last 7 Days</option>
                                 <option value="inactive">Inactive</option>
                             </select>
+                            <select id="diag-infra-filter" class="form-input" title="Infrastructure filter">
+                                <option value="all">All Infrastructure</option>
+                                <option value="permanent">Permanent</option>
+                                <option value="event">Event</option>
+                                <option value="permanent-event">Permanent + Event</option>
+                                <option value="untagged">Untagged</option>
+                            </select>
                             <select id="diag-type-filter" class="form-input">
                                 <option value="all">All Types</option>
                                 <option value="rf">RF</option>
@@ -371,6 +399,13 @@
                 <div class="nodes-container">
                     <div class="nodes-header">
                         <div class="nodes-header-left">
+                            <select id="voip-infra-filter" class="form-input" title="Infrastructure filter">
+                                <option value="all">All Infrastructure</option>
+                                <option value="permanent">Permanent</option>
+                                <option value="event">Event</option>
+                                <option value="permanent-event">Permanent + Event</option>
+                                <option value="untagged">Untagged</option>
+                            </select>
                             <label class="header-checkbox">From
                                 <select id="voip-source" class="form-input"></select>
                             </label>
@@ -642,6 +677,7 @@
     </div>
 
     <!-- Custom JavaScript -->
+    <script src="{{ url_for('static', filename='js/infra-filter.js') }}"></script>
     <script src="{{ url_for('static', filename='js/network.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rf-stats.js') }}"></script>
     <script src="{{ url_for('static', filename='js/nodes.js') }}"></script>

@@ -20,6 +20,7 @@ const DiagnosticsModule = {
         document.getElementById('diag-hours')?.addEventListener('change', () => this.load());
         document.getElementById('diag-status-filter')?.addEventListener('change', () => this.applyView());
         document.getElementById('diag-type-filter')?.addEventListener('change', () => this.applyView());
+        document.getElementById('diag-infra-filter')?.addEventListener('change', () => this.applyView());
         document.getElementById('diag-sort')?.addEventListener('change', () => this.applyView());
         const search = document.getElementById('diag-node-filter');
         if (search) {
@@ -142,11 +143,16 @@ const DiagnosticsModule = {
         const status = document.getElementById('diag-status-filter')?.value || 'all';
         const typeFilter = document.getElementById('diag-type-filter')?.value || 'all';
         const sortBy = document.getElementById('diag-sort')?.value || 'relevance';
+        const infra = document.getElementById('diag-infra-filter')?.value || 'all';
         const ctx = { selected: this.selectedNodeNames(), selectedConnected: this.selectedConnectedNames() };
+        // Graph nodes cover link-only endpoints missing from nodeMap.
+        const infraLookup = InfraFilter.lookup([...(this.networkData.nodes || []), ...Object.values(this.nodeMap)]);
+        const infraPasses = l => InfraFilter.linkMatches(infraLookup, l.source_node, l.target_node, infra);
 
         const flaps = this.sortRows(
             this.flaps.filter(l =>
                 this.linkPasses(l.source_node, l.target_node, search, status, ctx)
+                && infraPasses(l)
                 && (typeFilter === 'all' || this.linkTypeBucket(l.link_type) === typeFilter)),
             sortBy
         );
@@ -155,6 +161,7 @@ const DiagnosticsModule = {
         const asym = this.sortRows(
             this.asym.filter(l =>
                 this.linkPasses(l.source_node, l.target_node, search, status, ctx)
+                && infraPasses(l)
                 && (typeFilter === 'all' || typeFilter === 'rf')),
             sortBy
         );

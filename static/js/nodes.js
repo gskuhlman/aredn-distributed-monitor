@@ -32,6 +32,7 @@ const NodesModule = {
         if (statusFilter) {
             statusFilter.addEventListener('change', () => this.filterNodes());
         }
+        document.getElementById('nodes-infra-filter')?.addEventListener('change', () => this.filterNodes());
         if (typeFilter) {
             typeFilter.addEventListener('change', () => this.filterNodes());
         }
@@ -173,6 +174,7 @@ const NodesModule = {
         const status = document.getElementById('nodes-status-filter')?.value || 'all';
         const typeFilter = document.getElementById('nodes-type-filter')?.value || 'all';
         const sortBy = document.getElementById('nodes-sort')?.value || 'alpha';
+        const infra = document.getElementById('nodes-infra-filter')?.value || 'all';
 
         const now = Date.now();
         const ms24h = 24 * 60 * 60 * 1000;
@@ -226,7 +228,9 @@ const NodesModule = {
 
             const matchesType = !typeNames || typeNames.has(node.name);
 
-            return matchesSearch && matchesStatus && matchesType;
+            const matchesInfra = InfraFilter.matchesNode(node, infra);
+
+            return matchesSearch && matchesStatus && matchesType && matchesInfra;
         });
 
         // Sort

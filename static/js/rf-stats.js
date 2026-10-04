@@ -238,6 +238,7 @@ const RFStats = {
         if (statusFilter) {
             statusFilter.addEventListener('change', () => this.filterLinks());
         }
+        document.getElementById('rf-infra-filter')?.addEventListener('change', () => this.filterLinks());
         if (sortSelect) {
             sortSelect.addEventListener('change', () => this.filterLinks());
         }
@@ -297,6 +298,8 @@ const RFStats = {
         const search = (document.getElementById('rf-search')?.value || '').toLowerCase();
         const status = document.getElementById('rf-status-filter')?.value || 'all';
         const sortBy = document.getElementById('rf-sort')?.value || 'alpha';
+        const infra = document.getElementById('rf-infra-filter')?.value || 'all';
+        const infraLookup = InfraFilter.lookup(this.networkData.nodes);
 
         const selectedNames = status === 'selected' ? this.getSelectedNodeNames() : null;
         const selectedConnectedNames = status === 'selected-connected' ? this.getSelectedConnectedNodeNames() : null;
@@ -314,7 +317,9 @@ const RFStats = {
                 matchesStatus = selectedConnectedNames.has(link.source_node) || selectedConnectedNames.has(link.target_node);
             }
 
-            return matchesSearch && matchesStatus;
+            const matchesInfra = InfraFilter.linkMatches(infraLookup, link.source_node, link.target_node, infra);
+
+            return matchesSearch && matchesStatus && matchesInfra;
         });
 
         this.filteredLinks.sort((a, b) => {
