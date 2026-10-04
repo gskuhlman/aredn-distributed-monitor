@@ -31,7 +31,8 @@ let serverPositions = {};
 function getGraphFilters() {
     return {
         rfOnly: document.getElementById('filter-rf-only')?.checked || false,
-        selectedOnly: document.getElementById('scan-selected-only')?.checked || false
+        selectedOnly: document.getElementById('scan-selected-only')?.checked || false,
+        infra: document.getElementById('filter-infra')?.value || 'all'
     };
 }
 
@@ -48,6 +49,12 @@ function filterNetworkData(data) {
         const selectedIds = new Set(nodes.filter(node => node.is_selected).map(node => node.id));
         nodes = nodes.filter(node => selectedIds.has(node.id));
         edges = edges.filter(edge => selectedIds.has(edge.from) && selectedIds.has(edge.to));
+    }
+
+    if (filters.infra !== 'all') {
+        const infraIds = new Set(nodes.filter(node => InfraFilter.matchesNode(node, filters.infra)).map(node => node.id));
+        nodes = nodes.filter(node => infraIds.has(node.id));
+        edges = edges.filter(edge => infraIds.has(edge.from) && infraIds.has(edge.to));
     }
 
     if (filters.rfOnly) {
@@ -415,6 +422,14 @@ function renderLinkOnlyNodeDetails(node) {
                 <input type="checkbox" id="panel-node-selected" ${node.is_selected ? 'checked' : ''}>
                 Include in selected nodes
             </label>
+            <label class="checkbox-label node-selected-control">
+                <input type="checkbox" id="panel-node-permanent" ${node.is_permanent ? 'checked' : ''}>
+                Permanent infrastructure
+            </label>
+            <label class="checkbox-label node-selected-control">
+                <input type="checkbox" id="panel-node-event" ${node.is_event ? 'checked' : ''}>
+                Event infrastructure
+            </label>
             <p class="node-warning">
                 ${node.lqm_status_message || 'LQM-only neighbor'}
             </p>
@@ -461,6 +476,14 @@ function renderNodeDetails(data) {
             <label class="checkbox-label node-selected-control">
                 <input type="checkbox" id="panel-node-selected" ${node.is_selected ? 'checked' : ''}>
                 Include in selected nodes
+            </label>
+            <label class="checkbox-label node-selected-control">
+                <input type="checkbox" id="panel-node-permanent" ${node.is_permanent ? 'checked' : ''}>
+                Permanent infrastructure
+            </label>
+            <label class="checkbox-label node-selected-control">
+                <input type="checkbox" id="panel-node-event" ${node.is_event ? 'checked' : ''}>
+                Event infrastructure
             </label>
             <div class="node-panel-actions">
                 <a class="btn btn-secondary" href="/nodes/${encodeURIComponent(node.name)}">Full Node Info</a>
@@ -571,6 +594,41 @@ function bindPanelSelectedToggle(nodeName) {
     const toggle = document.getElementById('panel-node-selected');
     if (!toggle) return;
     toggle.addEventListener('change', () => setNodeSelected(nodeName, toggle.checked, toggle));
+
+    for (const tag of ['permanent', 'event']) {
+        const tagToggle = document.getElementById(`panel-node-${tag}`);
+        if (tagToggle) {
+            tagToggle.addEventListener('change', () => setNodeTag(nodeName, tag, tagToggle.checked, tagToggle));
+        }
+    }
+}
+
+async function setNodeTag(nodeName, tag, enabled, toggle = null) {
+    if (toggle) toggle.disabled = true;
+    try {
+        const response = await fetch(`/api/nodes/tags/${encodeURIComponent(nodeName)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tag, enabled })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Failed to update node');
+
+        fullNetworkData.nodes = (fullNetworkData.nodes || []).map(node =>
+            node.id === nodeName
+                ? { ...node, is_permanent: result.is_permanent, is_event: result.is_event }
+                : node
+        );
+        renderCurrentNetwork({ notifyChanges: false });
+        const label = tag === 'permanent' ? 'Permanent' : 'Event';
+        showToast('success', enabled ? `Tagged ${label}` : `${label} Tag Removed`, nodeName);
+    } catch (error) {
+        console.error('Error updating node tag:', error);
+        if (toggle) toggle.checked = !enabled;
+        showToast('error', 'Tag Update Failed', error.message);
+    } finally {
+        if (toggle) toggle.disabled = false;
+    }
 }
 
 async function setNodeSelected(nodeName, selected, toggle = null) {
@@ -908,6 +966,11 @@ function handlePingResult(data) {
  */
 function updateNetwork(data, options = {}) {
     if (!data || !data.nodes || !data.edges) return;
+    if (!nodesDataset) {
+        // Graph library failed to load; keep the counts accurate anyway
+        updateStats(data.nodes.length, data.edges.length);
+        return;
+    }
     const notifyChanges = options.notifyChanges !== false;
 
     const currentNodeIds = nodesDataset.getIds();
@@ -1557,7 +1620,7 @@ function clearDisplayedLog() {
     // Remove all dropped nodes from the network visualization
     for (const [nodeId, data] of droppedNodes.entries()) {
         console.log(`Clearing dropped node from display: ${nodeId}`);
-        nodesDataset.remove(nodeId);
+        if (nodesDataset) nodesDataset.remove(nodeId);
     }
     droppedNodes.clear();
 
@@ -1581,6 +1644,10 @@ function initEventListeners() {
     document.getElementById('settings-btn').addEventListener('click', toggleSettings);
 
     document.getElementById('filter-rf-only').addEventListener('change', () => {
+        renderCurrentNetwork({ notifyChanges: false });
+    });
+
+    document.getElementById('filter-infra').addEventListener('change', () => {
         renderCurrentNetwork({ notifyChanges: false });
     });
 
@@ -1674,6 +1741,8 @@ async function resetNodePositions() {
         console.error('Error clearing saved node layout:', error);
     }
 
+    if (!network) return;
+
     // Clear fixed positions from all nodes
     nodesDataset.forEach(node => {
         nodesDataset.update({
@@ -1730,11 +1799,26 @@ async function loadInitialData() {
 /**
  * Main initialization
  */
+/**
+ * Run one startup step so a failure (e.g. a library that did not load)
+ * is reported on screen instead of silently aborting the remaining steps.
+ */
+function runStartupStep(label, step) {
+    try {
+        step();
+    } catch (error) {
+        console.error(`Startup step failed: ${label}`, error);
+        showToast('error', `${label} failed to start`,
+            escapeHtml(error && error.message ? error.message : String(error)) +
+            '<br>Other features should still work. Try a hard refresh (Ctrl+F5).', 0);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Initializing AREDN Network Monitor');
 
-    initNetwork();
-    initSocket();
-    initEventListeners();
-    loadInitialData();
+    runStartupStep('Network graph', initNetwork);
+    runStartupStep('Live updates', initSocket);
+    runStartupStep('Page controls', initEventListeners);
+    runStartupStep('Initial data load', loadInitialData);
 });

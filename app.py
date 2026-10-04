@@ -3,6 +3,13 @@ AREDN Network Monitor - Flask Application
 Main entry point for the web application
 """
 
+# Use the OS resolver instead of eventlet's greendns. greendns reads DNS
+# servers from every adapter (including disconnected ones on Windows) and
+# times out before reaching the mesh node's DNS, so localnode.local.mesh
+# fails to resolve. Must be set before eventlet is imported.
+import os
+os.environ.setdefault('EVENTLET_NO_GREENDNS', 'yes')
+
 # Monkey-patch standard library for eventlet compatibility
 # MUST be done before any other imports that use threading
 import eventlet
@@ -464,6 +471,31 @@ def api_set_selected_node(name):
         'is_selected': is_selected,
         'selected_nodes': database.get_selected_node_names()
     })
+
+
+@app.route('/api/nodes/tags')
+def api_get_node_tags():
+    """Get node names for each infrastructure tag (permanent / event)."""
+    return jsonify(database.get_tagged_node_names())
+
+
+@app.route('/api/nodes/tags/<name>', methods=['POST'])
+def api_set_node_tag(name):
+    """Add or remove an infrastructure tag: {"tag": "permanent"|"event", "enabled": bool}."""
+    node_name = name.lower()
+    node = database.get_observed_node(node_name)
+    if not node:
+        return jsonify({'error': 'Node not found'}), 404
+
+    data = request.get_json(silent=True) or {}
+    tag = data.get('tag')
+    if tag not in database.NODE_TAGS:
+        return jsonify({'error': f"tag must be one of {', '.join(database.NODE_TAGS)}"}), 400
+
+    flags = database.set_node_tag(node_name, tag, bool(data.get('enabled')))
+    network_data = database.get_network_graph_data()
+    socketio.emit('network_update', network_data)
+    return jsonify({'success': True, 'node': node_name, **flags})
 
 
 @app.route('/api/node-positions', methods=['GET'])

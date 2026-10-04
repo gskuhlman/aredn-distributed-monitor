@@ -238,6 +238,7 @@ const RFStats = {
         if (statusFilter) {
             statusFilter.addEventListener('change', () => this.filterLinks());
         }
+        document.getElementById('rf-infra-filter')?.addEventListener('change', () => this.filterLinks());
         if (sortSelect) {
             sortSelect.addEventListener('change', () => this.filterLinks());
         }
@@ -297,6 +298,8 @@ const RFStats = {
         const search = (document.getElementById('rf-search')?.value || '').toLowerCase();
         const status = document.getElementById('rf-status-filter')?.value || 'all';
         const sortBy = document.getElementById('rf-sort')?.value || 'alpha';
+        const infra = document.getElementById('rf-infra-filter')?.value || 'all';
+        const infraLookup = InfraFilter.lookup(this.networkData.nodes);
 
         const selectedNames = status === 'selected' ? this.getSelectedNodeNames() : null;
         const selectedConnectedNames = status === 'selected-connected' ? this.getSelectedConnectedNodeNames() : null;
@@ -314,7 +317,9 @@ const RFStats = {
                 matchesStatus = selectedConnectedNames.has(link.source_node) || selectedConnectedNames.has(link.target_node);
             }
 
-            return matchesSearch && matchesStatus;
+            const matchesInfra = InfraFilter.linkMatches(infraLookup, link.source_node, link.target_node, infra);
+
+            return matchesSearch && matchesStatus && matchesInfra;
         });
 
         this.filteredLinks.sort((a, b) => {
@@ -323,9 +328,14 @@ const RFStats = {
                 const bKey = `${b.source_node || ''}-${b.target_node || ''}`;
                 return aKey.localeCompare(bKey);
             } else if (sortBy === 'last-seen') {
-                const aTime = a.last_seen ? new Date(a.last_seen).getTime() : 0;
-                const bTime = b.last_seen ? new Date(b.last_seen).getTime() : 0;
-                return bTime - aTime;
+                // Most recent first; links seen in the same scan share a
+                // timestamp, so fall back to alpha for a stable order
+                const aTime = a.last_seen ? new Date(a.last_seen).getTime() || 0 : 0;
+                const bTime = b.last_seen ? new Date(b.last_seen).getTime() || 0 : 0;
+                if (bTime !== aTime) return bTime - aTime;
+                const aKey = `${a.source_node || ''}-${a.target_node || ''}`;
+                const bKey = `${b.source_node || ''}-${b.target_node || ''}`;
+                return aKey.localeCompare(bKey);
             } else if (sortBy === 'quality') {
                 return (a.quality || 0) - (b.quality || 0);
             } else if (sortBy === 'snr') {
@@ -356,7 +366,7 @@ const RFStats = {
         if (!tbody) return;
 
         if (links.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6">No RF links found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7">No RF links found</td></tr>';
             return;
         }
 
@@ -384,6 +394,7 @@ const RFStats = {
                     <td><strong>${link.source_node}</strong> &harr; <strong>${link.target_node}</strong></td>
                     <td class="${qualityClass}">${link.quality || 0}%</td>
                     <td>${link.snr || 'N/A'}</td>
+                    <td title="${link.last_seen || ''}">${link.last_seen ? this.formatRelTime(link.last_seen) : '--'}</td>
                     <td>${pingDisplay}${pingTime ? ` <small class="rf-last-time">(${pingTime})</small>` : ''}</td>
                     <td>${throughputDisplay}${throughputTime ? ` <small class="rf-last-time">(${throughputTime})</small>` : ''}</td>
                     <td>
