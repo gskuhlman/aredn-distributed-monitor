@@ -5,15 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AREDN Network Monitor</title>
 
+    <!-- Third-party libraries are vendored (pinned) so the UI works without internet access -->
     <!-- vis.js for network visualization -->
-    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <script src="{{ url_for('static', filename='vendor/vis-network-10.1.2.min.js') }}"></script>
 
     <!-- Socket.IO for real-time updates -->
-    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='vendor/socket.io-4.6.0.min.js') }}"></script>
 
     <!-- Chart.js for RF stats graphs -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <script src="{{ url_for('static', filename='vendor/chart-4.5.1.umd.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/chartjs-adapter-date-fns-3.0.0.bundle.min.js') }}"></script>
 
     <!-- Custom styles -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">

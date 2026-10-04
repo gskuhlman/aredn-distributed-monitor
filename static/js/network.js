@@ -908,6 +908,11 @@ function handlePingResult(data) {
  */
 function updateNetwork(data, options = {}) {
     if (!data || !data.nodes || !data.edges) return;
+    if (!nodesDataset) {
+        // Graph library failed to load; keep the counts accurate anyway
+        updateStats(data.nodes.length, data.edges.length);
+        return;
+    }
     const notifyChanges = options.notifyChanges !== false;
 
     const currentNodeIds = nodesDataset.getIds();
@@ -1557,7 +1562,7 @@ function clearDisplayedLog() {
     // Remove all dropped nodes from the network visualization
     for (const [nodeId, data] of droppedNodes.entries()) {
         console.log(`Clearing dropped node from display: ${nodeId}`);
-        nodesDataset.remove(nodeId);
+        if (nodesDataset) nodesDataset.remove(nodeId);
     }
     droppedNodes.clear();
 
@@ -1674,6 +1679,8 @@ async function resetNodePositions() {
         console.error('Error clearing saved node layout:', error);
     }
 
+    if (!network) return;
+
     // Clear fixed positions from all nodes
     nodesDataset.forEach(node => {
         nodesDataset.update({
@@ -1730,11 +1737,26 @@ async function loadInitialData() {
 /**
  * Main initialization
  */
+/**
+ * Run one startup step so a failure (e.g. a library that did not load)
+ * is reported on screen instead of silently aborting the remaining steps.
+ */
+function runStartupStep(label, step) {
+    try {
+        step();
+    } catch (error) {
+        console.error(`Startup step failed: ${label}`, error);
+        showToast('error', `${label} failed to start`,
+            escapeHtml(error && error.message ? error.message : String(error)) +
+            '<br>Other features should still work. Try a hard refresh (Ctrl+F5).', 0);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Initializing AREDN Network Monitor');
 
-    initNetwork();
-    initSocket();
-    initEventListeners();
-    loadInitialData();
+    runStartupStep('Network graph', initNetwork);
+    runStartupStep('Live updates', initSocket);
+    runStartupStep('Page controls', initEventListeners);
+    runStartupStep('Initial data load', loadInitialData);
 });
