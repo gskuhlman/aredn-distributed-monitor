@@ -449,13 +449,18 @@ def process_links(data, source_node):
         # This ensures we discover all nodes even if connected only via tunnels.
         # Fall back to the tracker 'ip' field when canonical_ip is null —
         # Babel firmware leaves canonical_ip empty for OLSR DTD neighbors but
-        # populates 'ip' from its own discovery.
+        # populates 'ip' from its own discovery. Some firmware reports no IP
+        # at all for Wireguard tunnel neighbors, so fall back to the mesh DNS
+        # name; otherwise a seed whose only neighbors are tunnels stops BFS.
         discover_ip = canonical_ip or tracker.get('ip')
-        if tracker.get('routable') and discover_ip:
+        discover_host = discover_ip or (
+            f"{tracker_hostname}.local.mesh" if tracker_hostname else None
+        )
+        if tracker.get('routable') and discover_host:
             discovered_nodes.append({
                 'hostname': hostname,
                 'ip': discover_ip,
-                'url': build_sysinfo_url(discover_ip)
+                'url': build_sysinfo_url(discover_host)
             })
 
     missing_links = database.get_missing_source_links(source_node, current_targets)
