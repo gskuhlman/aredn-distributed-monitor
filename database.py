@@ -124,6 +124,18 @@ def init_db():
             )
         ''')
 
+        # Scan boundaries: operator-chosen nodes that limit BFS discovery so a
+        # local event isn't polluted by remote meshes. mode is 'exclude' (never
+        # poll this node, so nothing beyond it is reached through it) or 'stop'
+        # (poll it, but don't traverse past it -- like a supernode).
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS scan_boundaries (
+                node_name TEXT PRIMARY KEY,
+                mode TEXT NOT NULL DEFAULT 'exclude',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # Saved graph layout (node positions from the vis.js network map)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS node_positions (
@@ -546,10 +558,12 @@ def get_observed_node(name):
         node['is_link_only'] = False
         node['observed_status'] = 'active' if node.get('is_active') == 1 else 'inactive'
         node['is_selected'] = is_node_selected(name)
+        node['scan_boundary'] = get_scan_boundaries().get(name)
         return node
     link_only = build_link_only_node(name)
     if link_only:
         link_only['is_selected'] = is_node_selected(name)
+        link_only['scan_boundary'] = get_scan_boundaries().get(name)
     return link_only
 
 
@@ -557,6 +571,7 @@ def get_all_observed_nodes():
     """Get all polled nodes plus link-only endpoint names ever seen in links."""
     nodes = get_all_nodes()
     node_names = {node['name'] for node in nodes}
+    boundaries = get_scan_boundaries()
     observed = []
 
     for node in nodes:
@@ -564,6 +579,7 @@ def get_all_observed_nodes():
         item['is_link_only'] = False
         item['observed_status'] = 'active' if item.get('is_active') == 1 else 'inactive'
         item['is_selected'] = is_node_selected(item['name'])
+        item['scan_boundary'] = boundaries.get(item['name'])
         item['links_count'] = len(get_node_all_links(item['name']))
         item['active_links_count'] = len(get_node_links(item['name']))
         item['services_list'] = get_node_services(item['name'])
@@ -585,6 +601,7 @@ def get_all_observed_nodes():
         link_only = build_link_only_node(name)
         if link_only:
             link_only['is_selected'] = is_node_selected(name)
+            link_only['scan_boundary'] = boundaries.get(name)
             observed.append(link_only)
 
     return sorted(observed, key=lambda item: item.get('name') or '')
@@ -1094,6 +1111,37 @@ def set_node_selected(name, selected):
         else:
             cursor.execute('DELETE FROM selected_nodes WHERE node_name = ?', (node_name,))
     return is_node_selected(node_name)
+
+
+SCAN_BOUNDARY_MODES = ('exclude', 'stop')
+
+
+def get_scan_boundaries():
+    """Return {node_name: mode} for every configured scan boundary."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT node_name, mode FROM scan_boundaries ORDER BY node_name')
+        return {row['node_name']: row['mode'] for row in cursor.fetchall()}
+
+
+def set_scan_boundary(name, mode):
+    """Set a node's scan boundary mode, or clear it when mode is falsy."""
+    node_name = (name or '').strip().lower()
+    if not node_name:
+        raise ValueError('node name is required')
+    if mode and mode not in SCAN_BOUNDARY_MODES:
+        raise ValueError(f'mode must be one of {SCAN_BOUNDARY_MODES}')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if mode:
+            cursor.execute('''
+                INSERT INTO scan_boundaries (node_name, mode, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(node_name) DO UPDATE SET mode = excluded.mode
+            ''', (node_name, mode, local_timestamp()))
+        else:
+            cursor.execute('DELETE FROM scan_boundaries WHERE node_name = ?', (node_name,))
+    return get_scan_boundaries().get(node_name)
 
 
 # ============ Node Layout Operations ============
@@ -2006,6 +2054,116 @@ def get_link_asymmetry_report(min_delta=3.0):
     return report
 
 
+# ============ Mesh Health Check aggregates ============
+
+def get_link_ping_aggregates(hours=24):
+    """Per directional link ping summary over a window (mesh health check)."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT source_node, target_node,
+                   COUNT(*) AS samples,
+                   AVG(ping_avg) AS latency_avg,
+                   MAX(ping_max) AS latency_max,
+                   AVG(ping_loss) AS loss_avg,
+                   MAX(ping_loss) AS loss_max,
+                   SUM(CASE WHEN ping_loss >= 100 THEN 1 ELSE 0 END) AS total_loss_samples,
+                   AVG(jitter) AS jitter_avg,
+                   MAX(timestamp) AS last_sample
+            FROM link_history
+            WHERE timestamp > ? AND (ping_avg IS NOT NULL OR ping_loss IS NOT NULL)
+            GROUP BY source_node, target_node
+        ''', (cutoff,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_link_snr_spread(hours=24):
+    """Per directional RF link SNR/quality min/max/avg over a window."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT source_node, target_node,
+                   COUNT(*) AS samples,
+                   MIN(CAST(snr AS REAL)) AS snr_min,
+                   MAX(CAST(snr AS REAL)) AS snr_max,
+                   AVG(CAST(snr AS REAL)) AS snr_avg,
+                   MIN(quality) AS quality_min,
+                   AVG(quality) AS quality_avg
+            FROM link_history
+            WHERE timestamp > ? AND snr IS NOT NULL AND snr != ''
+            GROUP BY source_node, target_node
+        ''', (cutoff,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_node_health_aggregates(hours=24):
+    """Per-node poll reliability summary over a window (mesh health check)."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT node_name,
+                   COUNT(*) AS samples,
+                   SUM(CASE WHEN reachable = 0 THEN 1 ELSE 0 END) AS unreachable,
+                   SUM(CASE WHEN degraded = 1 THEN 1 ELSE 0 END) AS degraded,
+                   AVG(response_ms) AS response_ms_avg,
+                   MAX(load1) AS load1_max
+            FROM node_health_history
+            WHERE timestamp > ? AND probe_via IS NULL
+            GROUP BY node_name
+        ''', (cutoff,))
+        return {row['node_name']: dict(row) for row in cursor.fetchall()}
+
+
+def get_event_counts(event_type, hours=24):
+    """Count events of one type per node over a window."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT node_name, COUNT(*) AS n FROM events
+            WHERE event_type = ? AND timestamp > ? AND node_name IS NOT NULL
+            GROUP BY node_name
+        ''', (event_type, cutoff))
+        return {row['node_name']: row['n'] for row in cursor.fetchall()}
+
+
+def get_recent_voip_tests(hours=24):
+    """On-demand VOIP call tests run within the window."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT source_node, target_node, codec, ran_at, mos, mos_label,
+                   latency_ms, jitter_ms, loss_pct, worst_segment, mtu_warning
+            FROM voip_test_results WHERE ran_at > ?
+            ORDER BY mos ASC
+        ''', (cutoff,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_recent_voip_session_quality(hours=24):
+    """Per streamed VoIP session: sample count by severity within the window."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT s.id, s.mode, s.source, s.target, s.remote_host, s.started_at,
+                   COUNT(v.id) AS samples,
+                   SUM(CASE WHEN v.severity = 'BAD' THEN 1 ELSE 0 END) AS bad,
+                   SUM(CASE WHEN v.severity = 'WARN' THEN 1 ELSE 0 END) AS warn,
+                   SUM(CASE WHEN v.route_changed = 1 THEN 1 ELSE 0 END) AS route_changes,
+                   MAX(v.fwd_loss) AS fwd_loss_max, MAX(v.rev_loss) AS rev_loss_max
+            FROM voip_sessions s
+            JOIN voip_samples v ON v.session_id = s.id
+            WHERE s.started_at > ?
+            GROUP BY s.id
+        ''', (cutoff,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
 # ============ Utility Functions ============
 
 def get_link_color(link):
@@ -2326,11 +2484,15 @@ def get_network_graph_data():
     all_nodes = get_all_nodes()
     links = get_active_links()
     selected_node_names = set(get_selected_node_names())
+    scan_boundaries = get_scan_boundaries()
 
     # Create sets for quick lookup
     all_node_names = {n['name'] for n in all_nodes}
     active_node_names = {n['name'] for n in active_nodes}
-    supernode_names = {n['name'] for n in active_nodes if n.get('is_supernode')}
+    # Scan-boundary nodes act like supernodes here: their far-side neighbors
+    # are outside the scan scope and shouldn't be drawn as inactive nodes.
+    supernode_names = {n['name'] for n in active_nodes
+                       if n.get('is_supernode') or n['name'] in scan_boundaries}
     active_non_supernode_names = active_node_names - supernode_names
 
     # Find inactive nodes that are DIRECTLY connected to active NON-SUPERNODE nodes
@@ -2413,6 +2575,7 @@ def get_network_graph_data():
             'is_inactive': False,
             'is_link_only': True,
             'is_selected': node_name in selected_node_names,
+            'scan_boundary': scan_boundaries.get(node_name),
             'reported_links': reported_links
         })
 
@@ -2498,6 +2661,7 @@ def get_network_graph_data():
             'rf_frequency': rf_freq,
             'is_supernode': supernode,
             'is_selected': node_name in selected_node_names,
+            'scan_boundary': scan_boundaries.get(node_name),
             'is_inactive': node.get('is_inactive', False),
             'is_link_only': link_only,
             'reach_status': reach_status,

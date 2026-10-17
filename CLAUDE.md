@@ -23,7 +23,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now aredn-monitor
 
 # Validate Python syntax
-python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py
+python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py
 
 # Bootstrap CouchDB databases and indexes when COUCH_URL is configured
 python couch_client.py
@@ -45,6 +45,7 @@ There is no full test suite or linting currently configured.
 - `voip_proto.py`: Shared wire protocol + helpers for streamed VoIP sessions (stdlib-only; also imported by `agent.py`).
 - `voip_session.py`: Two-ended (remote agent) / one-ended streamed voice-like UDP session orchestration + correlation report.
 - `agent.py`: Standalone remote agent (stdlib-only) run on the far-end PC for two-ended sessions. Ship with `voip_proto.py`.
+- `mesh_diagnostics.py`: Network-wide Mesh Health Check (near-far/overpowering radios, SNR and TX/RX imbalance, one-way links, loss, VoIP MOS, flapping, noise, congestion, node health, hidden nodes, single points of failure). Read-only over SQLite; scoped by scan boundaries.
 - `config.py`: Central configuration and environment-variable overrides.
 
 ### Frontend Components
@@ -107,6 +108,11 @@ Existing dashboard routes:
 - `GET /api/status`
 - `GET /api/events`
 - `GET/POST /api/rf-stats/*`
+
+Mesh health and scan-boundary routes:
+
+- `GET /api/reports/mesh-health?hours=N`: findings report for the in-scope mesh
+- `GET /api/scan-boundaries`, `POST /api/scan-boundaries/<name>` `{mode: 'exclude'|'stop'|null}`: limit BFS discovery. `exclude` = never poll the node (nothing reachable only through it is scanned); `stop` = poll it but don't traverse past it (like a supernode). The seed is always scanned. Boundaries live in the local SQLite `scan_boundaries` table, not CouchDB.
 
 Distributed/readiness routes:
 

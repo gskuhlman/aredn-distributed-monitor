@@ -22,6 +22,7 @@ import database
 import scanner
 import rf_stats
 import link_health
+import mesh_diagnostics
 import incident_report
 import troubleshoot
 import voip
@@ -785,6 +786,46 @@ def api_report_asymmetry():
     """Links whose two directions disagree on signal (asymmetry report)."""
     min_delta = request.args.get('min_delta', 3.0, type=float)
     return jsonify({'min_delta': min_delta, 'links': database.get_link_asymmetry_report(min_delta=min_delta)})
+
+
+@app.route('/api/reports/mesh-health')
+def api_report_mesh_health():
+    """Network-wide health check: near-far, SNR/rate imbalance, loss, VoIP, etc.
+
+    Scoped to nodes reachable from the scan seed without crossing a scan boundary.
+    """
+    hours = request.args.get('hours', 24, type=int)
+    try:
+        return jsonify(mesh_diagnostics.run_health_check(hours=hours))
+    except Exception as e:
+        logger.exception("Mesh health check failed")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============ Scan Boundaries ============
+
+@app.route('/api/scan-boundaries')
+def api_get_scan_boundaries():
+    """Nodes that stop or exclude BFS discovery (keeps remote meshes out)."""
+    return jsonify({'boundaries': database.get_scan_boundaries()})
+
+
+@app.route('/api/scan-boundaries/<name>', methods=['POST'])
+def api_set_scan_boundary(name):
+    """Set a node's boundary mode: 'exclude', 'stop', or null/'' to clear."""
+    data = request.get_json(silent=True) or {}
+    mode = data.get('mode') or None
+    try:
+        result = database.set_scan_boundary(name, mode)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    logger.info(f"Scan boundary for {name.lower()} set to {result}")
+    return jsonify({
+        'success': True,
+        'node': name.lower(),
+        'mode': result,
+        'boundaries': database.get_scan_boundaries()
+    })
 
 
 @app.route('/api/reports/link-state/<source>/<target>')

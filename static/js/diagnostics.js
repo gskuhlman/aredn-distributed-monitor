@@ -10,6 +10,7 @@ const DiagnosticsModule = {
     initialized: false,
     flaps: [],
     asym: [],
+    health: null,
     nodeMap: {},
     networkData: { nodes: [], edges: [] },
 
@@ -21,6 +22,9 @@ const DiagnosticsModule = {
         document.getElementById('diag-status-filter')?.addEventListener('change', () => this.applyView());
         document.getElementById('diag-type-filter')?.addEventListener('change', () => this.applyView());
         document.getElementById('diag-sort')?.addEventListener('change', () => this.applyView());
+        document.getElementById('mh-run')?.addEventListener('click', () => this.loadHealth());
+        document.getElementById('mh-severity')?.addEventListener('change', () => this.applyView());
+        document.getElementById('mh-category')?.addEventListener('change', () => this.applyView());
         const search = document.getElementById('diag-node-filter');
         if (search) {
             search.addEventListener('input', () => this.applyView());
@@ -52,6 +56,111 @@ const DiagnosticsModule = {
             this.setStatus('Failed to load');
             console.error('Diagnostics load error:', error);
         }
+        await this.loadHealth();
+    },
+
+    async loadHealth() {
+        const hours = document.getElementById('diag-hours')?.value || 24;
+        const btn = document.getElementById('mh-run');
+        const container = document.getElementById('mh-findings');
+        if (btn) btn.disabled = true;
+        try {
+            const resp = await fetch(`/api/reports/mesh-health?hours=${encodeURIComponent(hours)}`);
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+            this.health = data;
+            this.populateCategories(data.categories || {});
+            this.applyView();
+        } catch (error) {
+            console.error('Mesh health check error:', error);
+            if (container) container.innerHTML = `<p class="log-empty">Health check failed: ${this.esc(error.message)}</p>`;
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    },
+
+    populateCategories(categories) {
+        const select = document.getElementById('mh-category');
+        if (!select || select.options.length > 1) return;
+        for (const [key, label] of Object.entries(categories)) {
+            const opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = label;
+            select.appendChild(opt);
+        }
+    },
+
+    renderHealth(search, status, ctx) {
+        const container = document.getElementById('mh-findings');
+        const summary = document.getElementById('mh-summary');
+        const scopeEl = document.getElementById('mh-scope');
+        if (!container || !this.health) return;
+        const h = this.health;
+
+        const scope = h.scope || {};
+        const boundaryNames = Object.keys(scope.boundaries || {});
+        if (scopeEl) {
+            scopeEl.textContent = `Seed ${scope.seed || 'unknown'} · ${scope.nodes_in_scope || 0} nodes in scope`
+                + (boundaryNames.length ? ` · ${boundaryNames.length} boundary node(s)` : '')
+                + ((scope.out_of_scope_active || []).length ? ` · ${scope.out_of_scope_active.length} active node(s) outside scope ignored` : '')
+                + ` · ${h.hours}h window · ${h.generated_at}`;
+        }
+
+        const sevFilter = document.getElementById('mh-severity')?.value || 'all';
+        const catFilter = document.getElementById('mh-category')?.value || 'all';
+        const findings = (h.findings || []).filter(f => {
+            if (sevFilter === 'critical' && f.severity !== 'critical') return false;
+            if (sevFilter === 'warning' && f.severity === 'info') return false;
+            if (catFilter !== 'all' && f.category !== catFilter) return false;
+            const nodes = f.nodes || [];
+            if (search && !nodes.some(n => String(n).toLowerCase().includes(search))
+                && !String(f.title).toLowerCase().includes(search)) return false;
+            if (status !== 'all' && !nodes.some(n => this.nodeMatchesStatus(n, status, ctx))) return false;
+            return true;
+        });
+
+        if (summary) {
+            const sev = (h.summary || {}).by_severity || {};
+            const cats = Object.entries((h.summary || {}).by_category || {})
+                .sort((a, b) => b[1].count - a[1].count)
+                .map(([key, v]) => `<button class="mh-chip" data-cat="${this.esc(key)}">${this.esc(v.label)} <b>${v.count}</b></button>`)
+                .join('');
+            const keyNodes = (h.key_nodes || []).slice(0, 6).map(n => this.esc(n)).join(', ');
+            summary.innerHTML = `
+                <span class="mh-sev mh-sev-critical">${sev.critical || 0} critical</span>
+                <span class="mh-sev mh-sev-warning">${sev.warning || 0} warning</span>
+                <span class="mh-sev mh-sev-info">${sev.info || 0} info</span>
+                ${cats}
+                ${keyNodes ? `<div class="form-hint mh-key">Key nodes (single points of failure): ${keyNodes}</div>` : ''}`;
+            summary.querySelectorAll('.mh-chip').forEach(chip => chip.addEventListener('click', () => {
+                const select = document.getElementById('mh-category');
+                if (select) select.value = select.value === chip.dataset.cat ? 'all' : chip.dataset.cat;
+                const sevSel = document.getElementById('mh-severity');
+                if (sevSel) sevSel.value = 'all';
+                this.applyView();
+            }));
+        }
+
+        if (!findings.length) {
+            container.innerHTML = `<p class="log-empty">${(h.findings || []).length ? 'No findings match the filters.' : 'No problems found in scope.'}</p>`;
+            return;
+        }
+        container.innerHTML = findings.map(f => {
+            const nodeLinks = (f.nodes || []).slice(0, 8).map(n =>
+                `<a href="/nodes/${encodeURIComponent(n)}">${this.esc(n)}</a>`).join(' ');
+            return `<details class="mh-finding mh-${this.esc(f.severity)}">
+                <summary>
+                    <span class="mh-sev mh-sev-${this.esc(f.severity)}">${this.esc(f.severity)}</span>
+                    <span class="mh-cat">${this.esc(f.category_label)}</span>
+                    <span class="mh-title">${this.esc(f.title)}</span>
+                </summary>
+                <div class="mh-body">
+                    <p>${this.esc(f.detail)}</p>
+                    <p><strong>Suggested fix:</strong> ${this.esc(f.recommendation)}</p>
+                    <p class="mh-nodes">${nodeLinks}</p>
+                </div>
+            </details>`;
+        }).join('');
     },
 
     // ---- selected-node sets (same logic as the Nodes page) ----
@@ -160,6 +269,7 @@ const DiagnosticsModule = {
         );
         this.renderFlaps(flaps);
         this.renderAsymmetry(asym);
+        this.renderHealth(search, status, ctx);
     },
 
     renderFlaps(links) {

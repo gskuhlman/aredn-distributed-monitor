@@ -317,6 +317,28 @@
 
                     <div class="diag-scroll">
                         <div class="diag-section">
+                            <h3>Mesh Health Check <small class="form-hint">network-wide problem finder, scoped by scan boundaries</small></h3>
+                            <div class="mh-controls">
+                                <select id="mh-severity" class="form-input">
+                                    <option value="all">All severities</option>
+                                    <option value="critical">Critical only</option>
+                                    <option value="warning" selected>Warning + Critical</option>
+                                </select>
+                                <select id="mh-category" class="form-input">
+                                    <option value="all">All categories</option>
+                                </select>
+                                <button id="mh-run" class="btn btn-primary">Run Health Check</button>
+                                <span id="mh-scope" class="form-hint"></span>
+                            </div>
+                            <div id="mh-summary" class="mh-summary"></div>
+                            <div id="mh-findings" class="mh-findings"><p class="log-empty">Loading...</p></div>
+                            <div class="health-footnote">
+                                <p><strong>What this checks.</strong> Near-far / overpowering radios (one neighbor so loud it desensitizes a receiver and masks weaker stations), SNR imbalance between link directions, TX/RX rate and throughput imbalance, one-way links, packet loss / latency / jitter, VoIP stability (estimated MOS, call tests, streamed sessions), flapping and LQM-blocked links, weak or unstable SNR, noise floor, channel congestion, node reboots / memory / poll reliability, hidden-node pairs, and single points of failure.</p>
+                                <p>Only nodes reachable from the scan seed without crossing a <strong>scan boundary</strong> are diagnosed. Set boundaries from a node's panel (Network tab) or node page. Findings are heuristics &mdash; confirm on the radios before changing anything.</p>
+                            </div>
+                        </div>
+
+                        <div class="diag-section">
                             <h3>Flapping Links <small class="form-hint">drops/blocks per link, flappiest first</small></h3>
                             <div class="table-scroll-wrapper">
                                 <table class="info-table">
@@ -501,6 +523,11 @@
                         <label for="database-retention-days">Database Retention (days):</label>
                         <input type="number" id="database-retention-days" class="form-input" min="1" max="3650" value="90">
                         <small class="form-hint">Nodes and related local state older than this are deleted from SQLite</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Scan Boundaries:</label>
+                        <div id="scan-boundary-list" class="scan-boundary-list"><small class="form-hint">None</small></div>
+                        <small class="form-hint"><strong>Block</strong>: never poll the node, so nothing reached only through it is scanned. <strong>Stop</strong>: poll it but don't scan past it. Set from a node's panel or node page.</small>
                     </div>
                     <div class="form-group">
                         <button id="save-settings" class="btn btn-primary">Save Settings</button>

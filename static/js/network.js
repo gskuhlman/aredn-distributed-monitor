@@ -415,6 +415,7 @@ function renderLinkOnlyNodeDetails(node) {
                 <input type="checkbox" id="panel-node-selected" ${node.is_selected ? 'checked' : ''}>
                 Include in selected nodes
             </label>
+            ${renderBoundaryControl(node.scan_boundary)}
             <p class="node-warning">
                 ${node.lqm_status_message || 'LQM-only neighbor'}
             </p>
@@ -433,6 +434,7 @@ function renderLinkOnlyNodeDetails(node) {
         </div>
     `;
     bindPanelSelectedToggle(node.id);
+    bindPanelBoundarySelect(node.id);
 }
 
 /**
@@ -462,6 +464,7 @@ function renderNodeDetails(data) {
                 <input type="checkbox" id="panel-node-selected" ${node.is_selected ? 'checked' : ''}>
                 Include in selected nodes
             </label>
+            ${renderBoundaryControl(node.scan_boundary)}
             <div class="node-panel-actions">
                 <a class="btn btn-secondary" href="/nodes/${encodeURIComponent(node.name)}">Full Node Info</a>
             </div>
@@ -565,6 +568,84 @@ function renderNodeDetails(data) {
 
     panelContent.innerHTML = html;
     bindPanelSelectedToggle(node.name);
+    bindPanelBoundarySelect(node.name);
+}
+
+function renderBoundaryControl(mode) {
+    const opt = (value, label) => `<option value="${value}" ${(mode || '') === value ? 'selected' : ''}>${label}</option>`;
+    return `<label class="scan-boundary-control" title="Limit network discovery at this node so remote meshes aren't scanned">
+        Scan boundary:
+        <select id="panel-node-boundary" class="form-input">
+            ${opt('', 'None')}
+            ${opt('stop', "Stop here (poll, don't scan past)")}
+            ${opt('exclude', "Block (don't poll it or beyond)")}
+        </select>
+    </label>`;
+}
+
+function bindPanelBoundarySelect(nodeName) {
+    const select = document.getElementById('panel-node-boundary');
+    if (!select) return;
+    select.addEventListener('change', () => setNodeBoundary(nodeName, select.value, select));
+}
+
+async function setNodeBoundary(nodeName, mode, select = null) {
+    const previous = ((fullNetworkData.nodes || []).find(n => n.id === nodeName) || {}).scan_boundary || '';
+    if (select) select.disabled = true;
+    try {
+        const response = await fetch(`/api/scan-boundaries/${encodeURIComponent(nodeName)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: mode || null })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Failed to update boundary');
+        fullNetworkData.nodes = (fullNetworkData.nodes || []).map(node =>
+            node.id === nodeName ? { ...node, scan_boundary: result.mode } : node
+        );
+        renderScanBoundaryList(result.boundaries);
+        const label = result.mode === 'exclude' ? 'Node Blocked'
+            : result.mode === 'stop' ? 'Scan Stops Here' : 'Boundary Cleared';
+        showToast('success', label, `${nodeName} - takes effect on the next scan`);
+    } catch (error) {
+        console.error('Error updating scan boundary:', error);
+        if (select) select.value = previous;
+        showToast('error', 'Boundary Failed', error.message);
+    } finally {
+        if (select) select.disabled = false;
+    }
+}
+
+async function loadScanBoundaries() {
+    try {
+        const response = await fetch('/api/scan-boundaries');
+        const data = await response.json();
+        renderScanBoundaryList(data.boundaries || {});
+    } catch (error) {
+        console.error('Error loading scan boundaries:', error);
+    }
+}
+
+function renderScanBoundaryList(boundaries) {
+    const container = document.getElementById('scan-boundary-list');
+    if (!container) return;
+    const names = Object.keys(boundaries || {}).sort();
+    if (!names.length) {
+        container.innerHTML = '<small class="form-hint">None - the whole reachable mesh is scanned</small>';
+        return;
+    }
+    container.innerHTML = names.map(name => `
+        <div class="scan-boundary-row">
+            <span>${escapeBoundaryText(name)} <small class="form-hint">${boundaries[name] === 'exclude' ? 'Block' : 'Stop'}</small></span>
+            <button class="btn btn-secondary btn-small" data-boundary-node="${escapeBoundaryText(name)}">Remove</button>
+        </div>`).join('');
+    container.querySelectorAll('[data-boundary-node]').forEach(btn =>
+        btn.addEventListener('click', () => setNodeBoundary(btn.dataset.boundaryNode, '')));
+}
+
+function escapeBoundaryText(value) {
+    return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function bindPanelSelectedToggle(nodeName) {
@@ -1015,7 +1096,12 @@ function updateNetwork(data, options = {}) {
     //   link_only – never pollable; only seen in a neighbor's LQM
     for (const node of data.nodes) {
         const reach = node.reach_status || (node.is_link_only ? 'link_only' : (node.is_inactive ? 'down' : 'polled'));
-        if (reach === 'link_only' || node.is_link_only) {
+        if (node.scan_boundary === 'exclude') {
+            // Deliberately not polled, so "down" would be misleading.
+            node.color = NODE_COLORS.linkOnly;
+            node.label = node.label + '\n(scan blocked)';
+            node.opacity = 0.7;
+        } else if (reach === 'link_only' || node.is_link_only) {
             node.color = NODE_COLORS.linkOnly;
             if (!node.label.includes('(link-only)')) {
                 node.label = node.label + '\n(link-only)';
@@ -1037,6 +1123,9 @@ function updateNetwork(data, options = {}) {
             node.color = NODE_COLORS.firmwareMismatch;
         } else {
             node.color = NODE_COLORS.normal;
+        }
+        if (node.scan_boundary === 'stop') {
+            node.label = node.label + '\n(scan stops)';
         }
 
         if (currentNodeIds.includes(node.id)) {
@@ -1327,6 +1416,7 @@ async function loadSettings() {
         document.getElementById('link-remove-after').value = settings.link_remove_after_minutes || 60;
         document.getElementById('new-node-days').value = settings.new_node_days || 30;
         document.getElementById('database-retention-days').value = settings.database_retention_days || 90;
+        loadScanBoundaries();
 
         // Update poll interval for countdown
         if (settings.poll_interval) {

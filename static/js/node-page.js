@@ -17,6 +17,9 @@ const NodePage = {
             this.runTraceroute(src, tgt, document.getElementById('trace-run'));
         });
         document.getElementById('node-log-search')?.addEventListener('input', () => this.renderLog());
+        document.getElementById('node-boundary-select')?.addEventListener('change', (event) => {
+            this.setBoundary(event.target.value);
+        });
         document.getElementById('node-selected-toggle')?.addEventListener('change', (event) => {
             this.setSelected(event.target.checked);
         });
@@ -70,6 +73,10 @@ const NodePage = {
         if (selectedToggle) {
             selectedToggle.checked = Boolean(node.is_selected);
         }
+        const boundarySelect = document.getElementById('node-boundary-select');
+        if (boundarySelect) {
+            boundarySelect.value = node.scan_boundary || '';
+        }
         this.renderSummary();
         this.renderNodeHealth();
         this.renderLinks();
@@ -78,6 +85,30 @@ const NodePage = {
         this.renderLinkHealth();
         this.renderIncidents();
         this.renderLog();
+    },
+
+    async setBoundary(mode) {
+        const select = document.getElementById('node-boundary-select');
+        const previous = this.data?.node?.scan_boundary || '';
+        if (select) select.disabled = true;
+        try {
+            const response = await fetch(`/api/scan-boundaries/${encodeURIComponent(this.nodeName)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: mode || null })
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) throw new Error(result.error || 'Failed to update boundary');
+            if (this.data?.node) this.data.node.scan_boundary = result.mode;
+            const label = result.mode === 'exclude' ? 'Node Blocked'
+                : result.mode === 'stop' ? 'Scan Stops Here' : 'Boundary Cleared';
+            this.showToast('success', label, `${this.nodeName} - takes effect on the next scan`);
+        } catch (error) {
+            if (select) select.value = previous;
+            this.showToast('error', 'Boundary Failed', error.message);
+        } finally {
+            if (select) select.disabled = false;
+        }
     },
 
     async setSelected(selected) {

@@ -22,6 +22,11 @@
                     <input type="checkbox" id="node-selected-toggle">
                     Include in selected nodes
                 </label>
+                <select id="node-boundary-select" class="form-input" title="Limit network discovery at this node">
+                    <option value="">Scan boundary: none</option>
+                    <option value="stop">Stop here (poll, don't scan past)</option>
+                    <option value="exclude">Block (don't poll it or beyond)</option>
+                </select>
                 <span id="node-page-status">Loading...</span>
                 <button id="node-scan-now" class="btn btn-primary">Scan Now</button>
             </div>

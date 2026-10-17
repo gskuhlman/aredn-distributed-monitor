@@ -529,6 +529,16 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
     observation_docs = []
     attempted_nodes = 0
     reachable_nodes = 0
+    # Operator-defined scan boundaries keep a local-event scan from wandering
+    # into remote meshes. 'exclude' nodes are never polled (so anything only
+    # reachable through them is never reached); 'stop' nodes are polled but not
+    # traversed past. The seed is always polled and traversed.
+    boundaries = database.get_scan_boundaries()
+    boundary_skipped = set()
+    boundary_stopped = set()
+    # Every node name polled or reported as a neighbor this scan. Used to tell
+    # "left scan scope" apart from "went offline inside the scanned area".
+    seen_names = set()
 
     def process_result(url, depth, target_hint, data, degraded, response_ms):
         """Process one fetched node serially (all DB writes happen here, on the
@@ -657,10 +667,20 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
             nodes_found += 1
             max_depth_reached = max(max_depth_reached, depth)
 
+        seen_names.add(node_name)
+
         # Check if this is a supernode - if so, don't traverse beyond it
         supernode = is_supernode(data)
         if supernode:
             logger.info(f"Found supernode: {node_name} - not traversing beyond")
+
+        # An operator boundary also stops traversal. An 'exclude' node is
+        # normally never queued, but one can still be reached by IP before its
+        # name is known; treat that like 'stop' so nothing beyond it is scanned.
+        at_boundary = depth > 0 and node_name in boundaries
+        if at_boundary:
+            boundary_stopped.add(node_name)
+            logger.info(f"Scan boundary ({boundaries[node_name]}) at {node_name} - not traversing beyond")
 
         # Process links and get discovered nodes. A degraded (bare sysinfo)
         # response has no LQM data, so it says nothing about links: skip
@@ -674,11 +694,18 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
 
         # Queue next-level nodes (unless at max depth or past a supernode).
         next_nodes = []
-        if depth < max_depth and not supernode:
+        for node_info in discovered:
+            if node_info.get('hostname'):
+                seen_names.add(node_info['hostname'])
+        if depth < max_depth and not supernode and not at_boundary:
             for node_info in discovered:
                 node_url = node_info['url']
+                hostname = node_info.get('hostname')
+                if hostname and boundaries.get(hostname) == 'exclude':
+                    boundary_skipped.add(hostname)
+                    continue
                 if node_url.lower() not in visited_urls:
-                    next_nodes.append((node_url, depth + 1, node_info.get('hostname')))
+                    next_nodes.append((node_url, depth + 1, hostname))
         return next_nodes
 
     # BFS by depth "waves": fetch every node in the current wave concurrently
@@ -721,7 +748,11 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
         'observed_at': observations.iso_z(observed_at),
         'observation_docs': observation_docs,
         'node_count_attempted': attempted_nodes,
-        'node_count_reachable': reachable_nodes
+        'node_count_reachable': reachable_nodes,
+        'boundaries_active': bool(boundaries),
+        'boundary_skipped': sorted(boundary_skipped),
+        'boundary_stopped': sorted(boundary_stopped),
+        'seen_names': sorted(seen_names)
     }
 
 
@@ -866,14 +897,29 @@ def update_link_statuses():
     }
 
 
-def update_node_statuses():
-    """Update node statuses based on timeouts, return details of changes"""
+def update_node_statuses(seen_names=None, boundaries_active=False):
+    """Update node statuses based on timeouts, return details of changes.
+
+    When scan boundaries are configured, a node that nobody in this scan polled
+    or reported as a neighbor has most likely just fallen outside the scan
+    scope. It still goes inactive locally, but is logged as info rather than an
+    outage warning so setting a boundary doesn't flood the log with "offline".
+    """
     # Get nodes that will be marked inactive before marking them
     inactive_nodes = database.get_nodes_to_mark_inactive(config.LINK_TIMEOUT)
     events = []
+    seen = set(seen_names or [])
 
     # Log events for nodes going offline
     for node in inactive_nodes:
+        if boundaries_active and node['name'] not in seen:
+            events.append({
+                'type': database.EVENT_NODE_OFFLINE,
+                'node': node['name'],
+                'details': "Node left scan scope (not seen by any scanned node; beyond a scan boundary or gone)",
+                'severity': 'info'
+            })
+            continue
         events.append({
             'type': database.EVENT_NODE_OFFLINE,
             'node': node['name'],
@@ -931,7 +977,10 @@ def run_scan():
     all_events.extend(link_status.get('events', []))
 
     # Update node statuses
-    node_status = update_node_statuses()
+    node_status = update_node_statuses(
+        seen_names=result.get('seen_names'),
+        boundaries_active=result.get('boundaries_active', False)
+    )
     result['inactive_nodes'] = node_status['inactive_nodes']
     all_events.extend(node_status.get('events', []))
 
@@ -956,6 +1005,7 @@ def run_scan():
     )
     result['observation_count'] = len(result.get('observation_docs', []))
     result.pop('observation_docs', None)
+    result.pop('seen_names', None)
 
     logger.info(f"Scan complete: {result['nodes_found']} nodes, {result['links_found']} links, {len(all_events)} events")
     return result
@@ -991,6 +1041,7 @@ def run_targeted_scan(target, max_depth=0):
     )
     result['observation_count'] = len(result.get('observation_docs', []))
     result.pop('observation_docs', None)
+    result.pop('seen_names', None)
     logger.info(
         "Targeted scan complete for %s: %s nodes, %s links",
         target,
