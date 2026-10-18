@@ -23,7 +23,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now aredn-monitor
 
 # Validate Python syntax
-python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py
+python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py link_watch.py
 
 # Bootstrap CouchDB databases and indexes when COUCH_URL is configured
 python couch_client.py
@@ -50,6 +50,7 @@ There is no full test suite or linting currently configured.
 - `reports.py`: Read-only time-window reporting (Reports tab): per-node poll health, per-link RF stats, state changes, events, VoIP, and bucketed series, filtered like the other pages.
 - `link_diagnostics.py`: Pair diagnosis for the RF Stats link view. Combines both ends' LQM trackers (including a MAC-only alias when one end lost the other's hostname), promoted LQM history columns, state log, node health/config, each end's full RF neighbor list (receiver-wide loss, near-far/overpowering neighbors with a suggested power cut), and radios at each site or in each antenna's beam tagged by channel relation (same/overlap/adjacent/near/clear) into ranked findings and a verdict; `run_live_checks` pings/traceroutes between the two nodes via their CGI.
 - `infra_audit.py`: Infrastructure Review (Diagnostics tab): audits infrastructure nodes' stored radio settings (optionally refreshed live) for site channel plans, overlapping radios in antenna beams, azimuth vs. neighbor bearings, PtP pairing, firmware, user blocks, reachability, near-far, plus a verdict per RF link touching infrastructure.
+- `link_watch.py`: Link Watch, run after every committed (never aborted) scan from `scheduled_scan`. Noise-floor watch: each radio's noise (signal - SNR from its own trackers in `link_history`) vs. a rolling baseline (same hour of day once 3+ days exist, else window median, last hour excluded). One-way link alarm: an RF pair where one end hears the other well and the other doesn't (LQ asymmetry, infinite Babel cost with good SNR, MAC-only identity, not listed at all), reusing `link_diagnostics._direction`; only judged when both ends were polled recently and they aren't wired together. Hysteresis state in SQLite `link_watch_state`; events fire on transitions only.
 - `config.py`: Central configuration and environment-variable overrides.
 
 ### Frontend Components
@@ -61,6 +62,7 @@ There is no full test suite or linting currently configured.
 - `static/js/rf-stats.js`: Chart.js graphs for quality, SNR, latency, throughput, and RF test actions.
 - `static/js/link-diagnosis.js`: RF Stats pair diagnosis panel (verdict, findings, direction/node comparison, colocated radios, state log, live path check, per-direction LQM charts).
 - `static/js/infra-review.js`: Infrastructure Review section on the Diagnostics tab (findings, per-site spectrum chart and settings table, link verdicts).
+- `static/js/link-watch.js`: Link Watch section on the Diagnostics tab (one-way alarms with a Diagnose button into RF Stats, noise table, per-radio noise series with baseline and hour-of-day profile).
 - `static/js/rf-channel.js`: Shared node channel display (centre/width/edge frequencies and channel numbers) and connected-peer channel relation (overlap/adjacent/near/same/clear) for the Nodes tab detail panel and node page; values come from `infra_audit.annotate_link_rf` via `/api/nodes/detail` and `/api/nodes/full` (`node.rf_span`, `link.peer_rf`).
 - `static/js/reports.js`: Reports tab: start/end window scrubbing (presets, prev/next, slider), filters, timeline, tables, and node/link drill-down charts.
 - `static/css/style.css`: Application layout and visual styling.
@@ -122,6 +124,13 @@ Infrastructure routes:
 
 - `GET /api/nodes/infrastructure`, `POST /api/nodes/infrastructure/<name>` `{infrastructure: bool, site?}`: mark towers/high sites. Site defaults to the location code in the name (`w0gq-col-...` -> `COL`); site names come from the `site_names` setting over defaults (COL Collins Tower, MMC Mt Mercy Hospital, EOC Linn County EOC). Stored in SQLite `infrastructure_nodes`, exposed as `is_infrastructure` on node and graph JSON.
 - `GET|POST /api/reports/infrastructure` (`POST {refresh: true}` re-reads settings from the nodes first)
+
+Link Watch routes:
+
+- `GET /api/reports/noise?hours=72&days=7`: every radio's current noise, baseline, delta and alarm state; with `&node=<name>`, that radio's series, baseline and 24-hour profile
+- `GET /api/reports/one-way?hours=24`: `active` (alarmed), `pending` (one-way now, not yet confirmed) and `cleared` (within `hours`) RF pairs with reasons and both ends' LQ/quality/SNR/cost
+
+Link Watch events (transitions only, with hysteresis; also categorized in Reports): `noise_jump` (warning), `noise_cleared` (info), `one_way_link` (warning, or critical when it touches infrastructure or is still one-way after `ONE_WAY_ESCALATE_MINUTES`), `one_way_link_cleared` (info; also raised when a flagged pair stops being evaluated for `ONE_WAY_FORGET_MINUTES`).
 
 Mesh health and scan-boundary routes:
 
@@ -185,6 +194,7 @@ Important settings in `config.py` and environment variables:
 - `VOIP_AGENT_PORT` / `VOIP_PROBE_UDP_PORT`: remote agent control (8765) and UDP probe (8766) ports.
 - `VOIP_STREAM_PPS` / `VOIP_STREAM_PACKET_BYTES`: streamed-session defaults (50 pps x 172 bytes ≈ 20ms RTP).
 - `VOIP_SESSION_ROUTE_INTERVAL` / `VOIP_SESSION_MAX_SECONDS`: route-refresh cadence and session safety cap.
+- `LINK_WATCH_ENABLED`; noise: `NOISE_JUMP_DB` (5), `NOISE_CLEAR_DB` (2), `NOISE_JUMP_SCANS` (2), `NOISE_BASELINE_HOURS` (72), `NOISE_BASELINE_EXCLUDE_MINUTES` (60), `NOISE_MIN_BASELINE_SAMPLES` (20), `NOISE_HOUR_MIN_DAYS` (3); one-way: `ONE_WAY_HIGH_LQ` (80), `ONE_WAY_LOW_LQ` (40), `ONE_WAY_SNR_OK` (15 dB), `ONE_WAY_SCANS` (2), `ONE_WAY_ESCALATE_MINUTES` (60), `ONE_WAY_FORGET_MINUTES` (60).
 
 Settings edited through `/api/settings` persist to SQLite and currently affect legacy scanner behavior.
 

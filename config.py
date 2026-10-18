@@ -142,6 +142,27 @@ MESH_PROBE_MAX_PER_CYCLE = env_int("MESH_PROBE_MAX_PER_CYCLE", 8)
 MESH_PROBE_COOLDOWN_SECONDS = env_int("MESH_PROBE_COOLDOWN_SECONDS", 300)
 # A mesh probe result is "recent" (trusted for status) for this long.
 MESH_PROBE_FRESH_SECONDS = env_int("MESH_PROBE_FRESH_SECONDS", 900)
+
+# --- Link Watch (link_watch.py): noise-floor watch and one-way link alarm ---
+# Noise = signal - SNR from each radio's own LQM trackers, vs. a rolling
+# baseline (same hour of day once NOISE_HOUR_MIN_DAYS days exist).
+LINK_WATCH_ENABLED = env_bool("LINK_WATCH_ENABLED", True)
+NOISE_JUMP_DB = env_int("NOISE_JUMP_DB", 5)              # dB above baseline to alarm
+NOISE_CLEAR_DB = env_int("NOISE_CLEAR_DB", 2)            # dB above baseline to clear
+NOISE_JUMP_SCANS = env_int("NOISE_JUMP_SCANS", 2)        # consecutive scans to raise/clear
+NOISE_BASELINE_HOURS = env_int("NOISE_BASELINE_HOURS", 72)
+NOISE_BASELINE_EXCLUDE_MINUTES = env_int("NOISE_BASELINE_EXCLUDE_MINUTES", 60)
+NOISE_MIN_BASELINE_SAMPLES = env_int("NOISE_MIN_BASELINE_SAMPLES", 20)
+NOISE_HOUR_MIN_DAYS = env_int("NOISE_HOUR_MIN_DAYS", 3)
+# One-way: one end hears >= HIGH while the other hears <= LOW (LQ %), Babel
+# cost infinite on one side with SNR >= SNR_OK both ways, or MAC-only identity.
+ONE_WAY_HIGH_LQ = env_int("ONE_WAY_HIGH_LQ", 80)
+ONE_WAY_LOW_LQ = env_int("ONE_WAY_LOW_LQ", 40)
+ONE_WAY_SNR_OK = env_int("ONE_WAY_SNR_OK", 15)
+ONE_WAY_SCANS = env_int("ONE_WAY_SCANS", 2)
+ONE_WAY_ESCALATE_MINUTES = env_int("ONE_WAY_ESCALATE_MINUTES", 60)
+ONE_WAY_FORGET_MINUTES = env_int("ONE_WAY_FORGET_MINUTES", 60)
+# --- end Link Watch ---
 # Total incident capture window and gap between probe rounds, in seconds.
 INCIDENT_DURATION = env_int("INCIDENT_DURATION_SECONDS", 90)
 INCIDENT_PROBE_INTERVAL = env_int("INCIDENT_PROBE_INTERVAL_SECONDS", 5)

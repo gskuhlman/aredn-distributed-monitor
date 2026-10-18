@@ -1577,7 +1577,12 @@ const EVENT_ICONS = {
     'frequency_change': { icon: '&#128246;', label: 'Frequency Change', class: 'event-warning' },
     'gateway_lost': { icon: '&#9888;', label: 'Starting Node Lost', class: 'event-warning' },
     'gateway_restored': { icon: '&#10004;', label: 'Starting Node Restored', class: 'event-success' },
-    'radio_config_change': { icon: '&#128225;', label: 'Radio Settings Changed', class: 'event-warning' }
+    'radio_config_change': { icon: '&#128225;', label: 'Radio Settings Changed', class: 'event-warning' },
+    // Link Watch (link_watch.py)
+    'noise_jump': { icon: '&#128266;', label: 'Noise Floor Jump', class: 'event-warning' },
+    'noise_cleared': { icon: '&#128264;', label: 'Noise Floor Normal', class: 'event-success' },
+    'one_way_link': { icon: '&#10145;', label: 'One-Way Link', class: 'event-warning' },
+    'one_way_link_cleared': { icon: '&#8646;', label: 'Link Two-Way Again', class: 'event-success' }
 };
 
 /**

@@ -830,6 +830,7 @@ function initTabSwitching() {
                     DiagnosticsModule.load();
                 }
                 if (typeof InfraReview !== 'undefined') InfraReview.init();
+                if (typeof LinkWatch !== 'undefined') LinkWatch.init();
             } else if (tab === 'voip') {
                 if (voipView) voipView.classList.add('active');
                 if (typeof VOIPModule !== 'undefined') {

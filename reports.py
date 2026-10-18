@@ -30,9 +30,11 @@ LINK_TYPE_BUCKETS = {
 
 EVENT_CATEGORIES = {
     'node': ('node_discovered', 'node_offline', 'node_online', 'node_degraded', 'node_reboot',
-             'radio_config_change'),
+             'radio_config_change',
+             'noise_jump', 'noise_cleared'),
     'link': ('link_new', 'link_dropped', 'link_removed', 'link_restored',
-             'link_blocked', 'link_unblocked'),
+             'link_blocked', 'link_unblocked',
+             'one_way_link', 'one_way_link_cleared'),
     'freq': ('frequency_change',),
     'system': ('gateway_lost', 'gateway_restored'),
 }

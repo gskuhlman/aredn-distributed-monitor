@@ -987,9 +987,34 @@ def _check_ping(ctx, f):
                  + (f" LQM measures {lqm:.0f} ms across the link itself." if lqm is not None else ''), ev)
 
 
+# --- Link Watch findings (link_watch.py state: one-way alarm, noise jumps) ---
+def _check_watch(ctx, f):
+    try:
+        import link_watch
+        w = link_watch.pair_watch_findings(*ctx['pair'])
+    except Exception:
+        return
+    one = w.get('one_way')
+    if one:
+        d = one.get('detail') or {}
+        _add(f, 'critical' if one.get('escalated') else 'warning', 'watch',
+             f"Link Watch: one-way link alarm since {one.get('since')}",
+             'The continuous one-way detector has flagged this pair on consecutive scans.',
+             d.get('reasons') or [])
+    for node, s in (w.get('noise') or {}).items():
+        d = s.get('detail') or {}
+        if d.get('delta') is None:
+            continue
+        _add(f, 'warning', 'watch', f"Link Watch: noise floor jump at {node} since {s.get('since')}",
+             f"{node}'s noise floor is {d.get('current')} dBm, {d['delta']:+.1f} dB above its "
+             f"baseline {d.get('baseline')} dBm. That lowers SNR on every link {node} receives.",
+             recommendation=f"Look for a new transmitter or WiFi near {node} on or next to its channel.")
+# --- end Link Watch findings ---
+
+
 CHECKS = (_check_visibility, _check_delivery, _check_receivers, _check_rf, _check_near_far,
           _check_routing, _check_rates, _check_quality_breakdown, _check_flaps, _check_config,
-          _check_interference, _check_nodes, _check_ping)
+          _check_interference, _check_nodes, _check_ping, _check_watch)
 
 
 # ------------------------------------------------------------ verdict -----
