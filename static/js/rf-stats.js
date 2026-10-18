@@ -185,6 +185,7 @@ const RFStats = {
 
                 if (this.selectedLink) {
                     this.loadLinkHistory(this.selectedLink.source, this.selectedLink.target);
+                    LinkDiagnosis.load(this.selectedLink.source, this.selectedLink.target, this.timeRangeHours);
                 }
             });
         });
@@ -193,12 +194,6 @@ const RFStats = {
         const pingAllBtn = document.getElementById('rf-ping-all');
         if (pingAllBtn) {
             pingAllBtn.addEventListener('click', () => this.pingAll());
-        }
-
-        // Clear Ping Times button
-        const clearPingBtn = document.getElementById('rf-clear-ping');
-        if (clearPingBtn) {
-            clearPingBtn.addEventListener('click', () => this.clearPingTimes());
         }
 
         // Back button
@@ -226,6 +221,11 @@ const RFStats = {
                     this.triggerTest(this.selectedLink.source, this.selectedLink.target, 'iperf', e.target);
                 }
             });
+        }
+
+        const chartLiveBtn = document.getElementById('chart-live-btn');
+        if (chartLiveBtn) {
+            chartLiveBtn.addEventListener('click', (e) => LinkDiagnosis.runLive(e.target));
         }
 
         // Filter / sort controls (overview table)
@@ -260,6 +260,29 @@ const RFStats = {
         } catch (error) {
             console.error('Error loading RF links:', error);
         }
+    },
+
+    // Infrastructure node names (from node rows and the network graph).
+    getInfrastructureNodeNames() {
+        const names = new Set([].filter(n => n.is_infrastructure).map(n => n.name).filter(Boolean));
+        for (const node of this.networkData.nodes || []) {
+            if (node.is_infrastructure && node.id) names.add(node.id);
+        }
+        return names;
+    },
+
+    // A node set plus every node one RF/DtD hop from it.
+    withConnected(base) {
+        const visible = new Set(base);
+        for (const edge of this.networkData.edges || []) {
+            const t = String(edge.link_type || '').toUpperCase();
+            if (t !== 'RF' && t !== 'DTD') continue;
+            if (base.has(edge.from) || base.has(edge.to)) {
+                visible.add(edge.from);
+                visible.add(edge.to);
+            }
+        }
+        return visible;
     },
 
     // Selected node names, gathered from the network graph (mirrors NodesModule).
@@ -300,6 +323,8 @@ const RFStats = {
 
         const selectedNames = status === 'selected' ? this.getSelectedNodeNames() : null;
         const selectedConnectedNames = status === 'selected-connected' ? this.getSelectedConnectedNodeNames() : null;
+        const infraNames = status.startsWith('infrastructure') ? this.getInfrastructureNodeNames() : null;
+        const infraSet = status === 'infrastructure-connected' ? this.withConnected(infraNames) : infraNames;
 
         this.filteredLinks = (this.rfLinks || []).filter(link => {
             const source = (link.source_node || '').toLowerCase();
@@ -312,6 +337,8 @@ const RFStats = {
                 matchesStatus = selectedNames.has(link.source_node) || selectedNames.has(link.target_node);
             } else if (status === 'selected-connected') {
                 matchesStatus = selectedConnectedNames.has(link.source_node) || selectedConnectedNames.has(link.target_node);
+            } else if (infraSet) {
+                matchesStatus = infraSet.has(link.source_node) || infraSet.has(link.target_node);
             }
 
             return matchesSearch && matchesStatus;
@@ -458,39 +485,18 @@ const RFStats = {
             const reached = results.filter(r => r.reachable).length;
             // The server recorded the pings to link history; reload to repaint.
             await this.loadRFLinks();
-            if (status) status.textContent = `Pinged ${results.length}; ${reached} reachable. `;
+            if (data.gateway_unreachable) {
+                if (status) status.textContent = 'Ping all aborted: starting node unreachable. ';
+                showToast('error', 'Starting Node Unreachable', data.error);
+            } else if (status) {
+                status.textContent = `Pinged ${results.length}; ${reached} reachable. `;
+            }
         } catch (e) {
             if (status) status.textContent = (e.name === 'AbortError')
                 ? 'Ping all timed out (still running on the server?). '
                 : 'Ping all failed. ';
         } finally {
             clearTimeout(timer);
-            if (btn) { btn.disabled = false; btn.textContent = original; }
-        }
-    },
-
-    /**
-     * Null out stored ping and throughput results so the overview stops showing
-     * stale values, then repaint. Clears only the currently filtered links.
-     */
-    async clearPingTimes() {
-        const btn = document.getElementById('rf-clear-ping');
-        if (btn && btn.disabled) return;
-        const status = document.getElementById('rf-ping-status');
-        const original = btn ? btn.textContent : '';
-        const links = (this.filteredLinks || this.rfLinks || []).map(l => [l.source_node, l.target_node]);
-        if (btn) { btn.disabled = true; btn.textContent = 'Clearing...'; }
-        try {
-            await fetch('/api/rf-stats/clear-ping', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ links })
-            });
-            await this.loadRFLinks();
-            if (status) status.textContent = 'Cleared ping/throughput. ';
-        } catch (e) {
-            if (status) status.textContent = 'Clear failed. ';
-        } finally {
             if (btn) { btn.disabled = false; btn.textContent = original; }
         }
     },
@@ -520,7 +526,8 @@ const RFStats = {
         const rfFilters = document.getElementById('rf-filters');
         if (rfFilters) rfFilters.classList.add('hidden');
 
-        // Load history data
+        // Load history data and the pair diagnosis
+        LinkDiagnosis.load(source, target, this.timeRangeHours);
         await this.loadLinkHistory(source, target);
     },
 
@@ -529,6 +536,7 @@ const RFStats = {
      */
     deselectLink() {
         this.selectedLink = null;
+        LinkDiagnosis.hide();
 
         // Hide back button
         const backBtn = document.getElementById('rf-back-btn');
@@ -762,6 +770,8 @@ const RFStats = {
         } else if (data.status === 'failed') {
             showToast('warning', 'iPerf Failed',
                 `${data.link.source} -> ${data.link.target}: Test failed`);
+        } else if (data.status === 'aborted') {
+            showToast('error', 'iPerf Aborted', data.error || 'Starting node unreachable');
         }
     },
 
@@ -785,8 +795,9 @@ function initTabSwitching() {
     const nodesView = document.getElementById('nodes-view');
     const diagnosticsView = document.getElementById('diagnostics-view');
     const voipView = document.getElementById('voip-view');
+    const reportsView = document.getElementById('reports-view');
     const legend = document.querySelector('.legend');
-    const allViews = [networkView, rfStatsView, nodesView, diagnosticsView, voipView];
+    const allViews = [networkView, rfStatsView, nodesView, diagnosticsView, voipView, reportsView];
 
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -818,11 +829,18 @@ function initTabSwitching() {
                     DiagnosticsModule.init();
                     DiagnosticsModule.load();
                 }
+                if (typeof InfraReview !== 'undefined') InfraReview.init();
             } else if (tab === 'voip') {
                 if (voipView) voipView.classList.add('active');
                 if (typeof VOIPModule !== 'undefined') {
                     VOIPModule.init();
                     VOIPModule.load();
+                }
+            } else if (tab === 'reports') {
+                if (reportsView) reportsView.classList.add('active');
+                if (typeof ReportsModule !== 'undefined') {
+                    ReportsModule.init();
+                    ReportsModule.load();
                 }
             }
         });

@@ -23,6 +23,9 @@ const NodePage = {
         document.getElementById('node-selected-toggle')?.addEventListener('change', (event) => {
             this.setSelected(event.target.checked);
         });
+        document.getElementById('node-infrastructure-toggle')?.addEventListener('change', (event) => {
+            this.setInfrastructure(event.target.checked);
+        });
         await this.load();
     },
 
@@ -73,6 +76,7 @@ const NodePage = {
         if (selectedToggle) {
             selectedToggle.checked = Boolean(node.is_selected);
         }
+        this.renderInfrastructure(node.is_infrastructure, node.infrastructure_site);
         const boundarySelect = document.getElementById('node-boundary-select');
         if (boundarySelect) {
             boundarySelect.value = node.scan_boundary || '';
@@ -135,6 +139,46 @@ const NodePage = {
         }
     },
 
+    renderInfrastructure(isInfra, site, sites = null) {
+        const toggle = document.getElementById('node-infrastructure-toggle');
+        if (toggle) toggle.checked = Boolean(isInfra);
+        const label = document.getElementById('node-infrastructure-site');
+        if (label) {
+            const name = site && sites ? sites[site] : null;
+            label.textContent = isInfra && site ? `(${site}${name ? ' – ' + name : ''})` : '';
+        }
+        if (isInfra && site && !sites) {
+            fetch('/api/nodes/infrastructure').then(r => r.json())
+                .then(d => this.renderInfrastructure(isInfra, site, d.sites || {})).catch(() => {});
+        }
+    },
+
+    async setInfrastructure(infrastructure) {
+        const toggle = document.getElementById('node-infrastructure-toggle');
+        if (toggle) toggle.disabled = true;
+        try {
+            const response = await fetch(`/api/nodes/infrastructure/${encodeURIComponent(this.nodeName)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ infrastructure })
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) throw new Error(result.error || 'Failed to update node');
+            if (this.data?.node) {
+                this.data.node.is_infrastructure = result.is_infrastructure;
+                this.data.node.infrastructure_site = result.infrastructure_site;
+            }
+            this.renderInfrastructure(result.is_infrastructure, result.infrastructure_site, result.sites);
+            this.showToast('success', result.is_infrastructure ? 'Marked as Infrastructure' : 'Infrastructure Mark Removed',
+                this.nodeName);
+        } catch (error) {
+            if (toggle) toggle.checked = !infrastructure;
+            this.showToast('error', 'Update Failed', error.message);
+        } finally {
+            if (toggle) toggle.disabled = false;
+        }
+    },
+
     renderSummary() {
         const node = this.data.node;
         document.getElementById('node-summary').innerHTML = `
@@ -144,8 +188,14 @@ const NodePage = {
                 <tr><td>Model:</td><td>${this.escapeHtml(node.model || 'Unknown')}</td></tr>
                 <tr><td>Firmware:</td><td>${this.escapeHtml(node.firmware_version || 'Unknown')}</td></tr>
                 <tr><td>Description:</td><td>${this.escapeHtml(node.description || 'N/A')}</td></tr>
-                <tr><td>RF Frequency:</td><td>${this.escapeHtml(node.rf_frequency || 'N/A')}</td></tr>
-                <tr><td>RF Channel:</td><td>${this.escapeHtml(node.rf_channel || 'N/A')}</td></tr>
+                <tr><td>RF Frequency:</td><td>${RfChannel.frequencyText(node.rf_span, node.rf_frequency)}</td></tr>
+                <tr><td>RF Channel:</td><td>${RfChannel.channelText(node.rf_span, node.rf_channel)}</td></tr>
+                <tr><td>Radio Mode / SSID:</td><td>${this.escapeHtml([node.rf_status === 'off' ? 'radio off' : node.rf_mode, node.rf_ssid].filter(Boolean).join(' / ') || 'N/A')}</td></tr>
+                <tr><td>Antenna:</td><td>${this.escapeHtml([node.antenna_desc,
+                    node.antenna_azimuth != null ? `azimuth ${node.antenna_azimuth}°` : null,
+                    node.antenna_elevation != null ? `tilt ${node.antenna_elevation}°` : null,
+                    node.antenna_height != null ? `height ${node.antenna_height} m` : null].filter(Boolean).join(', ') || 'N/A')}</td></tr>
+                <tr><td>Infrastructure:</td><td>${node.is_infrastructure ? `Yes${node.infrastructure_site ? ' (' + this.escapeHtml(node.infrastructure_site) + ')' : ''}` : 'No'}</td></tr>
                 <tr><td>First Seen:</td><td>${this.formatDate(node.first_seen)}</td></tr>
                 <tr><td>Last Seen:</td><td>${this.formatDate(node.last_seen)}</td></tr>
                 <tr><td>Status:</td><td>${this.getNodeStatusText(node)}</td></tr>
@@ -415,9 +465,11 @@ const NodePage = {
                     <button class="btn btn-small btn-secondary" data-action="iperf" data-source="${this.escapeAttr(this.data.node.name)}" data-target="${this.escapeAttr(other)}">iPerf3</button>
                 `;
             return `
-                <tr>
+                <tr class="${RfChannel.rowClass(link.peer_rf)}">
                     <td><a href="/nodes/${encodeURIComponent(other)}">${this.escapeHtml(other)}</a></td>
                     <td>${this.escapeHtml(link.link_type || '')}</td>
+                    <td>${RfChannel.peerCell(link.peer_rf)}</td>
+                    <td>${RfChannel.relationCell(link.peer_rf)}</td>
                     <td>${this.escapeHtml(link.quality ?? '')}</td>
                     <td>${this.escapeHtml(link.snr ?? 'N/A')}</td>
                     <td>${this.escapeHtml(link.distance ?? 'N/A')}</td>
@@ -442,9 +494,10 @@ const NodePage = {
 
         const container = document.getElementById('node-links');
         container.innerHTML = `
+            ${RfChannel.summary(links, l => l._peer)}
             <div class="table-scroll-wrapper">
-                <table class="info-table">
-                    <tr><th>Node</th><th>Type</th><th>Quality</th><th>SNR</th><th>Distance</th><th>Signal</th><th>Noise</th><th>TX Rate</th><th>RX Rate</th><th>MAC</th><th>Canonical IP</th><th>Identity</th><th>Routability</th><th>LQM Status</th><th>Status</th><th>Drops</th><th>First Seen</th><th>Stable Since</th><th>Last Seen</th><th>Actions</th></tr>
+                <table class="info-table diag-table">
+                    <tr><th>Node</th><th>Type</th><th>Peer Channel / Freq</th><th>Channel Relation</th><th>Quality</th><th>SNR</th><th>Distance</th><th>Signal</th><th>Noise</th><th>TX Rate</th><th>RX Rate</th><th>MAC</th><th>Canonical IP</th><th>Identity</th><th>Routability</th><th>LQM Status</th><th>Status</th><th>Drops</th><th>First Seen</th><th>Stable Since</th><th>Last Seen</th><th>Actions</th></tr>
                     ${rows}
                 </table>
             </div>

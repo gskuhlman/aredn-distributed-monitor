@@ -31,7 +31,8 @@ let serverPositions = {};
 function getGraphFilters() {
     return {
         rfOnly: document.getElementById('filter-rf-only')?.checked || false,
-        selectedOnly: document.getElementById('scan-selected-only')?.checked || false
+        selectedOnly: document.getElementById('scan-selected-only')?.checked || false,
+        infraOnly: document.getElementById('filter-infra-only')?.checked || false
     };
 }
 
@@ -48,6 +49,12 @@ function filterNetworkData(data) {
         const selectedIds = new Set(nodes.filter(node => node.is_selected).map(node => node.id));
         nodes = nodes.filter(node => selectedIds.has(node.id));
         edges = edges.filter(edge => selectedIds.has(edge.from) && selectedIds.has(edge.to));
+    }
+
+    if (filters.infraOnly) {
+        const infraIds = new Set(nodes.filter(node => node.is_infrastructure).map(node => node.id));
+        nodes = nodes.filter(node => infraIds.has(node.id));
+        edges = edges.filter(edge => infraIds.has(edge.from) && infraIds.has(edge.to));
     }
 
     if (filters.rfOnly) {
@@ -415,6 +422,10 @@ function renderLinkOnlyNodeDetails(node) {
                 <input type="checkbox" id="panel-node-selected" ${node.is_selected ? 'checked' : ''}>
                 Include in selected nodes
             </label>
+            <label class="checkbox-label node-selected-control" title="Towers / high sites: used by filters; diagnostics never suggest lowering their power">
+                <input type="checkbox" id="panel-node-infrastructure" ${node.is_infrastructure ? 'checked' : ''}>
+                Infrastructure node
+            </label>
             ${renderBoundaryControl(node.scan_boundary)}
             <p class="node-warning">
                 ${node.lqm_status_message || 'LQM-only neighbor'}
@@ -434,6 +445,7 @@ function renderLinkOnlyNodeDetails(node) {
         </div>
     `;
     bindPanelSelectedToggle(node.id);
+    bindPanelInfrastructureToggle(node.id);
     bindPanelBoundarySelect(node.id);
 }
 
@@ -463,6 +475,10 @@ function renderNodeDetails(data) {
             <label class="checkbox-label node-selected-control">
                 <input type="checkbox" id="panel-node-selected" ${node.is_selected ? 'checked' : ''}>
                 Include in selected nodes
+            </label>
+            <label class="checkbox-label node-selected-control" title="Towers / high sites: used by filters; diagnostics never suggest lowering their power">
+                <input type="checkbox" id="panel-node-infrastructure" ${node.is_infrastructure ? 'checked' : ''}>
+                Infrastructure node
             </label>
             ${renderBoundaryControl(node.scan_boundary)}
             <div class="node-panel-actions">
@@ -568,6 +584,7 @@ function renderNodeDetails(data) {
 
     panelContent.innerHTML = html;
     bindPanelSelectedToggle(node.name);
+    bindPanelInfrastructureToggle(node.name);
     bindPanelBoundarySelect(node.name);
 }
 
@@ -652,6 +669,36 @@ function bindPanelSelectedToggle(nodeName) {
     const toggle = document.getElementById('panel-node-selected');
     if (!toggle) return;
     toggle.addEventListener('change', () => setNodeSelected(nodeName, toggle.checked, toggle));
+}
+
+function bindPanelInfrastructureToggle(nodeName) {
+    const toggle = document.getElementById('panel-node-infrastructure');
+    if (!toggle) return;
+    toggle.addEventListener('change', () => setNodeInfrastructure(nodeName, toggle.checked, toggle));
+}
+
+async function setNodeInfrastructure(nodeName, infrastructure, toggle = null) {
+    if (toggle) toggle.disabled = true;
+    try {
+        const response = await fetch(`/api/nodes/infrastructure/${encodeURIComponent(nodeName)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ infrastructure })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Failed to update node');
+        fullNetworkData.nodes = (fullNetworkData.nodes || []).map(node =>
+            node.id === nodeName ? { ...node, is_infrastructure: result.is_infrastructure } : node
+        );
+        renderCurrentNetwork({ notifyChanges: false });
+        showToast('success', result.is_infrastructure ? 'Marked as Infrastructure' : 'Infrastructure Mark Removed', nodeName);
+    } catch (error) {
+        console.error('Error updating infrastructure node:', error);
+        if (toggle) toggle.checked = !infrastructure;
+        showToast('error', 'Update Failed', error.message);
+    } finally {
+        if (toggle) toggle.disabled = false;
+    }
 }
 
 async function setNodeSelected(nodeName, selected, toggle = null) {
@@ -1127,6 +1174,8 @@ function updateNetwork(data, options = {}) {
         if (node.scan_boundary === 'stop') {
             node.label = node.label + '\n(scan stops)';
         }
+        // Infrastructure (tower) nodes are drawn as diamonds.
+        node.shape = node.is_infrastructure ? 'diamond' : 'dot';
 
         if (currentNodeIds.includes(node.id)) {
             // Preserve existing position and fixed state if node was manually positioned
@@ -1337,6 +1386,17 @@ function initSocket() {
         showToast('error', 'Scan Failed', data.error || 'An error occurred during the network scan');
     });
 
+    // Scan aborted because the starting node was lost; results were discarded
+    socket.on('scan_aborted', (data) => {
+        setStatus(true, 'Connected');
+        document.getElementById('scan-btn').disabled = false;
+        const scanStatus = document.getElementById('footer-scan-status');
+        if (scanStatus) {
+            scanStatus.textContent = 'Scan aborted: starting node unreachable (results discarded)';
+            scanStatus.className = 'scan-status idle';
+        }
+    });
+
     // Handle starting node unreachable error
     socket.on('starting_node_error', (data) => {
         console.error('Starting node error:', data);
@@ -1514,7 +1574,10 @@ const EVENT_ICONS = {
     'link_dropped': { icon: '&#128280;', label: 'Link Dropped', class: 'event-warning' },
     'link_removed': { icon: '&#128465;', label: 'Link Removed', class: 'event-info' },
     'link_restored': { icon: '&#128279;', label: 'Link Restored', class: 'event-success' },
-    'frequency_change': { icon: '&#128246;', label: 'Frequency Change', class: 'event-warning' }
+    'frequency_change': { icon: '&#128246;', label: 'Frequency Change', class: 'event-warning' },
+    'gateway_lost': { icon: '&#9888;', label: 'Starting Node Lost', class: 'event-warning' },
+    'gateway_restored': { icon: '&#10004;', label: 'Starting Node Restored', class: 'event-success' },
+    'radio_config_change': { icon: '&#128225;', label: 'Radio Settings Changed', class: 'event-warning' }
 };
 
 /**
@@ -1671,6 +1734,10 @@ function initEventListeners() {
     document.getElementById('settings-btn').addEventListener('click', toggleSettings);
 
     document.getElementById('filter-rf-only').addEventListener('change', () => {
+        renderCurrentNetwork({ notifyChanges: false });
+    });
+
+    document.getElementById('filter-infra-only')?.addEventListener('change', () => {
         renderCurrentNetwork({ notifyChanges: false });
     });
 

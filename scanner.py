@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 import config
 import database
 import couch_client
+import gateway
 import observations
 
 # Configure logging
@@ -22,6 +23,10 @@ logger = logging.getLogger(__name__)
 # Nodes whose last poll needed the bare-sysinfo fallback, used to emit
 # degraded/recovered events only on transitions instead of every scan.
 _degraded_nodes = set()
+
+# Whether the last scan lost the starting node, so gateway lost/restored events
+# are logged only on transitions instead of every aborted scan.
+_gateway_lost = False
 
 
 def build_sysinfo_url(ip_or_hostname, full=True):
@@ -194,6 +199,17 @@ def process_node_data(data, refresh_services=True):
         is_supernode=supernode
     )
 
+    # Radio settings (mode, SSID, width, antenna) for audits and diagnostics.
+    labels = {'rf_mode': 'mode', 'rf_ssid': 'SSID', 'rf_chanbw': 'channel width'}
+    changes = database.set_node_radio_config(node_name, database.radio_config_from_sysinfo(data))
+    for col, (old, new) in changes.items():
+        events.append({
+            'type': database.EVENT_RADIO_CONFIG_CHANGE,
+            'node': node_name,
+            'details': f"Radio {labels[col]} changed: {old} -> {new}",
+            'severity': 'warning'
+        })
+
     # Process services_local (services provided by this node)
     if refresh_services:
         database.clear_node_services(node_name)
@@ -281,36 +297,91 @@ def tracker_lqm_status_message(hostname, canonical_ip, routability_status):
     return None
 
 
+def lqm_trackers(data):
+    """Return the node's LQM trackers as a dict, or None if malformed.
+
+    Some firmware reports trackers as a list; it is keyed by index then.
+    """
+    trackers = data.get('lqm', {}).get('info', {}).get('trackers', {})
+    if isinstance(trackers, list):
+        return {str(i): t for i, t in enumerate(trackers)}
+    if not isinstance(trackers, dict):
+        logger.warning(f"Unexpected trackers type: {type(trackers)}")
+        return None
+    return trackers
+
+
+def tracker_hostnames(mac, tracker):
+    """Return (tracker_hostname, hostname, mac_address) for a tracker.
+
+    hostname falls back to a mac-derived name when the tracker has none.
+    """
+    mac_address = tracker_mac_address(mac, tracker)
+    tracker_hostname = tracker.get('hostname', '').lower()
+    hostname = tracker_hostname
+    if not hostname and mac_address:
+        hostname = f"mac-{mac_address.replace(':', '').replace('-', '')}"
+    return tracker_hostname, hostname, mac_address
+
+
+def is_tunnel_link_type(link_type):
+    return link_type.upper() in ('WIREGUARD', 'TUN', 'TUNNEL', 'VTUN', 'WG')
+
+
+def get_show_tunnels():
+    """Whether tunnel links are saved (from settings or config)."""
+    return database.get_setting('show_tunnels', 'false').lower() == 'true' or config.SHOW_TUNNELS
+
+
+def discover_neighbors(data, show_tunnels):
+    """Return the routable neighbors to queue for discovery from one node's
+    sysinfo. Pure (no DB writes), so a scan can walk the mesh before deciding
+    whether its results are trustworthy enough to commit.
+    """
+    trackers = lqm_trackers(data) if data else None
+    if not trackers:
+        return []
+
+    discovered_nodes = []
+    for mac, tracker in trackers.items():
+        _, hostname, _ = tracker_hostnames(mac, tracker)
+        if not hostname:
+            continue
+        # A saved link type reported disconnected is not traversed.
+        if (not is_tunnel_link_type(tracker.get('type', '')) or show_tunnels)                 and not tracker_is_connected(tracker):
+            continue
+        # ALWAYS add routable nodes to discovery queue (regardless of link type)
+        # This ensures we discover all nodes even if connected only via tunnels.
+        # Fall back to the tracker 'ip' field when canonical_ip is null —
+        # Babel firmware leaves canonical_ip empty for OLSR DTD neighbors but
+        # populates 'ip' from its own discovery.
+        discover_ip = tracker.get('canonical_ip') or tracker.get('ip')
+        if tracker.get('routable') and discover_ip:
+            discovered_nodes.append({
+                'hostname': hostname,
+                'ip': discover_ip,
+                'url': build_sysinfo_url(discover_ip)
+            })
+    return discovered_nodes
+
+
 def process_links(data, source_node):
     """Process LQM tracker data to extract links and discover connected nodes"""
     if not data or not source_node:
         return [], []
 
-    lqm_info = data.get('lqm', {}).get('info', {})
-    trackers = lqm_info.get('trackers', {})
-    discovered_nodes = []
+    trackers = lqm_trackers(data)
     events = []
-
-    # Handle case where trackers might be a list instead of dict
-    if isinstance(trackers, list):
-        # Convert list to dict using index as key
-        trackers = {str(i): t for i, t in enumerate(trackers)}
-    elif not isinstance(trackers, dict):
-        logger.warning(f"Unexpected trackers type: {type(trackers)}")
+    if trackers is None:
         return [], []
 
-    # Check if tunnels should be shown (from settings or config)
-    show_tunnels = database.get_setting('show_tunnels', 'false').lower() == 'true' or config.SHOW_TUNNELS
+    show_tunnels = get_show_tunnels()
     current_targets = set()
 
     for mac, tracker in trackers.items():
         link_type = tracker.get('type', '')
         canonical_ip = tracker.get('canonical_ip')
-        mac_address = tracker_mac_address(mac, tracker)
-        tracker_hostname = tracker.get('hostname', '').lower()
-        hostname = tracker_hostname
-        if not hostname and mac_address:
-            hostname = f"mac-{mac_address.replace(':', '').replace('-', '')}"
+        tracker_hostname, hostname, mac_address = tracker_hostnames(mac, tracker)
 
         if not hostname:
             continue
@@ -329,8 +400,7 @@ def process_links(data, source_node):
             quality = 0
 
         # Always save RF and DTD links, optionally save tunnel links
-        is_tunnel = link_type.upper() in ('WIREGUARD', 'TUN', 'TUNNEL', 'VTUN', 'WG')
-        if not is_tunnel or show_tunnels:
+        if not is_tunnel_link_type(link_type) or show_tunnels:
             if not tracker_is_connected(tracker):
                 existing_link = database.get_link(source_node, hostname)
                 if existing_link and existing_link.get('status') not in ('dropped', 'removed'):
@@ -445,19 +515,6 @@ def process_links(data, source_node):
                 raw_tracker=raw_tracker
             )
 
-        # ALWAYS add routable nodes to discovery queue (regardless of link type)
-        # This ensures we discover all nodes even if connected only via tunnels.
-        # Fall back to the tracker 'ip' field when canonical_ip is null —
-        # Babel firmware leaves canonical_ip empty for OLSR DTD neighbors but
-        # populates 'ip' from its own discovery.
-        discover_ip = canonical_ip or tracker.get('ip')
-        if tracker.get('routable') and discover_ip:
-            discovered_nodes.append({
-                'hostname': hostname,
-                'ip': discover_ip,
-                'url': build_sysinfo_url(discover_ip)
-            })
-
     missing_links = database.get_missing_source_links(source_node, current_targets)
     dropped_count = database.mark_missing_source_links_dropped(source_node, current_targets)
     for link in missing_links:
@@ -475,7 +532,7 @@ def process_links(data, source_node):
     if dropped_count > 0:
         logger.info(f"Marked {dropped_count} missing links from {source_node} as dropped")
 
-    return discovered_nodes, events
+    return discover_neighbors(data, show_tunnels), events
 
 
 def normalize_start_url(url):
@@ -490,19 +547,42 @@ def normalize_start_url(url):
     return url
 
 
-def discover_network(start_url=None, max_depth=None, record_depth=True):
+def url_host(url):
+    """Lowercased host of a node URL (scheme optional)."""
+    if '://' not in url:
+        url = f"http://{url}"
+    return (urlparse(url).hostname or '').lower()
+
+
+def gateway_reachable(gateway_url):
+    """Probe the starting node with a bare sysinfo request (cheap, and answers
+    even when the node is too loaded for the full LQM/hosts/services one)."""
+    return gateway.probe(url_host(gateway_url))
+
+
+def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_url=None):
     """
     Discover the network starting from a node.
     Uses BFS traversal to find all connected nodes.
     Returns a dictionary with scan results.
 
+    The scan runs in two phases: every node is fetched first (no DB writes),
+    then the results are committed. The configured starting node is the
+    collector's gateway into the mesh; if it is unreachable at the start, or
+    stops answering at any point during the scan, the scan is aborted and every
+    result is discarded. Failures in that case say nothing about the mesh
+    nodes themselves -- only that this collector is off the network.
+
     Args:
         start_url: Starting node URL
         max_depth: Maximum hops from starting node (default from settings/config)
+        gateway_url: Node whose reachability gates the scan (default: start_url)
     """
     if start_url is None:
         # Check for override in settings
-        start_url = database.get_setting('starting_node', config.STARTING_NODE)
+        start_url = get_starting_node_url()
+    if gateway_url is None:
+        gateway_url = start_url
 
     if max_depth is None:
         # Get from settings or config
@@ -510,6 +590,8 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
 
     # Normalize the URL to ensure it has the proper path
     start_url = normalize_start_url(start_url)
+    gateway_url = normalize_start_url(gateway_url)
+    gateway_host = url_host(gateway_url)
 
     logger.info(f"Starting network discovery from {start_url} (max depth: {max_depth})")
 
@@ -524,7 +606,7 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
     errors = []
     max_depth_reached = 0
     all_events = []
-    starting_node_error = None  # Track if starting node failed
+    starting_node_error = None  # Set when the scan is aborted (gateway lost)
     observed_at = observations.utc_now()
     observation_docs = []
     attempted_nodes = 0
@@ -539,12 +621,15 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
     # Every node name polled or reported as a neighbor this scan. Used to tell
     # "left scan scope" apart from "went offline inside the scanned area".
     seen_names = set()
+    show_tunnels = get_show_tunnels()
+    # (item, fetch result) pairs in BFS order, committed only after the scan.
+    fetched_results = []
 
     def process_result(url, depth, target_hint, data, degraded, response_ms):
-        """Process one fetched node serially (all DB writes happen here, on the
-        scan thread). Returns the next-level (url, depth, hint) tuples to queue."""
+        """Commit one fetched node (all DB writes happen here, serially, and
+        only once the whole scan is known to be trustworthy)."""
         nonlocal attempted_nodes, reachable_nodes, nodes_found, links_found
-        nonlocal max_depth_reached, starting_node_error
+        nonlocal max_depth_reached
         attempted_nodes += 1
         logger.info(f"Scanned (depth {depth}): {url}")
 
@@ -571,10 +656,7 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
                 database.update_node_health(
                     failed_target, reachable=False, response_ms=response_ms
                 )
-            if depth == 0 and starting_node_error is None:
-                starting_node_error = f"Starting node unreachable: {url}"
-                logger.error(starting_node_error)
-            return []
+            return
 
         # Process the node
         node_name, node_events = process_node_data(data, refresh_services=not degraded)
@@ -582,7 +664,7 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
 
         if not node_name:
             errors.append(f"Invalid node data from: {url}")
-            return []
+            return
 
         # Record discovery depth (hops from the seed) on full scans only; a
         # targeted single-node scan starts at depth 0 and must not overwrite it.
@@ -667,6 +749,20 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
             nodes_found += 1
             max_depth_reached = max(max_depth_reached, depth)
 
+        # Process links. A degraded (bare sysinfo) response has no LQM data,
+        # so it says nothing about links: skip link processing rather than
+        # mark every link from this node dropped.
+        if not degraded:
+            discovered, link_events = process_links(data, node_name)
+            all_events.extend(link_events)
+            links_found += len(discovered)
+
+    def plan_next(depth, data, degraded):
+        """Return the next-level (url, depth, hint) tuples to queue for one
+        fetched node. No DB writes, so traversal can run ahead of the commit."""
+        node_name = (data or {}).get('node', '').lower()
+        if not node_name:
+            return []
         seen_names.add(node_name)
 
         # Check if this is a supernode - if so, don't traverse beyond it
@@ -682,15 +778,9 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
             boundary_stopped.add(node_name)
             logger.info(f"Scan boundary ({boundaries[node_name]}) at {node_name} - not traversing beyond")
 
-        # Process links and get discovered nodes. A degraded (bare sysinfo)
-        # response has no LQM data, so it says nothing about links: skip
-        # link processing rather than mark every link from this node dropped.
-        if degraded:
-            discovered, link_events = [], []
-        else:
-            discovered, link_events = process_links(data, node_name)
-        all_events.extend(link_events)
-        links_found += len(discovered)
+        # A degraded (bare sysinfo) response has no LQM data, so it has no
+        # neighbors to traverse.
+        discovered = [] if degraded else discover_neighbors(data, show_tunnels)
 
         # Queue next-level nodes (unless at max depth or past a supernode).
         next_nodes = []
@@ -731,12 +821,58 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
                 lambda it: (it, fetch_node_with_fallback(it[0])), wave
             ))
 
-        for (url, depth, target_hint), (data, degraded, response_ms) in fetched:
-            queue.extend(process_result(url, depth, target_hint, data, degraded, response_ms))
+        # Is the gateway still answering? If it was polled in this wave its own
+        # result answers that; otherwise probe it. Losing it means every
+        # failure in this scan may be ours, not the mesh's: abort.
+        gateway_ok = None
+        for (url, _, _), (data, _, _) in fetched:
+            if url_host(url) == gateway_host:
+                gateway_ok = bool(gateway_ok) or data is not None
+        if gateway_ok is None:
+            gateway_ok = gateway_reachable(gateway_url)
+        else:
+            gateway.record(gateway_ok)
+        if not gateway_ok:
+            starting_node_error = (
+                f"Starting node {gateway_host} unreachable -- scan aborted, results "
+                "discarded (this collector appears to be off the AREDN network)"
+            )
+            logger.error(starting_node_error)
+            break
+
+        for item, fetch_result in fetched:
+            fetched_results.append((item, fetch_result))
+            queue.extend(plan_next(item[1], fetch_result[0], fetch_result[1]))
+
+    if starting_node_error:
+        return {
+            'aborted': True,
+            'nodes_found': 0,
+            'links_found': 0,
+            'nodes_visited': 0,
+            'max_depth_reached': 0,
+            'errors': [starting_node_error],
+            'events': [],
+            'timestamp': datetime.now().isoformat(),
+            'starting_node_error': starting_node_error,
+            'observed_at': observations.iso_z(observed_at),
+            'observation_docs': [],
+            'node_count_attempted': 0,
+            'node_count_reachable': 0,
+            'boundaries_active': bool(boundaries),
+            'boundary_skipped': [],
+            'boundary_stopped': [],
+            'seen_names': []
+        }
+
+    # The gateway stayed reachable throughout, so the results reflect the mesh.
+    for (url, depth, target_hint), (data, degraded, response_ms) in fetched_results:
+        process_result(url, depth, target_hint, data, degraded, response_ms)
 
     logger.info(f"Discovery complete: {nodes_found} nodes, {links_found} links, max depth reached: {max_depth_reached}")
 
     return {
+        'aborted': False,
         'nodes_found': nodes_found,
         'links_found': links_found,
         'nodes_visited': len(visited_nodes),
@@ -744,7 +880,7 @@ def discover_network(start_url=None, max_depth=None, record_depth=True):
         'errors': errors,
         'events': all_events,
         'timestamp': datetime.now().isoformat(),
-        'starting_node_error': starting_node_error,  # None if starting node was reachable
+        'starting_node_error': None,
         'observed_at': observations.iso_z(observed_at),
         'observation_docs': observation_docs,
         'node_count_attempted': attempted_nodes,
@@ -777,7 +913,8 @@ def write_observations(result, duration_ms):
             node_count_attempted=result.get('node_count_attempted', 0),
             node_count_reachable=result.get('node_count_reachable', 0),
             duration_ms=duration_ms,
-            errors=result.get('errors', [])
+            errors=result.get('errors', []),
+            scan_aborted=result.get('aborted', False)
         )
     )
     docs_by_id[heartbeat['_id']] = heartbeat
@@ -966,8 +1103,19 @@ def run_scan():
     # Discover network
     result = discover_network()
 
+    gateway_events = gateway_transition_events(result)
+    if result.get('aborted'):
+        # Lost the starting node: nothing in this scan reflects the mesh. Skip
+        # the timeout-based link/node aging and retention pruning too, so an
+        # outage on our side doesn't age healthy nodes into "offline".
+        log_scan_events(gateway_events)
+        result['events'] = gateway_events
+        result['dropped_links'] = []
+        result['inactive_nodes'] = []
+        return finish_scan_result(result, scan_started)
+
     # Collect all events
-    all_events = result.get('events', [])
+    all_events = gateway_events + result.get('events', [])
 
     # Update link statuses
     link_status = update_link_statuses()
@@ -985,7 +1133,46 @@ def run_scan():
     all_events.extend(node_status.get('events', []))
 
     # Save all events to database
-    for event in all_events:
+    log_scan_events(all_events)
+
+    database.clear_old_events(config.CONNECTIVITY_LOG_RETENTION_DAYS)
+    database.trim_connectivity_log(config.CONNECTIVITY_LOG_RETENTION_DAYS)
+    result['nodes_pruned'] = prune_database_retention()
+
+    result['events'] = all_events
+    finish_scan_result(result, scan_started)
+
+    logger.info(f"Scan complete: {result['nodes_found']} nodes, {result['links_found']} links, {len(all_events)} events")
+    return result
+
+
+def gateway_transition_events(result):
+    """Events for losing/regaining the starting node, on transitions only."""
+    global _gateway_lost
+    if result.get('aborted'):
+        if _gateway_lost:
+            return []
+        _gateway_lost = True
+        return [{
+            'type': database.EVENT_GATEWAY_LOST,
+            'node': None,
+            'details': f"{result.get('starting_node_error')}. Scans are skipped until "
+                       "it answers again; no node or link state is changed meanwhile.",
+            'severity': 'warning'
+        }]
+    if not _gateway_lost:
+        return []
+    _gateway_lost = False
+    return [{
+        'type': database.EVENT_GATEWAY_RESTORED,
+        'node': None,
+        'details': "Starting node reachable again; scanning resumed",
+        'severity': 'info'
+    }]
+
+
+def log_scan_events(events):
+    for event in events:
         database.log_event(
             event_type=event['type'],
             node_name=event.get('node'),
@@ -993,11 +1180,10 @@ def run_scan():
             severity=event.get('severity', 'info')
         )
 
-    database.clear_old_events(config.CONNECTIVITY_LOG_RETENTION_DAYS)
-    database.trim_connectivity_log(config.CONNECTIVITY_LOG_RETENTION_DAYS)
-    result['nodes_pruned'] = prune_database_retention()
 
-    result['events'] = all_events
+def finish_scan_result(result, scan_started):
+    """Write CouchDB observations (just the heartbeat for an aborted scan) and
+    strip internal fields from the result."""
     result['timestamp'] = datetime.now().isoformat()
     result['couchdb_write'] = write_observations(
         result,
@@ -1006,8 +1192,6 @@ def run_scan():
     result['observation_count'] = len(result.get('observation_docs', []))
     result.pop('observation_docs', None)
     result.pop('seen_names', None)
-
-    logger.info(f"Scan complete: {result['nodes_found']} nodes, {result['links_found']} links, {len(all_events)} events")
     return result
 
 
@@ -1022,26 +1206,18 @@ def run_targeted_scan(target, max_depth=0):
     logger.info("Starting targeted scan for %s", target)
     scan_started = monotonic()
     start_url = normalize_start_url(target)
-    result = discover_network(start_url=start_url, max_depth=max_depth, record_depth=False)
+    # Gate on the configured starting node, not the target: if we can't reach
+    # the mesh at all, the target failing says nothing about the target.
+    result = discover_network(
+        start_url=start_url, max_depth=max_depth, record_depth=False,
+        gateway_url=get_starting_node_url()
+    )
 
-    all_events = result.get('events', [])
-    for event in all_events:
-        database.log_event(
-            event_type=event['type'],
-            node_name=event.get('node'),
-            details=event.get('details'),
-            severity=event.get('severity', 'info')
-        )
+    all_events = gateway_transition_events(result) + result.get('events', [])
+    log_scan_events(all_events)
 
     result['events'] = all_events
-    result['timestamp'] = datetime.now().isoformat()
-    result['couchdb_write'] = write_observations(
-        result,
-        duration_ms=int((monotonic() - scan_started) * 1000)
-    )
-    result['observation_count'] = len(result.get('observation_docs', []))
-    result.pop('observation_docs', None)
-    result.pop('seen_names', None)
+    finish_scan_result(result, scan_started)
     logger.info(
         "Targeted scan complete for %s: %s nodes, %s links",
         target,

@@ -114,6 +114,29 @@ const NodesModule = {
         return `<a href="${this.escapeAttr(`http://${address}`)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(address)}</a>`;
     },
 
+    // Infrastructure node names (from node rows and the network graph).
+    getInfrastructureNodeNames() {
+        const names = new Set((this.nodes || []).filter(n => n.is_infrastructure).map(n => n.name).filter(Boolean));
+        for (const node of this.networkData.nodes || []) {
+            if (node.is_infrastructure && node.id) names.add(node.id);
+        }
+        return names;
+    },
+
+    // A node set plus every node one RF/DtD hop from it.
+    withConnected(base) {
+        const visible = new Set(base);
+        for (const edge of this.networkData.edges || []) {
+            const t = String(edge.link_type || '').toUpperCase();
+            if (t !== 'RF' && t !== 'DTD') continue;
+            if (base.has(edge.from) || base.has(edge.to)) {
+                visible.add(edge.from);
+                visible.add(edge.to);
+            }
+        }
+        return visible;
+    },
+
     getSelectedNodeNames() {
         const selected = new Set(
             this.nodes
@@ -179,6 +202,8 @@ const NodesModule = {
         const ms7d = 7 * ms24h;
         const selectedNames = status === 'selected' ? this.getSelectedNodeNames() : null;
         const selectedConnectedNames = status === 'selected-connected' ? this.getSelectedConnectedNodeNames() : null;
+        const infraNames = status.startsWith('infrastructure') ? this.getInfrastructureNodeNames() : null;
+        const infraSet = status === 'infrastructure-connected' ? this.withConnected(infraNames) : infraNames;
         const typeNames = typeFilter !== 'all' ? this.nodesWithLinkType(typeFilter) : null;
 
         this.filteredNodes = this.nodes.filter(node => {
@@ -210,6 +235,8 @@ const NodesModule = {
                 matchesStatus = selectedNames.has(node.name);
             } else if (status === 'selected-connected') {
                 matchesStatus = selectedConnectedNames.has(node.name);
+            } else if (infraSet) {
+                matchesStatus = infraSet.has(node.name);
             } else if (status === 'active') {
                 matchesStatus = node.is_active === 1 && !node.is_link_only;
             } else if (status === 'link-only') {
@@ -398,8 +425,8 @@ const NodesModule = {
                         <tr><td>Model:</td><td>${this.escapeHtml(node.model || 'Unknown')}</td></tr>
                         <tr><td>Firmware:</td><td>${this.escapeHtml(node.firmware_version || 'Unknown')}</td></tr>
                         <tr><td>Description:</td><td>${this.escapeHtml(node.description || 'N/A')}</td></tr>
-                        <tr><td>RF Frequency:</td><td>${this.escapeHtml(node.rf_frequency || 'N/A')}</td></tr>
-                        <tr><td>RF Channel:</td><td>${this.escapeHtml(node.rf_channel || 'N/A')}</td></tr>
+                        <tr><td>RF Frequency:</td><td>${RfChannel.frequencyText(node.rf_span, node.rf_frequency)}</td></tr>
+                        <tr><td>RF Channel:</td><td>${RfChannel.channelText(node.rf_span, node.rf_channel)}</td></tr>
                         <tr><td>First Seen:</td><td>${node.first_seen ? new Date(node.first_seen).toLocaleString() : 'N/A'}</td></tr>
                         <tr><td>Last Seen:</td><td>${node.last_seen ? new Date(node.last_seen).toLocaleString() : 'N/A'}</td></tr>
                         <tr><td>Status:</td><td>${this.getNodeStatusText(node)}</td></tr>
@@ -439,17 +466,21 @@ const NodesModule = {
                 html += `
                     <div class="node-detail-section">
                         <h3>Connected Nodes (${links.length})</h3>
-                        <table class="info-table">
-                            <tr><th>Node</th><th>Type</th><th>Quality</th><th>SNR</th><th>Signal</th><th>Noise</th><th>MAC</th><th>Routability</th><th>Status</th><th>Node-reported flaps</th><th>Scanner-to-node</th><th>Last Seen</th></tr>
+                        ${RfChannel.summary(links, l => l.source_node === node.name ? l.target_node : l.source_node)}
+                        <div class="table-scroll-wrapper">
+                        <table class="info-table diag-table">
+                            <tr><th>Node</th><th>Type</th><th>Peer Channel / Freq</th><th>Channel Relation</th><th>Quality</th><th>SNR</th><th>Signal</th><th>Noise</th><th>MAC</th><th>Routability</th><th>Status</th><th>Node-reported flaps</th><th>Scanner-to-node</th><th>Last Seen</th></tr>
                 `;
                 for (const link of links) {
                     const otherNode = link.source_node === node.name ? link.target_node : link.source_node;
                     const qualityClass = this.getQualityClass(link.quality);
                     const fm = flapMap[otherNode] || { node_reported: 0, scanner: 0 };
                     html += `
-                        <tr>
+                        <tr class="${RfChannel.rowClass(link.peer_rf)}">
                             <td><strong>${this.escapeHtml(otherNode)}</strong></td>
                             <td>${this.escapeHtml(link.link_type)}</td>
+                            <td>${RfChannel.peerCell(link.peer_rf)}</td>
+                            <td>${RfChannel.relationCell(link.peer_rf)}</td>
                             <td class="${qualityClass}">${link.quality || 0}%</td>
                             <td>${this.escapeHtml(link.snr || 'N/A')}</td>
                             <td>${this.escapeHtml(link.signal || 'N/A')}</td>
@@ -463,7 +494,7 @@ const NodesModule = {
                         </tr>
                     `;
                 }
-                html += '</table></div>';
+                html += '</table></div></div>';
             }
 
             if (services.length > 0) {

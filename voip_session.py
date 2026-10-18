@@ -30,6 +30,7 @@ import time
 
 import config
 import database
+import gateway
 import rf_stats
 import voip_proto as vp
 
@@ -113,6 +114,8 @@ class VoipSession:
         self.worker.start()
 
     def stop(self):
+        if self.done:
+            return
         self.stop_event.set()
         self.udp.stop_sender()
         self.udp.stop_echo()
@@ -123,7 +126,8 @@ class VoipSession:
                                   headers={"X-AREDN-Diag-Key": self.agent_key})
             except Exception:
                 pass
-        if self.worker and self.worker.is_alive():
+        if (self.worker and self.worker.is_alive()
+                and self.worker is not threading.current_thread()):
             self.worker.join(timeout=2.0)
         self.udp.stop()
 
@@ -140,6 +144,7 @@ class VoipSession:
         base = f"http://{self.remote_host}:{config.VOIP_AGENT_PORT}"
         headers = {"X-AREDN-Diag-Key": self.agent_key}
 
+        gateway_lost = False
         while not self.stop_event.is_set() and time.monotonic() < max_end:
             now = time.monotonic()
 
@@ -183,9 +188,22 @@ class VoipSession:
                 "diagnosis": text,
             }
             self.last_sample = sample
+            # Any loss/failed stats may be our own lost path onto the mesh;
+            # if so, discard the sample and end the session.
+            troubled = (fwd_rx.get("loss_pct") or local_rx.get("loss_pct")
+                        or rtt.get("echo_loss_pct") or remote_stats.get("ok") is False)
+            if troubled and gateway.failure_is_ours():
+                self.error = gateway.unreachable_message() + "; session stopped"
+                logger.warning("VoIP session %s: %s", self.session_id, self.error)
+                self.mark_event("GATEWAY_LOST", self.error)
+                gateway_lost = True
+                break
             database.save_voip_sample(self.session_id, sample)
             self.route_changed_flag = False
             self.stop_event.wait(1.0)
+
+        if gateway_lost and not self.stop_event.is_set():
+            self.stop()
 
     def _refresh_routes(self, base, headers):
         # Forward: from the collector's vantage (or the chosen source node).
@@ -374,6 +392,8 @@ def start_session(mode, source_label, target_label, remote_host,
     with _session_lock:
         if _current and not _current.done:
             return None, "A VoIP session is already running; stop it first."
+        if not gateway.is_reachable():
+            return None, gateway.unreachable_message()
         try:
             s = VoipSession(mode, source_label, target_label, remote_host,
                             agent_key=agent_key, pps=pps,

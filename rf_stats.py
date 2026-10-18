@@ -24,6 +24,7 @@ except ImportError:
 
 import config
 import database
+import gateway
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,18 @@ logger = logging.getLogger(__name__)
 iperf_queue = deque()
 iperf_running = False
 iperf_lock = threading.Lock()
+
+
+class GatewayUnreachable(Exception):
+    """Raised when a probe is refused because the starting node is unreachable."""
+
+
+def ping_ok(result):
+    """True when a ping result shows the target answered at all."""
+    if not result:
+        return False
+    loss = result.get('loss')
+    return loss is None or loss < 100
 
 
 def _run_subprocess(cmd, timeout):
@@ -598,6 +611,10 @@ def run_ping_round(socketio=None):
         logger.debug("No RF links to ping")
         return
 
+    if not gateway.is_reachable():
+        logger.warning("Skipping ping round: %s", gateway.unreachable_message())
+        return
+
     # Calculate stagger delay (spread pings across ~50 seconds of a 60s interval)
     stagger_delay = min(50.0 / len(rf_links), 5.0) if rf_links else 0
 
@@ -611,6 +628,10 @@ def run_ping_round(socketio=None):
 
         # Run ping
         ping_result = ping_node(target_ip, count=config.PING_COUNT, timeout=config.PING_TIMEOUT)
+
+        if not ping_ok(ping_result) and gateway.failure_is_ours():
+            logger.warning("Aborting ping round: %s", gateway.unreachable_message())
+            return
 
         if ping_result:
             # Record to database
@@ -696,6 +717,15 @@ def process_iperf_queue(socketio=None):
             logger.debug("Iperf queue is empty")
             return
 
+    # Leave the queue intact until we're back on the mesh.
+    if not gateway.is_reachable():
+        logger.warning("Skipping iperf queue: %s", gateway.unreachable_message())
+        return
+
+    with iperf_lock:
+        if iperf_running or not iperf_queue:
+            return
+
         # Sort by priority and get highest priority item
         sorted_queue = sorted(iperf_queue, key=lambda x: x['priority'])
         test_item = sorted_queue[0]
@@ -766,6 +796,14 @@ def process_iperf_queue(socketio=None):
                 })
 
             logger.info(f"Iperf complete: {source_node}->{target_node}: TX={result['tx_mbps']}Mbps, RX={result['rx_mbps']}Mbps")
+        elif gateway.failure_is_ours():
+            if socketio:
+                socketio.emit('iperf_test_status', {
+                    'link': {'source': source_node, 'target': target_node},
+                    'status': 'aborted',
+                    'error': gateway.unreachable_message()
+                })
+            logger.warning(f"Iperf aborted: {source_node} -> {target_node}: {gateway.unreachable_message()}")
         else:
             # Emit failure
             if socketio:
@@ -786,6 +824,10 @@ def cleanup_old_history():
     count = database.cleanup_link_history(hours=hours)
     if count > 0:
         logger.info(f"Cleaned up {count} old link history records")
+
+    stripped = database.strip_old_raw_trackers(config.RAW_TRACKER_RETENTION_HOURS)
+    if stripped > 0:
+        logger.info(f"Stripped raw tracker data from {stripped} link history records")
 
     health_count = database.cleanup_node_health(config.NODE_HEALTH_RETENTION_HOURS)
     if health_count > 0:
@@ -877,12 +919,20 @@ def run_incident_capture(link, socketio=None):
     rounds = 0
     try:
         while time.monotonic() - started < config.INCIDENT_DURATION:
+            if not gateway.is_reachable():
+                logger.warning("Incident capture %s <-> %s stopped: %s",
+                               source_node, target_node, gateway.unreachable_message())
+                break
             rounds += 1
             # source -> target
             forward = ping_via_aredn(target_node, source_node_ip=source_ip)
-            _record_incident_ping(source_node, target_node, forward)
             # target -> source (isolates the reverse direction)
             reverse = ping_via_aredn(source_node, source_node_ip=target_ip)
+            if not (ping_ok(forward) and ping_ok(reverse)) and gateway.failure_is_ours():
+                logger.warning("Incident capture %s <-> %s stopped: %s",
+                               source_node, target_node, gateway.unreachable_message())
+                break
+            _record_incident_ping(source_node, target_node, forward)
             _record_incident_ping(target_node, source_node, reverse)
 
             if socketio:
@@ -914,6 +964,9 @@ def maybe_run_incident_probes(socketio=None):
     """
     if not (config.INCIDENT_MODE_ENABLED and config.RF_STATS_ENABLED):
         return []
+    if not gateway.is_reachable():
+        logger.warning("Skipping incident probes: %s", gateway.unreachable_message())
+        return []
 
     launched = []
     for link in select_incident_links():
@@ -941,6 +994,9 @@ def probe_mesh_reachability(socketio=None):
     """
     if not (config.MESH_PROBE_ENABLED and config.RF_STATS_ENABLED):
         return []
+    if not gateway.is_reachable():
+        logger.warning("Skipping mesh reachability probes: %s", gateway.unreachable_message())
+        return []
 
     candidates = database.get_via_mesh_candidates(
         config.MESH_PROBE_COOLDOWN_SECONDS, config.MESH_PROBE_MAX_PER_CYCLE
@@ -953,6 +1009,9 @@ def probe_mesh_reachability(socketio=None):
         result = ping_via_aredn(target, source_node_ip=cand.get('neighbor_ip'))
         loss = (result or {}).get('loss')
         reachable = bool(result) and (loss is None or loss < 100)
+        if not reachable and gateway.failure_is_ours():
+            logger.warning("Stopping mesh probes: %s", gateway.unreachable_message())
+            break
         response_ms = (result or {}).get('avg')
         database.record_mesh_probe(node, neighbor, reachable, response_ms=response_ms)
         results.append((node, neighbor, reachable))
@@ -996,6 +1055,9 @@ def ping_all_rf_links(count=3, timeout=2, max_workers=16, links=None, clear_firs
     if not all_links:
         return []
 
+    if not gateway.is_reachable():
+        raise GatewayUnreachable(gateway.unreachable_message())
+
     if clear_first:
         try:
             database.clear_link_ping_throughput(
@@ -1016,6 +1078,11 @@ def ping_all_rf_links(count=3, timeout=2, max_workers=16, links=None, clear_firs
         except Exception as exc:
             logger.warning("RF ping %s -> %s (%s) failed: %s", src, tgt, ip, exc)
             res = None
+        if not ping_ok(res) and gateway.failure_is_ours():
+            # Our path onto the mesh is gone; don't blame the link.
+            base.update({'reachable': None, 'avg': None, 'loss': None, 'jitter': None,
+                         'aborted': True})
+            return base
         if res:
             try:
                 database.update_link_history_ping(

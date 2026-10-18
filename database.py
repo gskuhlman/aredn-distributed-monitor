@@ -3,6 +3,7 @@ Database module for AREDN Network Monitor
 SQLite database setup and CRUD operations
 """
 
+import json
 import sqlite3
 from datetime import datetime, timedelta
 from contextlib import contextmanager
@@ -24,6 +25,31 @@ def _parse_local_timestamp(timestamp):
 
 def get_db_path():
     return config.DATABASE_PATH
+
+
+# LQM tracker fields promoted to link_history columns (column, tracker key) so
+# link diagnostics outlive the short raw_tracker retention.
+LQM_TRACKER_KEYS = (
+    ('signal', 'signal'),
+    ('lq', 'lq'),
+    ('tx_quality', 'tx_quality'),
+    ('ping_quality', 'ping_quality'),
+    ('tx_packets', 'tx_packets'),
+    ('tx_fail', 'tx_fail'),
+    ('tx_retries', 'tx_retries'),
+    ('tx_bitrate', 'tx_bitrate'),
+    ('rx_bitrate', 'rx_bitrate'),
+    ('txcost', 'txcost'),
+    ('rxcost', 'rxcost'),
+    ('routable', 'routable'),
+    ('lqm_rtt', 'rtt'),
+)
+LQM_HISTORY_COLUMNS = (
+    ('signal', 'REAL'), ('lq', 'REAL'), ('tx_quality', 'REAL'), ('ping_quality', 'REAL'),
+    ('tx_packets', 'INTEGER'), ('tx_fail', 'INTEGER'), ('tx_retries', 'INTEGER'),
+    ('tx_bitrate', 'REAL'), ('rx_bitrate', 'REAL'), ('txcost', 'INTEGER'),
+    ('rxcost', 'INTEGER'), ('routable', 'INTEGER'), ('lqm_rtt', 'REAL'),
+)
 
 
 @contextmanager
@@ -124,6 +150,17 @@ def init_db():
             )
         ''')
 
+        # Infrastructure nodes: towers/high sites the operator marks so filters
+        # and diagnostics can treat them differently (e.g. never recommend
+        # lowering their power). site is the location code from the node name.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS infrastructure_nodes (
+                node_name TEXT PRIMARY KEY,
+                site TEXT,
+                marked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # Scan boundaries: operator-chosen nodes that limit BFS discovery so a
         # local event isn't polluted by remote meshes. mode is 'exclude' (never
         # poll this node, so nothing beyond it is reached through it) or 'stop'
@@ -214,11 +251,19 @@ def init_db():
             ('blocked_reason', 'TEXT'),
             ('raw_tracker', 'TEXT'),
             ("sample_type", "TEXT DEFAULT 'scan'")
-        ):
+        ) + LQM_HISTORY_COLUMNS:
             try:
                 cursor.execute(f'ALTER TABLE link_history ADD COLUMN {column} {definition}')
             except sqlite3.OperationalError:
                 pass  # Column already exists
+
+        # Promote LQM fields out of raw_tracker for rows recorded before these
+        # columns existed (raw_tracker itself is only kept a short while).
+        cursor.execute(f'''
+            UPDATE link_history SET {", ".join(
+                f"{col} = json_extract(raw_tracker, '$.{key}')" for col, key in LQM_TRACKER_KEYS)}
+            WHERE raw_tracker IS NOT NULL AND tx_packets IS NULL AND json_valid(raw_tracker)
+        ''')
 
         # nodes additive health columns (latest snapshot; time series in node_health_history)
         for column, definition in (
@@ -231,7 +276,7 @@ def init_db():
             ('mem_total', 'INTEGER'),
             ('channel_busy', 'REAL'),
             ('scan_depth', 'INTEGER')
-        ):
+        ) + RADIO_CONFIG_COLUMNS:
             try:
                 cursor.execute(f'ALTER TABLE nodes ADD COLUMN {column} {definition}')
             except sqlite3.OperationalError:
@@ -384,6 +429,7 @@ def delete_node(name):
         cursor.execute('DELETE FROM nodes WHERE name = ?', (name,))
         deleted = cursor.rowcount
         cursor.execute('DELETE FROM selected_nodes WHERE node_name = ?', (name,))
+        cursor.execute('DELETE FROM infrastructure_nodes WHERE node_name = ?', (name,))
         return deleted
 
 
@@ -409,6 +455,7 @@ def prune_old_nodes(days):
         )
         cursor.execute(f'DELETE FROM nodes WHERE name IN ({placeholders})', names)
         cursor.execute(f'DELETE FROM selected_nodes WHERE node_name IN ({placeholders})', names)
+        cursor.execute(f'DELETE FROM infrastructure_nodes WHERE node_name IN ({placeholders})', names)
         return len(names)
 
 
@@ -558,11 +605,13 @@ def get_observed_node(name):
         node['is_link_only'] = False
         node['observed_status'] = 'active' if node.get('is_active') == 1 else 'inactive'
         node['is_selected'] = is_node_selected(name)
+        node.update(infrastructure_info(name))
         node['scan_boundary'] = get_scan_boundaries().get(name)
         return node
     link_only = build_link_only_node(name)
     if link_only:
         link_only['is_selected'] = is_node_selected(name)
+        link_only.update(infrastructure_info(name))
         link_only['scan_boundary'] = get_scan_boundaries().get(name)
     return link_only
 
@@ -572,6 +621,7 @@ def get_all_observed_nodes():
     nodes = get_all_nodes()
     node_names = {node['name'] for node in nodes}
     boundaries = get_scan_boundaries()
+    infra = get_infrastructure_nodes()
     observed = []
 
     for node in nodes:
@@ -579,6 +629,8 @@ def get_all_observed_nodes():
         item['is_link_only'] = False
         item['observed_status'] = 'active' if item.get('is_active') == 1 else 'inactive'
         item['is_selected'] = is_node_selected(item['name'])
+        item['is_infrastructure'] = item['name'] in infra
+        item['infrastructure_site'] = infra.get(item['name'])
         item['scan_boundary'] = boundaries.get(item['name'])
         item['links_count'] = len(get_node_all_links(item['name']))
         item['active_links_count'] = len(get_node_links(item['name']))
@@ -601,6 +653,8 @@ def get_all_observed_nodes():
         link_only = build_link_only_node(name)
         if link_only:
             link_only['is_selected'] = is_node_selected(name)
+            link_only['is_infrastructure'] = name in infra
+            link_only['infrastructure_site'] = infra.get(name)
             link_only['scan_boundary'] = boundaries.get(name)
             observed.append(link_only)
 
@@ -1113,6 +1167,124 @@ def set_node_selected(name, selected):
     return is_node_selected(node_name)
 
 
+# ============ Infrastructure Node Operations ============
+
+DEFAULT_SITE_NAMES = {
+    'COL': 'Collins Tower',
+    'MMC': 'Mt Mercy Hospital',
+    'EOC': 'Linn County EOC',
+}
+
+
+def site_code_from_name(name):
+    """Location code from a CALL-SITE-... node name (w0gq-col-rkt-s -> COL)."""
+    parts = (name or '').split('-')
+    return parts[1].upper() if len(parts) >= 3 and parts[1] else None
+
+
+def get_site_names():
+    """Site code -> human-readable location, from settings over the defaults."""
+    names = dict(DEFAULT_SITE_NAMES)
+    try:
+        names.update(json.loads(get_setting('site_names', '{}') or '{}'))
+    except (TypeError, ValueError):
+        pass
+    return names
+
+
+def get_infrastructure_nodes():
+    """{node_name: site_code} for every infrastructure node."""
+    with get_connection() as conn:
+        rows = conn.execute('SELECT node_name, site FROM infrastructure_nodes ORDER BY node_name')
+        return {row['node_name']: row['site'] for row in rows}
+
+
+def get_infrastructure_node_names():
+    return sorted(get_infrastructure_nodes())
+
+
+def infrastructure_info(name):
+    site = get_infrastructure_nodes().get(name, False)
+    return {'is_infrastructure': site is not False,
+            'infrastructure_site': site if site is not False else None}
+
+
+def set_node_infrastructure(name, infrastructure, site=None):
+    """Mark or unmark a node as infrastructure. The site defaults to the
+    location code in the node name."""
+    node_name = (name or '').lower()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if infrastructure:
+            cursor.execute('''
+                INSERT INTO infrastructure_nodes (node_name, site, marked_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(node_name) DO UPDATE SET site = excluded.site
+            ''', (node_name, site or site_code_from_name(node_name), local_timestamp()))
+        else:
+            cursor.execute('DELETE FROM infrastructure_nodes WHERE node_name = ?', (node_name,))
+    return node_name in get_infrastructure_nodes()
+
+
+# ============ Radio configuration (from sysinfo meshrf) ============
+
+RADIO_CONFIG_COLUMNS = (
+    ('rf_status', 'TEXT'), ('rf_mode', 'TEXT'), ('rf_ssid', 'TEXT'), ('rf_chanbw', 'REAL'),
+    ('antenna_azimuth', 'REAL'), ('antenna_elevation', 'REAL'), ('antenna_height', 'REAL'),
+    ('antenna_gain', 'REAL'), ('antenna_beamwidth', 'REAL'), ('antenna_desc', 'TEXT'),
+    ('lqm_user_blocks', 'TEXT'), ('radio_config_at', 'TEXT'),
+)
+
+
+def _num_or_none(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def radio_config_from_sysinfo(data):
+    """Radio settings a node reports in sysinfo.json (meshrf + LQM config)."""
+    meshrf = data.get('meshrf') or {}
+    antenna = meshrf.get('antenna') or {}
+    lqm_cfg = (data.get('lqm') or {}).get('config') or {}
+    desc = antenna.get('description')
+    return {
+        'rf_status': meshrf.get('status'),
+        'rf_mode': meshrf.get('mode'),
+        'rf_ssid': meshrf.get('ssid'),
+        'rf_chanbw': _num_or_none(meshrf.get('chanbw')),
+        'antenna_azimuth': _num_or_none(meshrf.get('azimuth')),
+        'antenna_elevation': _num_or_none(meshrf.get('elevation')),
+        'antenna_height': _num_or_none(meshrf.get('height')),
+        'antenna_gain': _num_or_none(antenna.get('gain')),
+        'antenna_beamwidth': _num_or_none(antenna.get('beamwidth')),
+        'antenna_desc': desc.replace('&deg;', '°') if isinstance(desc, str) else desc,
+        'lqm_user_blocks': lqm_cfg.get('user_blocks') if 'user_blocks' in lqm_cfg else None,
+    }
+
+
+def set_node_radio_config(name, config_values):
+    """Store a node's reported radio settings. Returns {field: (old, new)} for
+    the settings whose change is worth an event (mode, SSID, width)."""
+    if not any(v is not None for v in config_values.values()):
+        return {}
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        old = cursor.execute('SELECT rf_mode, rf_ssid, rf_chanbw FROM nodes WHERE name = ?',
+                             (name,)).fetchone()
+        cols = list(config_values)
+        cursor.execute(
+            f"UPDATE nodes SET {', '.join(f'{c} = ?' for c in cols)}, radio_config_at = ? WHERE name = ?",
+            [config_values[c] for c in cols] + [local_timestamp(), name])
+    changes = {}
+    if old:
+        for col in ('rf_mode', 'rf_ssid', 'rf_chanbw'):
+            if old[col] is not None and config_values.get(col) is not None and old[col] != config_values[col]:
+                changes[col] = (old[col], config_values[col])
+    return changes
+
+
 SCAN_BOUNDARY_MODES = ('exclude', 'stop')
 
 
@@ -1207,6 +1379,9 @@ EVENT_FREQUENCY_CHANGE = 'frequency_change'
 EVENT_LINK_BLOCKED = 'link_blocked'
 EVENT_LINK_UNBLOCKED = 'link_unblocked'
 EVENT_NODE_REBOOT = 'node_reboot'
+EVENT_GATEWAY_LOST = 'gateway_lost'
+EVENT_RADIO_CONFIG_CHANGE = 'radio_config_change'
+EVENT_GATEWAY_RESTORED = 'gateway_restored'
 
 
 def trim_connectivity_log(days=None):
@@ -1313,6 +1488,23 @@ def clear_old_events(days=30):
 
 # ============ Link History Operations (RF Stats) ============
 
+def lqm_history_fields(raw_tracker):
+    """Pull the LQM diagnostic fields out of a raw tracker JSON string."""
+    try:
+        tracker = json.loads(raw_tracker) if raw_tracker else None
+    except (TypeError, ValueError):
+        tracker = None
+    if not isinstance(tracker, dict):
+        return {col: None for col, _ in LQM_TRACKER_KEYS}
+    fields = {}
+    for col, key in LQM_TRACKER_KEYS:
+        value = tracker.get(key)
+        if isinstance(value, bool):
+            value = 1 if value else 0
+        fields[col] = value if isinstance(value, (int, float)) else None
+    return fields
+
+
 def insert_link_history(source_node, target_node, link_type, quality=None, snr=None,
                         ping_min=None, ping_avg=None, ping_max=None, ping_loss=None,
                         jitter=None, throughput_tx=None, throughput_rx=None,
@@ -1321,22 +1513,31 @@ def insert_link_history(source_node, target_node, link_type, quality=None, snr=N
     """Insert a new link history record"""
     now = local_timestamp()
     blocked_int = None if blocked is None else (1 if blocked else 0)
+    lqm = lqm_history_fields(raw_tracker)
+    lqm_cols = list(lqm)
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(f'''
             INSERT INTO link_history (timestamp, source_node, target_node, link_type,
                                      quality, snr, ping_min, ping_avg, ping_max, ping_loss,
                                      jitter, throughput_tx, throughput_rx,
-                                     rev_snr, blocked, blocked_reason, raw_tracker, sample_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     rev_snr, blocked, blocked_reason, raw_tracker, sample_type,
+                                     {", ".join(lqm_cols)})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{", ?" * len(lqm_cols)})
         ''', (now, source_node, target_node, link_type, quality, snr,
               ping_min, ping_avg, ping_max, ping_loss, jitter, throughput_tx, throughput_rx,
-              rev_snr, blocked_int, blocked_reason, raw_tracker, sample_type))
+              rev_snr, blocked_int, blocked_reason, raw_tracker, sample_type,
+              *[lqm[c] for c in lqm_cols]))
         return cursor.lastrowid
 
 
 def get_link_history(source_node, target_node, hours=24, limit=2000):
-    """Get history for a specific link within the time range"""
+    """Get history for a specific link within the time range.
+
+    Returns the newest `limit` samples, plus every throughput sample in the
+    window: iperf results are sparse (one per test) and high-rate incident
+    samples would otherwise push them out of the limit.
+    """
     cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -1344,9 +1545,20 @@ def get_link_history(source_node, target_node, hours=24, limit=2000):
             SELECT * FROM link_history
             WHERE source_node = ? AND target_node = ?
             AND timestamp > ?
+            AND (
+                id IN (
+                    SELECT id FROM link_history
+                    WHERE source_node = ? AND target_node = ?
+                    AND timestamp > ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                )
+                OR throughput_tx IS NOT NULL
+                OR throughput_rx IS NOT NULL
+            )
             ORDER BY timestamp ASC
-            LIMIT ?
-        ''', (source_node, target_node, cutoff, limit))
+        ''', (source_node, target_node, cutoff,
+              source_node, target_node, cutoff, limit))
         return [dict(row) for row in cursor.fetchall()]
 
 
@@ -1469,6 +1681,17 @@ def cleanup_link_history(hours=24):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('DELETE FROM link_history WHERE timestamp < ?', (cutoff,))
+        return cursor.rowcount
+
+
+def strip_old_raw_trackers(hours=24):
+    """Null out raw_tracker blobs older than `hours`; the promoted columns stay."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE link_history SET raw_tracker = NULL WHERE timestamp < ? AND raw_tracker IS NOT NULL',
+            (cutoff,))
         return cursor.rowcount
 
 
@@ -2484,6 +2707,7 @@ def get_network_graph_data():
     all_nodes = get_all_nodes()
     links = get_active_links()
     selected_node_names = set(get_selected_node_names())
+    infra_nodes = get_infrastructure_nodes()
     scan_boundaries = get_scan_boundaries()
 
     # Create sets for quick lookup
@@ -2575,6 +2799,7 @@ def get_network_graph_data():
             'is_inactive': False,
             'is_link_only': True,
             'is_selected': node_name in selected_node_names,
+            'is_infrastructure': node_name in infra_nodes,
             'scan_boundary': scan_boundaries.get(node_name),
             'reported_links': reported_links
         })
@@ -2661,6 +2886,7 @@ def get_network_graph_data():
             'rf_frequency': rf_freq,
             'is_supernode': supernode,
             'is_selected': node_name in selected_node_names,
+            'is_infrastructure': node_name in infra_nodes,
             'scan_boundary': scan_boundaries.get(node_name),
             'is_inactive': node.get('is_inactive', False),
             'is_link_only': link_only,

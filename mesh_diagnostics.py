@@ -204,6 +204,8 @@ def compute_scope(nodes, links, boundaries):
 # ============ Checks ============
 
 def _check_near_far(f, rf_by_source, key_nodes, scope):
+    # Infrastructure (tower) nodes keep their power; advice moves to the other end.
+    infra = set(database.get_infrastructure_node_names())
     hot_at = defaultdict(list)   # hot transmitter -> [(receiver, snr, signal)]
     for receiver, links in rf_by_source.items():
         if receiver not in scope:
@@ -245,9 +247,15 @@ def _check_near_far(f, rf_by_source, key_nodes, scope):
             'desensitize the receiver and dominate airtime, so weaker stations get penalized or '
             'blocked by LQM and the mesh loses paths through ' + receiver + '.'
             + (' ' + receiver + ' is a key node (single point of failure).' if receiver in key_nodes else ''),
-            f'Reduce TX power on {loud_name}, increase physical separation or antenna isolation '
-            f'between {loud_name} and {receiver} (vertical separation, aim away, shielding), or move '
-            f'one of them to another channel/band. Re-check the weak neighbors after the change.',
+            (f'Reduce TX power on {loud_name}, increase physical separation or antenna isolation '
+             f'between {loud_name} and {receiver} (vertical separation, aim away, shielding), or move '
+             f'one of them to another channel/band. Re-check the weak neighbors after the change.'
+             if loud_name not in infra else
+             f'{loud_name} is infrastructure, so keep its power. '
+             + (f'Fix it at {receiver}: aim slightly off {loud_name}, use a lower-gain antenna, or move '
+                f'{receiver} to a channel/sector further from {loud_name}.' if receiver not in infra else
+                f'Both are infrastructure: increase their separation (vertical spacing, aim away, '
+                f'shielding) or move them further apart in frequency.')),
             {'receiver': receiver, 'hot': loud_name, 'hot_snr': loudest[1], 'hot_signal': loudest[2],
              'weak': [{'node': m[0]['target_node'], 'snr': m[1], 'blocked': bool(m[0].get('blocked'))} for m in weak]}
         )
@@ -256,6 +264,8 @@ def _check_near_far(f, rf_by_source, key_nodes, scope):
     # much power for the deployment, not just sited badly relative to one node.
     for tx, hits in hot_at.items():
         overload = [h for h in hits if h[1] >= OVERLOAD_SNR or (h[2] is not None and h[2] >= OVERLOAD_SIGNAL_DBM)]
+        if tx in infra and not overload:
+            continue  # a tower is expected to be loud at many nodes
         if len(hits) >= 2 or overload:
             receivers = ', '.join(f'{r} {s:.0f} dB' for r, s, _ in hits[:6])
             f.add(
@@ -266,8 +276,11 @@ def _check_near_far(f, rf_by_source, key_nodes, scope):
                 + ('Signals this strong risk overloading the receiver front end. ' if overload else '')
                 + 'An over-powered or too-close radio raises everyone else\'s effective noise and '
                 'can keep neighbors from hearing more distant key nodes.',
-                f'Lower TX power on {tx} until its strongest neighbor is around 25-35 dB SNR, or '
-                'relocate/re-aim it. Close-in event radios often need only a few dBm.',
+                (f'Lower TX power on {tx} until its strongest neighbor is around 25-35 dB SNR, or '
+                 'relocate/re-aim it. Close-in event radios often need only a few dBm.'
+                 if tx not in infra else
+                 f'{tx} is infrastructure, so keep its power; the receivers listed should re-aim, '
+                 'use lower-gain antennas, or add separation.'),
                 {'transmitter': tx, 'receivers': [{'node': r, 'snr': s, 'signal': g} for r, s, g in hits]}
             )
 

@@ -38,7 +38,7 @@ DATABASE_RETENTION_DAYS = env_int("DATABASE_RETENTION_DAYS", 90)  # Keep inactiv
 
 # Connectivity event log
 CONNECTIVITY_LOG_PATH = "connectivity.log"
-CONNECTIVITY_LOG_RETENTION_DAYS = 30
+CONNECTIVITY_LOG_RETENTION_DAYS = env_int("CONNECTIVITY_LOG_RETENTION_DAYS", 31)
 
 # Link quality thresholds (0-100)
 QUALITY_GOOD = 85  # Above this = green
@@ -99,7 +99,10 @@ IPERF_BANDWIDTH = '10M' # Bandwidth limit to avoid overwhelming network
 QUALITY_THRESHOLD_IPERF = 50
 
 # History retention
-HISTORY_RETENTION_HOURS = 24  # How long to keep historical data
+# Long enough for the Reports page to scrub back a month.
+HISTORY_RETENTION_HOURS = env_int("HISTORY_RETENTION_HOURS", 24 * 31)
+# raw_tracker blobs (~1KB each) are nulled out sooner to keep the DB small.
+RAW_TRACKER_RETENTION_HOURS = env_int("RAW_TRACKER_RETENTION_HOURS", 24)
 
 # ============ Diagnostics / Incident Mode ============
 
@@ -109,11 +112,11 @@ STORE_RAW_TRACKER = env_bool("STORE_RAW_TRACKER", True)
 
 # Capture per-poll node health (uptime, load, memory) into node_health_history.
 NODE_HEALTH_ENABLED = env_bool("NODE_HEALTH_ENABLED", True)
-NODE_HEALTH_RETENTION_HOURS = env_int("NODE_HEALTH_RETENTION_HOURS", 24 * 14)
+NODE_HEALTH_RETENTION_HOURS = env_int("NODE_HEALTH_RETENTION_HOURS", 24 * 31)
 
 # Structured link state-change log (used by the flap report). Kept longer than
 # RF history because it is tiny (one row per transition, not per sample).
-LINK_STATE_LOG_RETENTION_DAYS = env_int("LINK_STATE_LOG_RETENTION_DAYS", 30)
+LINK_STATE_LOG_RETENTION_DAYS = env_int("LINK_STATE_LOG_RETENTION_DAYS", 31)
 
 # Incident mode: when a watched node's link drops or goes marginal, sample that
 # one link hard (bidirectionally) for a short window instead of standing down.

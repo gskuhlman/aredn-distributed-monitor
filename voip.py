@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import config
 import database
+import gateway
 import rf_stats
 import link_health
 
@@ -76,6 +77,8 @@ def ping_all_endpoints(count=2, timeout=2, max_workers=16):
     endpoints = database.get_voip_endpoints()
     if not endpoints:
         return []
+    if not gateway.is_reachable():
+        raise rf_stats.GatewayUnreachable(gateway.unreachable_message())
 
     codec = _resolve_codec(config.VOIP_CODEC)
 
@@ -92,6 +95,10 @@ def ping_all_endpoints(count=2, timeout=2, max_workers=16):
             logger.warning("VOIP ping of %s failed: %s", ip, exc)
             res = None
         ok = _ping_ok(res)
+        if not ok and gateway.failure_is_ours():
+            base.update({'reachable': None, 'avg': None, 'jitter': None, 'loss': None,
+                         'mos': None, 'mos_rating': 'unknown', 'aborted': True})
+            return base
         avg = (res or {}).get('avg')
         jitter = (res or {}).get('jitter')
         loss = (res or {}).get('loss')
@@ -345,6 +352,8 @@ def run_call_quality(a, b, codec=None):
     """Orchestrate all VOIP probes for A->B; resilient + cached."""
     if not _addr(a):
         return {'error': f'Source "{a}" not found (unknown node and not an IP/host)'}
+    if not gateway.is_reachable():
+        return {'error': gateway.unreachable_message(), 'gateway_unreachable': True}
     codec = _resolve_codec(codec)
     result = {'source': a, 'target': b, 'codec': codec,
               'codec_label': link_health.codec_params(codec)['label']}
@@ -366,6 +375,12 @@ def run_call_quality(a, b, codec=None):
         except Exception as exc:
             logger.warning("%s probe failed %s->%s: %s", key, a, b, exc)
             result[key] = {'status': 'failed', 'note': str(exc)}
+
+    # A failed probe while we've lost the mesh is our problem, not the path's.
+    probes_failed = any((result.get(k) or {}).get('status') == 'failed'
+                        for k in ('end_to_end', 'segments', 'capacity', 'mtu'))
+    if probes_failed and gateway.failure_is_ours():
+        return {'error': gateway.unreachable_message(), 'gateway_unreachable': True}
 
     try:
         database.save_voip_test(a, b, codec, result)

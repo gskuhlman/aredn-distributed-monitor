@@ -175,6 +175,30 @@ const DiagnosticsModule = {
         return selected;
     },
 
+    infrastructureNames() {
+        const names = new Set();
+        for (const name in this.nodeMap) {
+            if (this.nodeMap[name].is_infrastructure) names.add(name);
+        }
+        for (const node of this.networkData.nodes || []) {
+            if (node.is_infrastructure && node.id) names.add(node.id);
+        }
+        return names;
+    },
+
+    withConnected(base) {
+        const visible = new Set(base);
+        for (const edge of this.networkData.edges || []) {
+            const t = String(edge.link_type || '').toUpperCase();
+            if (t !== 'RF' && t !== 'DTD') continue;
+            if (base.has(edge.from) || base.has(edge.to)) {
+                visible.add(edge.from);
+                visible.add(edge.to);
+            }
+        }
+        return visible;
+    },
+
     selectedConnectedNames() {
         const selected = this.selectedNodeNames();
         const visible = new Set(selected);
@@ -194,6 +218,8 @@ const DiagnosticsModule = {
         const node = this.nodeMap[name];
         if (status === 'selected') return ctx.selected.has(name);
         if (status === 'selected-connected') return ctx.selectedConnected.has(name);
+        if (status === 'infrastructure') return ctx.infrastructure.has(name);
+        if (status === 'infrastructure-connected') return ctx.infrastructureConnected.has(name);
         if (!node) return false;  // link-only endpoints have no nodes row
         if (status === 'active') return node.is_active === 1 && !node.is_link_only;
         if (status === 'link-only') return !!node.is_link_only;
@@ -251,7 +277,11 @@ const DiagnosticsModule = {
         const status = document.getElementById('diag-status-filter')?.value || 'all';
         const typeFilter = document.getElementById('diag-type-filter')?.value || 'all';
         const sortBy = document.getElementById('diag-sort')?.value || 'relevance';
-        const ctx = { selected: this.selectedNodeNames(), selectedConnected: this.selectedConnectedNames() };
+        const infrastructure = this.infrastructureNames();
+        const ctx = {
+            selected: this.selectedNodeNames(), selectedConnected: this.selectedConnectedNames(),
+            infrastructure, infrastructureConnected: this.withConnected(infrastructure)
+        };
 
         const flaps = this.sortRows(
             this.flaps.filter(l =>

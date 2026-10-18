@@ -30,12 +30,17 @@
                     <button class="tab-btn" data-tab="nodes">Nodes</button>
                     <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
                     <button class="tab-btn" data-tab="voip">VOIP</button>
+                    <button class="tab-btn" data-tab="reports">Reports</button>
                 </nav>
             </div>
             <div class="header-controls">
                 <label class="header-checkbox">
                     <input type="checkbox" id="filter-rf-only">
                     RF only
+                </label>
+                <label class="header-checkbox" title="Show only infrastructure nodes on the graph">
+                    <input type="checkbox" id="filter-infra-only">
+                    Infrastructure only
                 </label>
                 <label class="header-checkbox">
                     <input type="checkbox" id="scan-selected-only">
@@ -74,7 +79,6 @@
                                     <button class="time-btn" data-hours="168">7D</button>
                                 </div>
                                 <button id="rf-ping-all" class="btn btn-secondary">Ping All</button>
-                                <button id="rf-clear-ping" class="btn btn-secondary">Clear Ping Times</button>
                             </div>
                             <div class="rf-stats-status">
                                 <span id="rf-ping-status"></span>
@@ -90,6 +94,8 @@
                                     <option value="all">All Links</option>
                                     <option value="selected">Selected Nodes</option>
                                     <option value="selected-connected">Selected Nodes + Connected</option>
+                                    <option value="infrastructure">Infrastructure Nodes</option>
+                                    <option value="infrastructure-connected">Infrastructure + Connected</option>
                                 </select>
                                 <select id="rf-sort" class="form-input">
                                     <option value="alpha">Sort: Alpha</option>
@@ -107,8 +113,12 @@
                             <div class="selected-link-actions">
                                 <button id="chart-ping-btn" class="btn btn-secondary">Run Ping Test</button>
                                 <button id="chart-iperf-btn" class="btn btn-secondary">Run iPerf Test</button>
+                                <button id="chart-live-btn" class="btn btn-secondary" title="Ping and traceroute between the two nodes from the nodes themselves">Live Path Check</button>
                             </div>
                         </div>
+
+                        <!-- Pair diagnosis (hidden until link selected) -->
+                        <div id="rf-diagnosis" class="rf-diagnosis hidden"></div>
 
                         <!-- Charts grid (hidden until link selected) -->
                         <div id="rf-charts-grid" class="rf-charts-grid hidden">
@@ -129,6 +139,9 @@
                                 <canvas id="throughput-chart"></canvas>
                             </div>
                         </div>
+
+                        <!-- Pair diagnostic charts (both directions + both ends) -->
+                        <div id="rf-diag-charts" class="rf-charts-grid hidden"></div>
 
                         <!-- Overview table -->
                         <div id="rf-overview-table" class="rf-overview-table">
@@ -163,7 +176,9 @@
                             <select id="nodes-status-filter" class="form-input">
                                 <option value="all">All Nodes</option>
                                 <option value="selected">Selected Nodes</option>
-                                <option value="selected-connected">Selected Nodes + Connected</option>
+                                <option value="selected-connected" selected>Selected Nodes + Connected</option>
+                                <option value="infrastructure">Infrastructure Nodes</option>
+                                <option value="infrastructure-connected">Infrastructure + Connected</option>
                                 <option value="active">Currently Active</option>
                                 <option value="link-only">Link-only</option>
                                 <option value="24h">Last 24 Hours</option>
@@ -282,6 +297,8 @@
                                 <option value="all">All Nodes</option>
                                 <option value="selected">Selected Nodes</option>
                                 <option value="selected-connected">Selected Nodes + Connected</option>
+                                <option value="infrastructure">Infrastructure Nodes</option>
+                                <option value="infrastructure-connected">Infrastructure + Connected</option>
                                 <option value="active">Currently Active</option>
                                 <option value="link-only">Link-only</option>
                                 <option value="24h">Last 24 Hours</option>
@@ -316,6 +333,18 @@
                     </div>
 
                     <div class="diag-scroll">
+                        <div class="diag-section">
+                            <h3>Infrastructure Review <small class="form-hint">radio settings of every infrastructure node: channel plans, beams, pointing, pairing, firmware</small></h3>
+                            <div class="mh-controls">
+                                <label class="checkbox-label" title="Read current settings from each infrastructure node before reviewing">
+                                    <input type="checkbox" id="infra-refresh" checked> Refresh settings from nodes
+                                </label>
+                                <button id="infra-run" class="btn btn-primary">Run Infrastructure Review</button>
+                                <span id="infra-status" class="form-hint"></span>
+                            </div>
+                            <div id="infra-review"><p class="log-empty">Not run yet.</p></div>
+                        </div>
+
                         <div class="diag-section">
                             <h3>Mesh Health Check <small class="form-hint">network-wide problem finder, scoped by scan boundaries</small></h3>
                             <div class="mh-controls">
@@ -381,6 +410,126 @@
                                 <p><strong>Potential fixes.</strong> Re-aim or upgrade the antenna on the <em>weaker</em> end; equalize TX power between the two radios; clear or work around an obstruction and hunt one-sided interference (check the noise floor on the weak side); verify the distance setting and both radios' health. If it persists, reposition the weaker end.</p>
                                 <p><strong>Impact on throughput &amp; latency.</strong> A radio link is only as good as its <em>worse</em> direction: the modulation/data rate is negotiated down to what the weak path supports, driving retransmits, higher latency and jitter, and lower throughput. Because TCP ACKs travel the reverse path, a weak return direction caps end-to-end TCP speed even if the forward path is strong. Severe asymmetry also makes LQM penalize or block the link, which shows up as flapping &mdash; and it degrades VOIP into one-way audio or choppy calls.</p>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reports View -->
+            <div id="reports-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="rpt-controls">
+                        <div class="rpt-row">
+                            <label class="rpt-field">Start
+                                <input type="datetime-local" id="rpt-start" class="form-input" step="60">
+                            </label>
+                            <label class="rpt-field">Window
+                                <select id="rpt-duration" class="form-input">
+                                    <option value="1">1 hour</option>
+                                    <option value="3">3 hours</option>
+                                    <option value="6">6 hours</option>
+                                    <option value="12">12 hours</option>
+                                    <option value="24" selected>24 hours</option>
+                                    <option value="72">72 hours</option>
+                                    <option value="168">1 week</option>
+                                    <option value="720">1 month</option>
+                                    <option value="custom" hidden>Custom</option>
+                                </select>
+                            </label>
+                            <label class="rpt-field">End
+                                <input type="datetime-local" id="rpt-end" class="form-input" step="60">
+                            </label>
+                            <div class="rpt-nav">
+                                <button id="rpt-prev" class="btn btn-secondary" title="Previous window">&#9664; Prev</button>
+                                <button id="rpt-next" class="btn btn-secondary" title="Next window">Next &#9654;</button>
+                                <button id="rpt-latest" class="btn btn-secondary" title="Window ending now">Latest</button>
+                                <button id="rpt-load" class="btn btn-primary">Load</button>
+                            </div>
+                            <span id="rpt-status" class="nodes-count">Idle</span>
+                        </div>
+                        <div class="rpt-row rpt-scrub-row">
+                            <span class="rpt-scrub-label" id="rpt-scrub-min"></span>
+                            <input type="range" id="rpt-scrub" class="rpt-scrub" min="0" max="1000" step="1" aria-label="Scrub window start">
+                            <span class="rpt-scrub-label" id="rpt-scrub-max"></span>
+                        </div>
+                        <div class="rpt-row">
+                            <input type="text" id="rpt-search" class="form-input rpt-search" placeholder="Search nodes...">
+                            <select id="rpt-scope" class="form-input rpt-select">
+                                <option value="all">All Nodes</option>
+                                <option value="selected">Selected Nodes</option>
+                                <option value="selected-connected">Selected Nodes + Connected</option>
+                                <option value="infrastructure">Infrastructure Nodes</option>
+                                <option value="infrastructure-connected">Infrastructure + Connected</option>
+                                <option value="rf">RF-only Nodes</option>
+                                <option value="active">Currently Active</option>
+                                <option value="inactive">Inactive</option>
+                            </select>
+                            <select id="rpt-link-type" class="form-input rpt-select">
+                                <option value="all">All Link Types</option>
+                                <option value="rf">RF</option>
+                                <option value="dtd">DtD</option>
+                                <option value="wireguard">Wireguard</option>
+                                <option value="tunnel">Tunnel</option>
+                            </select>
+                            <select id="rpt-sample-type" class="form-input rpt-select">
+                                <option value="all">All Samples</option>
+                                <option value="scan">Scan Samples</option>
+                                <option value="incident">Incident Samples</option>
+                            </select>
+                            <select id="rpt-severity" class="form-input rpt-select">
+                                <option value="all">All Severities</option>
+                                <option value="warning">Warnings Only</option>
+                            </select>
+                            <div class="rpt-checks">
+                                <label><input type="checkbox" class="rpt-event-cat" value="node" checked> Node</label>
+                                <label><input type="checkbox" class="rpt-event-cat" value="link" checked> Link</label>
+                                <label><input type="checkbox" class="rpt-event-cat" value="freq" checked> Frequency</label>
+                                <label><input type="checkbox" class="rpt-event-cat" value="system" checked> System</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="diag-scroll">
+                        <div id="rpt-summary" class="rpt-summary"></div>
+
+                        <div class="diag-section">
+                            <h3>Timeline <small class="form-hint" id="rpt-bucket-hint"></small></h3>
+                            <div class="chart-card rpt-timeline-card">
+                                <canvas id="rpt-timeline-chart"></canvas>
+                            </div>
+                        </div>
+
+                        <div id="rpt-detail" class="diag-section hidden">
+                            <h3><span id="rpt-detail-title"></span>
+                                <button id="rpt-detail-close" class="btn btn-secondary btn-small">Close</button>
+                            </h3>
+                            <div class="rf-charts-grid" id="rpt-detail-charts"></div>
+                            <div id="rpt-detail-extra"></div>
+                        </div>
+
+                        <div class="diag-section">
+                            <h3>Nodes <small class="form-hint">scanner polls in the window; click a row for charts</small></h3>
+                            <div class="table-scroll-wrapper rpt-table-wrap" id="rpt-nodes"></div>
+                        </div>
+
+                        <div class="diag-section">
+                            <h3>Links <small class="form-hint">RF samples, pings and iPerf in the window; click a row for charts</small></h3>
+                            <div class="table-scroll-wrapper rpt-table-wrap" id="rpt-links"></div>
+                        </div>
+
+                        <div class="diag-section">
+                            <h3>Link State Changes <small class="form-hint" id="rpt-transitions-hint"></small></h3>
+                            <div class="table-scroll-wrapper rpt-table-wrap" id="rpt-transitions"></div>
+                        </div>
+
+                        <div class="diag-section">
+                            <h3>Events <small class="form-hint" id="rpt-events-hint"></small></h3>
+                            <div class="table-scroll-wrapper rpt-table-wrap" id="rpt-events"></div>
+                        </div>
+
+                        <div class="diag-section">
+                            <h3>VoIP</h3>
+                            <div class="table-scroll-wrapper rpt-table-wrap" id="rpt-voip"></div>
                         </div>
                     </div>
                 </div>
@@ -634,6 +783,9 @@
         </div>
         <h4>Node Status</h4>
         <div class="legend-item">
+            <span class="legend-node infra"></span> Infrastructure (diamond)
+        </div>
+        <div class="legend-item">
             <span class="legend-node normal"></span> Polled (scanner reached it)
         </div>
         <div class="legend-item">
@@ -669,9 +821,13 @@
     <!-- Custom JavaScript -->
     <script src="{{ url_for('static', filename='js/network.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rf-stats.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/link-diagnosis.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/rf-channel.js') }}"></script>
     <script src="{{ url_for('static', filename='js/nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/diagnostics.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/infra-review.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/reports.js') }}"></script>
 </body>
 </html>

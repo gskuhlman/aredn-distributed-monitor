@@ -21,6 +21,10 @@ import config
 import database
 import scanner
 import rf_stats
+import gateway
+import reports
+import link_diagnostics
+import infra_audit
 import link_health
 import mesh_diagnostics
 import incident_report
@@ -104,6 +108,7 @@ def run_configured_scan():
         'events': [],
         'timestamp': datetime.now().isoformat(),
         'starting_node_error': None,
+        'aborted': False,
         'selected_scan': True,
         'selected_nodes': selected_names,
         'inactive_nodes': [],
@@ -121,6 +126,13 @@ def run_configured_scan():
             continue
 
         node_result = scanner.run_targeted_scan(node['ip'], max_depth=0)
+        result['events'].extend(node_result.get('events', []))
+        if node_result.get('aborted'):
+            # Lost the starting node: stop, the remaining nodes can't be judged.
+            result['aborted'] = True
+            result['starting_node_error'] = node_result.get('starting_node_error')
+            result['errors'].extend(node_result.get('errors', []))
+            break
         result['nodes_found'] += node_result.get('nodes_found', 0)
         result['links_found'] += node_result.get('links_found', 0)
         result['nodes_visited'] += node_result.get('nodes_visited', 0)
@@ -129,7 +141,6 @@ def run_configured_scan():
             node_result.get('max_depth_reached', 0)
         )
         result['errors'].extend(node_result.get('errors', []))
-        result['events'].extend(node_result.get('events', []))
 
     result['timestamp'] = datetime.now().isoformat()
     return result
@@ -188,6 +199,17 @@ def scheduled_scan():
                 'timestamp': datetime.now().isoformat()
             })
             logger.error(f"Starting node error: {result['starting_node_error']}")
+
+        if result.get('aborted'):
+            # Results were discarded; skip RF history/probing (they'd act on
+            # stale state or fail for our own lack of connectivity).
+            for event in result.get('events', []):
+                socketio.emit('new_event', event)
+            socketio.emit('scan_aborted', {
+                'error': result.get('starting_node_error'),
+                'timestamp': result['timestamp']
+            })
+            return
 
         # Record RF link stats (quality/SNR) to history
         if config.RF_STATS_ENABLED:
@@ -371,6 +393,7 @@ def api_get_node_detail(name):
 
     services = database.get_node_services(node_name)
     links = database.get_node_all_links(node_name)
+    node['rf_span'] = infra_audit.annotate_link_rf(node_name, links, node)
     connectivity_log = database.get_node_observed_events(node_name)
 
     return jsonify({
@@ -393,6 +416,7 @@ def api_get_node_full(name):
     event_limit = request.args.get('event_limit', 500, type=int)
 
     all_links = database.get_node_all_links(node_name)
+    node['rf_span'] = infra_audit.annotate_link_rf(node_name, all_links, node)
     # Reachability for this node AND its peers (one shared derivation).
     names = {node_name}
     for l in all_links:
@@ -429,6 +453,8 @@ def api_scan_node(name):
 
     try:
         result = scanner.run_targeted_scan(node['ip'], max_depth=0)
+        if result.get('aborted'):
+            return jsonify({'error': result.get('starting_node_error'), 'result': result}), 503
         network_data = database.get_network_graph_data()
         socketio.emit('scan_complete', {
             'result': result,
@@ -465,6 +491,29 @@ def api_set_selected_node(name):
         'is_selected': is_selected,
         'selected_nodes': database.get_selected_node_names()
     })
+
+
+@app.route('/api/nodes/infrastructure')
+def api_get_infrastructure_nodes():
+    """Infrastructure nodes with their site codes, plus the site-name map."""
+    return jsonify({'infrastructure_nodes': database.get_infrastructure_nodes(),
+                    'sites': database.get_site_names()})
+
+
+@app.route('/api/nodes/infrastructure/<name>', methods=['POST'])
+def api_set_infrastructure_node(name):
+    """Mark or unmark a node as infrastructure ({infrastructure: bool, site?})."""
+    node_name = name.lower()
+    if not database.get_observed_node(node_name):
+        return jsonify({'error': 'Node not found'}), 404
+    data = request.get_json(silent=True) or {}
+    site = (data.get('site') or '').strip().upper() or None
+    is_infra = database.set_node_infrastructure(node_name, bool(data.get('infrastructure')), site=site)
+    socketio.emit('network_update', database.get_network_graph_data())
+    info = database.infrastructure_info(node_name)
+    return jsonify({'success': True, 'node': node_name, 'is_infrastructure': is_infra,
+                    'infrastructure_site': info['infrastructure_site'],
+                    'sites': database.get_site_names()})
 
 
 @app.route('/api/node-positions', methods=['GET'])
@@ -706,6 +755,13 @@ def api_clear_events():
 
 # ============ RF Stats API Routes ============
 
+
+def gateway_error_response():
+    """503 response for a probe refused/discarded because the starting node is
+    unreachable (the failure is ours, not the target's)."""
+    return jsonify({'error': gateway.unreachable_message(), 'gateway_unreachable': True}), 503
+
+
 @app.route('/api/rf-stats/links')
 def api_get_rf_links():
     """Get all RF links with current stats"""
@@ -725,21 +781,15 @@ def api_rf_ping_all():
     body = request.get_json(silent=True) or {}
     links = body.get('links')
     do_clear = bool(body.get('clear', False))
-    return jsonify({'results': rf_stats.ping_all_rf_links(links=links, clear_first=do_clear)})
-
-
-@app.route('/api/rf-stats/clear-ping', methods=['POST'])
-def api_rf_clear_ping():
-    """Null out stored ping and throughput results so the overview stops showing
-    stale values. Optional JSON body ``{"links": [["src","tgt"], ...]}`` restricts
-    the clear to a caller-supplied set; otherwise all rows are cleared."""
-    body = request.get_json(silent=True) or {}
-    links = body.get('links')
-    pairs = None
-    if links:
-        pairs = [(s, t) for s, t in links]
-    cleared = database.clear_link_ping_throughput(links=pairs)
-    return jsonify({'success': True, 'cleared': cleared})
+    try:
+        results = rf_stats.ping_all_rf_links(links=links, clear_first=do_clear)
+    except rf_stats.GatewayUnreachable:
+        return gateway_error_response()
+    response = {'results': results}
+    if any(r.get('aborted') for r in results):
+        response['error'] = gateway.unreachable_message()
+        response['gateway_unreachable'] = True
+    return jsonify(response)
 
 
 @app.route('/api/rf-stats/history/<source>/<target>')
@@ -758,11 +808,85 @@ def api_get_all_rf_history():
     return jsonify(history)
 
 
+@app.route('/api/reports/infrastructure', methods=['GET', 'POST'])
+def api_infrastructure_review():
+    """Audit infrastructure radio settings. POST {refresh: true} first pulls
+    current settings from each infrastructure node."""
+    refresh = request.method == 'POST' and bool((request.get_json(silent=True) or {}).get('refresh', True))
+    result = infra_audit.run_review(refresh=refresh)
+    if result.get('gateway_unreachable'):
+        return jsonify(result), 503
+    return jsonify(result)
+
+
+@app.route('/api/rf-stats/diagnose/<a>/<b>')
+def api_rf_diagnose_pair(a, b):
+    """Diagnose everything known about the link between two nodes."""
+    hours = max(1, min(24 * 31, request.args.get('hours', 24, type=int)))
+    return jsonify(link_diagnostics.diagnose_pair(a, b, hours=hours))
+
+
+@app.route('/api/rf-stats/diagnose/<a>/<b>/live', methods=['POST'])
+def api_rf_diagnose_pair_live(a, b):
+    """Ping/traceroute between the two nodes from their own CGI."""
+    result = link_diagnostics.run_live_checks(a, b)
+    if result.get('gateway_unreachable'):
+        return jsonify(result), 503
+    if result.get('error'):
+        return jsonify(result), 400
+    return jsonify(result)
+
+
 @app.route('/api/rf-stats/summary')
 def api_get_rf_stats_summary():
     """Get RF stats collection status"""
     summary = rf_stats.get_rf_stats_summary()
     return jsonify(summary)
+
+
+# ============ Time-Window Reports ============
+
+def _report_args():
+    """Common Reports-tab query args: the window plus the page filters."""
+    cats = request.args.get('events')
+    return {
+        'start': request.args.get('start'),
+        'end': request.args.get('end'),
+        'scope': request.args.get('scope', 'all'),
+        'link_type': request.args.get('link_type', 'all'),
+        'search': request.args.get('search', ''),
+        'sample_type': request.args.get('sample_type', 'all'),
+        'event_categories': cats.split(',') if cats else None,
+        'severity': request.args.get('severity', 'all'),
+    }
+
+
+@app.route('/api/reports/window')
+def api_report_window():
+    """Everything collected in [start, end), filtered like the other pages."""
+    try:
+        return jsonify(reports.window_report(**_report_args()))
+    except reports.ReportError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/reports/window/node/<name>')
+def api_report_window_node(name):
+    try:
+        return jsonify(reports.node_series(
+            name.lower(), request.args.get('start'), request.args.get('end')))
+    except reports.ReportError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/reports/window/link/<source>/<target>')
+def api_report_window_link(source, target):
+    try:
+        return jsonify(reports.link_series(
+            source.lower(), target.lower(), request.args.get('start'),
+            request.args.get('end'), request.args.get('sample_type', 'all')))
+    except reports.ReportError as exc:
+        return jsonify({'error': str(exc)}), 400
 
 
 # ============ Diagnostic Reports ============
@@ -870,7 +994,15 @@ def api_voip_endpoints():
 @app.route('/api/voip/ping-all', methods=['POST'])
 def api_voip_ping_all():
     """Ping every VOIP endpoint device from the collector for a reachability sweep."""
-    return jsonify({'results': voip.ping_all_endpoints()})
+    try:
+        results = voip.ping_all_endpoints()
+    except rf_stats.GatewayUnreachable:
+        return gateway_error_response()
+    response = {'results': results}
+    if any(r.get('aborted') for r in results):
+        response['error'] = gateway.unreachable_message()
+        response['gateway_unreachable'] = True
+    return jsonify(response)
 
 
 @app.route('/api/voip/call-quality/<source>/<target>', methods=['POST'])
@@ -878,6 +1010,8 @@ def api_voip_call_quality(source, target):
     """Run live end-to-end VOIP diagnostics between two endpoints."""
     codec = request.args.get('codec')
     result = voip.run_call_quality(source.lower(), target.lower(), codec=codec)
+    if result.get('gateway_unreachable'):
+        return jsonify(result), 503
     if result.get('error'):
         return jsonify(result), 404
     return jsonify({'success': True, 'result': result})
@@ -992,6 +1126,8 @@ def api_ping_node(node_name):
 
     # Run single ping (count=1 for quick response)
     result = rf_stats.ping_node(node['ip'], count=1, timeout=2)
+    if not rf_stats.ping_ok(result) and gateway.failure_is_ours():
+        return gateway_error_response()
 
     if result:
         return jsonify({
@@ -1018,6 +1154,8 @@ def api_traceroute_node(node_name):
     if result:
         result['node'] = node_name
         return jsonify({'success': True, 'result': result})
+    if gateway.failure_is_ours():
+        return gateway_error_response()
     return jsonify({'error': 'Traceroute failed or target unreachable'}), 500
 
 
@@ -1029,6 +1167,9 @@ def api_trigger_rf_test(source, target):
     # Normalize node names to lowercase (database stores them in lowercase)
     source = source.lower()
     target = target.lower()
+
+    if not gateway.is_reachable():
+        return gateway_error_response()
 
     # Try to get target node's IP from database
     target_node = database.get_node(target)
@@ -1045,6 +1186,8 @@ def api_trigger_rf_test(source, target):
             # This allows pinging nodes beyond our scan depth
             result = rf_stats.ping_via_aredn(target)
 
+        if not rf_stats.ping_ok(result) and gateway.failure_is_ours():
+            return gateway_error_response()
         if result:
             database.update_link_history_ping(
                 source, target,
@@ -1084,6 +1227,8 @@ def api_trigger_rf_test(source, target):
                 result.get('tx_mbps'), result.get('rx_mbps')
             )
             return jsonify({'success': True, 'result': result})
+        if gateway.failure_is_ours():
+            return gateway_error_response()
         return jsonify({'error': 'iPerf test failed - target may not be reachable'}), 500
 
     elif test_type == 'traceroute':
@@ -1094,6 +1239,8 @@ def api_trigger_rf_test(source, target):
         result = rf_stats.traceroute_via_aredn(target, source_node_ip=source_ip)
         if result:
             return jsonify({'success': True, 'result': result})
+        if gateway.failure_is_ours():
+            return gateway_error_response()
         return jsonify({'error': 'Traceroute failed - source node unreachable or target invalid'}), 500
 
     return jsonify({'error': 'Invalid test type'}), 400
@@ -1214,6 +1361,9 @@ def handle_start_node_ping(data):
                 'time': result.get('avg') if result else None,
                 'loss': result.get('loss') if result else 100
             }
+            if not ping_data['success'] and gateway.failure_is_ours():
+                ping_data['gateway_unreachable'] = True
+                ping_data['error'] = gateway.unreachable_message()
             socketio.emit('ping_result', ping_data)
 
             # Wait 1 second between pings

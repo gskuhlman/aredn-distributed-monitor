@@ -362,7 +362,10 @@ def iter_service_observations(data, target_node, collector_id, collector_site, o
 
 def build_heartbeat(collector_id, collector_site, observed_at, collector_version,
                     node_count_attempted, node_count_reachable, duration_ms,
-                    errors=None):
+                    errors=None, scan_aborted=False):
+    # scan_aborted: the collector lost its starting node (its way onto the
+    # mesh) and discarded the cycle. It is not a healthy collector for that
+    # cycle, and its lack of sightings is no evidence against any node.
     failed = max(0, node_count_attempted - node_count_reachable)
     return {
         '_id': heartbeat_id(collector_id, observed_at),
@@ -377,5 +380,6 @@ def build_heartbeat(collector_id, collector_site, observed_at, collector_version
         'node_count_reachable': node_count_reachable,
         'node_count_failed': failed,
         'duration_ms': duration_ms,
+        'scan_aborted': bool(scan_aborted),
         'errors': errors or []
     }
