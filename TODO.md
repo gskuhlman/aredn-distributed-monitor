@@ -63,7 +63,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 
 ## Alerts and operations
 
-- [ ] 21. **Notifications.** Email, Discord, ntfy or APRS when an infrastructure node
+- [x] 21. **Notifications.** Email, Discord, ntfy or APRS when an infrastructure node
       goes down, a sector loses a client, the starting node is lost, or a link score
       drops; respect maintenance windows.
 - [ ] 22. **Maintenance windows.** Planned work is excluded from reports and alarms.
