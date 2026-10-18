@@ -23,6 +23,7 @@ import scanner
 import rf_stats
 import gateway
 import reports
+import unreachable
 import link_diagnostics
 import infra_audit
 import link_health
@@ -400,7 +401,8 @@ def api_get_node_detail(name):
         'node': node,
         'services': services,
         'links': links,
-        'connectivity_log': connectivity_log
+        'connectivity_log': connectivity_log,
+        'unreachable_cause': unreachable.node_cause(node_name)
     })
 
 
@@ -437,6 +439,7 @@ def api_get_node_full(name):
         'incident_samples': database.get_incident_samples(node_name, hours=hours),
         'flap_report': database.get_link_flap_report(hours=hours, node=node_name),
         'reach': reach_map.get(node_name),
+        'unreachable_cause': unreachable.node_cause(node_name, hours=hours),
         'peer_reach': reach_map
     })
 
@@ -875,6 +878,21 @@ def api_report_window_node(name):
     try:
         return jsonify(reports.node_series(
             name.lower(), request.args.get('start'), request.args.get('end')))
+    except reports.ReportError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/reports/unreachable')
+def api_report_unreachable():
+    """Why each node with failed polls was unreachable (unreachable.py):
+    start/end (local YYYY-MM-DDTHH:MM) or hours, plus scope/link_type/search."""
+    try:
+        return jsonify(reports.unreachable_report(
+            start=request.args.get('start'), end=request.args.get('end'),
+            hours=request.args.get('hours', 24, type=float),
+            scope=request.args.get('scope', 'all'),
+            link_type=request.args.get('link_type', 'all'),
+            search=request.args.get('search', '')))
     except reports.ReportError as exc:
         return jsonify({'error': str(exc)}), 400
 

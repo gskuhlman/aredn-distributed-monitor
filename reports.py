@@ -14,6 +14,7 @@ strings, so the window is compared in that form too.
 from datetime import datetime, timedelta
 
 import database
+import unreachable as unreachable_causes
 
 TS_FMT = '%Y-%m-%d %H:%M:%S'
 MAX_WINDOW = timedelta(days=32)
@@ -279,6 +280,17 @@ def window_report(start, end, scope='all', link_type='all', search='',
                                     if polls else None)
             nodes.append(row)
 
+        # ---- unreachable causes (unreachable.py): only unexplained failures
+        # count as unreachable in the summary and timeline.
+        causes = unreachable_causes.classify(s, e, names, conn)
+        for row in nodes:
+            c = causes.get(row['name'])
+            if c:
+                row.update({'cause': c['cause'], 'cause_label': c['cause_label'],
+                            'explained': c['explained'], 'can_exclude': c['can_exclude']})
+        explained_names = sorted(n for n, c in causes.items() if c['explained'])
+        explained_sql = f' AND node_name NOT IN ({_in(explained_names)})' if explained_names else ''
+
         # ---- links
         transitions_by_link = {}
         for r in cur.execute(f'''
@@ -377,9 +389,16 @@ def window_report(start, end, scope='all', link_type='all', search='',
         ''', list(b) + list(win) + list(TROUBLE_STATES) + lt_params), 'link_trouble')
         add(cur.execute(f'''
             SELECT {_bucket_expr()} AS b, SUM(reachable = 0) FROM node_health_history
-            WHERE timestamp >= ? AND timestamp < ? AND probe_via IS NULL{node_sql}
+            WHERE timestamp >= ? AND timestamp < ? AND probe_via IS NULL{node_sql}{explained_sql}
             GROUP BY b
-        ''', list(b) + list(win)), 'unreachable')
+        ''', list(b) + list(win) + explained_names), 'unreachable')
+        if explained_names:
+            add(cur.execute(f'''
+                SELECT {_bucket_expr()} AS b, SUM(reachable = 0) FROM node_health_history
+                WHERE timestamp >= ? AND timestamp < ? AND probe_via IS NULL
+                  AND node_name IN ({_in(explained_names)})
+                GROUP BY b
+            ''', list(b) + list(win) + explained_names), 'explained_unreachable')
         add(cur.execute(f'''
             SELECT {_bucket_expr()} AS b, AVG(quality) FROM link_history
             WHERE timestamp >= ? AND timestamp < ? AND quality IS NOT NULL
@@ -400,11 +419,17 @@ def window_report(start, end, scope='all', link_type='all', search='',
             'info': row.get('info') or 0,
             'link_trouble': row.get('link_trouble') or 0,
             'unreachable': row.get('unreachable') or 0,
+            'explained_unreachable': row.get('explained_unreachable') or 0,
             'avg_quality': round(row['avg_quality'], 1) if row.get('avg_quality') is not None else None,
         })
 
     polls = sum(n.get('polls') or 0 for n in nodes)
-    unreachable = sum(n.get('unreachable') or 0 for n in nodes)
+    # Failed polls of nodes whose failure is explained (legacy tunnel, stale,
+    # placeholder, starting-node outage...) are not counted as unreachable.
+    explained_polls = sum(n.get('unreachable') or 0 for n in nodes if n.get('explained'))
+    unreachable = sum(n.get('unreachable') or 0 for n in nodes) - explained_polls
+    cause_summary = unreachable_causes.summarize(causes)
+    unreachable_rows = unreachable_causes.report_rows(causes)
     quality = [l['avg_quality'] for l in links if l.get('avg_quality') is not None]
     gateway_outages = sum(1 for ev in events if ev['event_type'] == 'gateway_lost')
 
@@ -420,6 +445,11 @@ def window_report(start, end, scope='all', link_type='all', search='',
             'polls': polls,
             'unreachable_polls': unreachable,
             'reachable_pct': round(100.0 * (polls - unreachable) / polls, 1) if polls else None,
+            'explained_unreachable_polls': explained_polls,
+            'really_down_nodes': cause_summary['really_down_nodes'],
+            'intermittent_nodes': cause_summary['intermittent_nodes'],
+            'explained_unreachable_nodes': cause_summary['explained_nodes'],
+            'unreachable_by_cause': cause_summary['by_cause'],
             'link_samples': sum(l.get('samples') or 0 for l in links),
             'avg_quality': round(sum(quality) / len(quality), 1) if quality else None,
             'iperf_tests': sum(l.get('iperf_tests') or 0 for l in links),
@@ -433,6 +463,7 @@ def window_report(start, end, scope='all', link_type='all', search='',
         },
         'timeline': timeline_rows,
         'nodes': nodes,
+        'unreachable': unreachable_rows,
         'links': links,
         'transitions': transitions[:MAX_ROWS],
         'transitions_truncated': len(transitions) > MAX_ROWS,
@@ -509,3 +540,18 @@ def link_series(source, target, start, end, sample_type='all'):
     return {'source': source, 'target': target,
             'window': {'start': s, 'end': e, 'bucket_seconds': bucket},
             'series': rows, 'throughput': throughput, 'transitions': transitions}
+
+
+# ---------------------------------------------------------- unreachable ----
+
+def unreachable_report(start=None, end=None, hours=None, scope='all', link_type='all', search=''):
+    """Unreachable-cause classification (unreachable.py) for a window given as
+    start/end or as the last ``hours``, filtered by the page scope."""
+    if start or end:
+        start_dt, end_dt = parse_window(start, end)
+    else:
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(hours=min(max(float(hours or 24), 0.25), 24 * 32))
+    with database.get_connection() as conn:
+        names = resolve_scope(conn, scope, link_type, search)
+    return unreachable_causes.report(start_dt.strftime(TS_FMT), end_dt.strftime(TS_FMT), names)

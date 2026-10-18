@@ -2031,3 +2031,19 @@ body {
 .infra-badge-warning { background: #e67e22; }
 .infra-badge-info { background: #3498db; }
 .infra-badge-ok { background: #27ae60; }
+
+/* ---- Unreachable causes (Reports tab, node views; unreachable.py) ---- */
+.rpt-unreach-toggle { display: inline-flex; gap: 6px; align-items: center; margin: 0 0 8px; font-size: 0.85rem; }
+.rpt-unreach-table td { white-space: normal; vertical-align: top; }
+.rpt-unreach-table td.rpt-cause-detail { min-width: 280px; max-width: 520px; font-size: 0.85rem; }
+.rpt-unreach-table td.rpt-cause-detail ul { margin: 4px 0 0 16px; padding: 0; color: #555; }
+.rpt-cause-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem;
+    font-weight: 600; white-space: nowrap; background: #ecf0f1; color: #555; }
+.rpt-cause-badge.rpt-cause-critical { background: #fadbd8; color: #c0392b; }
+.rpt-cause-badge.rpt-cause-warning { background: #fdebd0; color: #b9770e; }
+.rpt-cause-badge.rpt-cause-info { background: #e8f1f8; color: #2874a6; }
+.unreach-cause { margin: 8px 0; padding: 8px 10px; border-left: 4px solid #95a5a6; background: #f8f9f9;
+    border-radius: 4px; font-size: 0.9rem; }
+.unreach-cause.rpt-cause-critical { border-left-color: #c0392b; background: #fdf2f1; }
+.unreach-cause.rpt-cause-warning { border-left-color: #e67e22; background: #fef5e7; }
+.unreach-cause ul { margin: 4px 0 0 18px; padding: 0; color: #555; }

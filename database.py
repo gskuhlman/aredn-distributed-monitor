@@ -306,7 +306,12 @@ def init_db():
 
         # `probe_via` is NULL for direct scanner polls; for a neighbor-relayed
         # mesh-reachability probe it holds the neighbor that did the pinging.
-        for column, definition in (('probe_via', 'TEXT'),):
+        # For failed scanner polls (unreachable classifier, unreachable.py):
+        # `fail_reason` is why the fetch failed (timeout, refused, no_route,
+        # dns, http_<code>, bad_json), `reported_by` / `via_link_type` the
+        # neighbor whose LQM report queued the node and the link type it saw.
+        for column, definition in (('probe_via', 'TEXT'), ('fail_reason', 'TEXT'),
+                                   ('reported_by', 'TEXT'), ('via_link_type', 'TEXT')):
             try:
                 cursor.execute(f'ALTER TABLE node_health_history ADD COLUMN {column} {definition}')
             except sqlite3.OperationalError:
@@ -1787,7 +1792,8 @@ def _coalesce_float(value):
         return None
 
 
-def update_node_health(name, health=None, reachable=True, degraded=False, response_ms=None):
+def update_node_health(name, health=None, reachable=True, degraded=False, response_ms=None,
+                       fail_reason=None, reported_by=None, via_link_type=None):
     """Store a node-health sample and detect reboots.
 
     Updates the latest health columns on ``nodes`` and appends a row to
@@ -1830,11 +1836,13 @@ def update_node_health(name, health=None, reachable=True, degraded=False, respon
         cursor.execute('''
             INSERT INTO node_health_history (timestamp, node_name, reachable, degraded,
                                              response_ms, uptime_seconds, load1, load5,
-                                             load15, mem_free, mem_total, channel_busy)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             load15, mem_free, mem_total, channel_busy,
+                                             fail_reason, reported_by, via_link_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (now, name, 1 if reachable else 0, 1 if degraded else 0, response_ms,
               new_uptime, health.get('load1'), health.get('load5'), health.get('load15'),
-              health.get('mem_free'), health.get('mem_total'), health.get('channel_busy')))
+              health.get('mem_free'), health.get('mem_total'), health.get('channel_busy'),
+              fail_reason, reported_by, via_link_type))
 
     return reboot
 

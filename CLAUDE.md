@@ -23,7 +23,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now aredn-monitor
 
 # Validate Python syntax
-python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py
+python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py unreachable.py
 
 # Bootstrap CouchDB databases and indexes when COUCH_URL is configured
 python couch_client.py
@@ -50,6 +50,7 @@ There is no full test suite or linting currently configured.
 - `reports.py`: Read-only time-window reporting (Reports tab): per-node poll health, per-link RF stats, state changes, events, VoIP, and bucketed series, filtered like the other pages.
 - `link_diagnostics.py`: Pair diagnosis for the RF Stats link view. Combines both ends' LQM trackers (including a MAC-only alias when one end lost the other's hostname), promoted LQM history columns, state log, node health/config, each end's full RF neighbor list (receiver-wide loss, near-far/overpowering neighbors with a suggested power cut), and radios at each site or in each antenna's beam tagged by channel relation (same/overlap/adjacent/near/clear) into ranked findings and a verdict; `run_live_checks` pings/traceroutes between the two nodes via their CGI.
 - `infra_audit.py`: Infrastructure Review (Diagnostics tab): audits infrastructure nodes' stored radio settings (optionally refreshed live) for site channel plans, overlapping radios in antenna beams, azimuth vs. neighbor bearings, PtP pairing, firmware, user blocks, reachability, near-far, plus a verdict per RF link touching infrastructure.
+- `unreachable.py`: Unreachable classifier. Sorts every node with failed scanner polls or mesh probes in a window into a cause (starting_node_outage, placeholder, excluded, legacy_tunnel_only, pings_no_http, intermittent, stale, not_routable, behind_supernode, never_resolves, really_down). Only `really_down`/`intermittent` count as unreachable in Reports; the rest are explained. Uses `fail_reason`/`reported_by`/`via_link_type`, which the scanner records on failed polls in `node_health_history`, plus links/nodes state for older rows.
 - `config.py`: Central configuration and environment-variable overrides.
 
 ### Frontend Components
@@ -62,6 +63,7 @@ There is no full test suite or linting currently configured.
 - `static/js/link-diagnosis.js`: RF Stats pair diagnosis panel (verdict, findings, direction/node comparison, colocated radios, state log, live path check, per-direction LQM charts).
 - `static/js/infra-review.js`: Infrastructure Review section on the Diagnostics tab (findings, per-site spectrum chart and settings table, link verdicts).
 - `static/js/rf-channel.js`: Shared node channel display (centre/width/edge frequencies and channel numbers) and connected-peer channel relation (overlap/adjacent/near/same/clear) for the Nodes tab detail panel and node page; values come from `infra_audit.annotate_link_rf` via `/api/nodes/detail` and `/api/nodes/full` (`node.rf_span`, `link.peer_rf`).
+- `static/js/unreachable-cause.js`: Shared "why unreachable" block for the node page and Nodes detail panel (`unreachable_cause` from `/api/nodes/full` and `/api/nodes/detail`).
 - `static/js/reports.js`: Reports tab: start/end window scrubbing (presets, prev/next, slider), filters, timeline, tables, and node/link drill-down charts.
 - `static/css/style.css`: Application layout and visual styling.
 
@@ -131,6 +133,7 @@ Mesh health and scan-boundary routes:
 Time-window report routes (Reports tab; `start`/`end` as `YYYY-MM-DDTHH:MM` local time, max 32 days):
 
 - `GET /api/reports/window?start&end&scope&link_type&search&sample_type&events&severity`
+- `GET /api/reports/unreachable?start&end` (or `hours`) `&scope&link_type&search`: unreachable cause per node (unreachable.py) with real vs. explained counts. `/api/reports/window` also returns `unreachable` rows, per-node `cause`, and summary counts that exclude explained failures.
 - `GET /api/reports/window/node/<name>?start&end`, `GET /api/reports/window/link/<source>/<target>?start&end&sample_type`
 
 Distributed/readiness routes:
