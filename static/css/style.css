@@ -2155,3 +2155,11 @@ tr.notify-log-suppressed td { color: #95a5a6; }
 .unreach-cause.rpt-cause-critical { border-left-color: #c0392b; background: #fdf2f1; }
 .unreach-cause.rpt-cause-warning { border-left-color: #e67e22; background: #fef5e7; }
 .unreach-cause ul { margin: 4px 0 0 18px; padding: 0; color: #555; }
+/* --- Link Watch (link-watch.js) --- */
+.diag-section h4 { margin: 12px 0 6px; font-size: 0.95em; }
+#lw-noise tr.lw-radio { cursor: pointer; }
+#lw-noise tr.lw-radio:hover td, #lw-noise tr.lw-selected td { background: rgba(52, 152, 219, 0.12); }
+.lw-why { white-space: normal !important; max-width: 520px; font-size: 0.9em; }
+.lw-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.lw-chart { position: relative; height: 240px; }
+/* --- end Link Watch --- */

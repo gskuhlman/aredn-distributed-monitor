@@ -27,9 +27,9 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 
 - [ ] 6. **Hidden-node / airtime check per sector.** Clients that can't hear each other,
       combined with channel busy and retries; suggest RTS/CTS or fewer clients.
-- [ ] 7. **Noise-floor watch.** Noise (signal − SNR) per radio over time; alert on jumps
+- [x] 7. **Noise-floor watch.** Noise (signal − SNR) per radio over time; alert on jumps
       of 5 dB or more; show the time-of-day pattern (WiFi follows when people are home).
-- [ ] 8. **One-way link alarm.** One end's LQ high and the other low, routing cost
+- [x] 8. **One-way link alarm.** One end's LQ high and the other low, routing cost
       infinite, or one end knows the other only by MAC. Flag it continuously instead of
       only when someone runs a diagnosis.
 - [ ] 9. **Route-change log.** Periodic traceroute along key paths (starting node to

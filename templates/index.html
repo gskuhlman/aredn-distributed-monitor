@@ -335,6 +335,28 @@
                     </div>
 
                     <div class="diag-scroll">
+                        <!-- Link Watch (link-watch.js) -->
+                        <div class="diag-section">
+                            <h3>Link Watch <small class="form-hint">continuous one-way link alarm and noise-floor watch, checked after every scan</small></h3>
+                            <div class="mh-controls">
+                                <button id="lw-refresh" class="btn btn-secondary">Refresh</button>
+                                <label class="checkbox-label"><input type="checkbox" id="lw-all-radios"> Show all radios</label>
+                                <span id="lw-status" class="form-hint"></span>
+                            </div>
+                            <h4>One-way links</h4>
+                            <div id="lw-one-way"><p class="log-empty">Not loaded yet.</p></div>
+                            <h4>Noise floor</h4>
+                            <div id="lw-noise"><p class="log-empty">Not loaded yet.</p></div>
+                            <div id="lw-noise-detail" class="hidden">
+                                <h4 id="lw-noise-title"></h4>
+                                <div class="lw-charts">
+                                    <div class="lw-chart"><canvas id="lw-noise-series"></canvas></div>
+                                    <div class="lw-chart"><canvas id="lw-noise-profile"></canvas></div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- end Link Watch -->
+
                         <div class="diag-section">
                             <h3>Infrastructure Review <small class="form-hint">radio settings of every infrastructure node: channel plans, beams, pointing, pairing, firmware</small></h3>
                             <div class="mh-controls">
@@ -984,6 +1006,7 @@
     <script src="{{ url_for('static', filename='js/diagnostics.js') }}"></script>
     <script src="{{ url_for('static', filename='js/infra-review.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/link-watch.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reports.js') }}"></script>

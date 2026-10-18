@@ -1409,6 +1409,11 @@ EVENT_GATEWAY_LOST = 'gateway_lost'
 EVENT_RADIO_CONFIG_CHANGE = 'radio_config_change'
 EVENT_GATEWAY_RESTORED = 'gateway_restored'
 EVENT_FIRMWARE_CHANGE = 'firmware_change'
+# Link Watch (link_watch.py) transitions
+EVENT_NOISE_JUMP = 'noise_jump'
+EVENT_NOISE_CLEARED = 'noise_cleared'
+EVENT_ONE_WAY_LINK = 'one_way_link'
+EVENT_ONE_WAY_LINK_CLEARED = 'one_way_link_cleared'
 
 
 def trim_connectivity_log(days=None):

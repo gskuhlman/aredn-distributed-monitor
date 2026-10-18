@@ -28,6 +28,7 @@ import link_diagnostics
 import infra_audit
 import change_log
 import channel_map
+import link_watch
 import link_health
 import mesh_diagnostics
 import incident_report
@@ -218,6 +219,15 @@ def scheduled_scan():
         # Record RF link stats (quality/SNR) to history
         if config.RF_STATS_ENABLED:
             rf_stats.record_rf_link_stats()
+
+        # --- Link Watch: noise-floor and one-way link detectors (transitions only) ---
+        if config.LINK_WATCH_ENABLED:
+            try:
+                for event in link_watch.run_after_scan():
+                    socketio.emit('new_event', event)
+            except Exception as exc:
+                logger.error("Link watch error: %s", exc)
+        # --- end Link Watch ---
 
         # Kick off high-rate incident probing for any watched link in trouble.
         if config.INCIDENT_MODE_ENABLED:
@@ -846,6 +856,22 @@ def api_channel_map_what_if():
         scope=body.get('scope', 'all'), max_km=body.get('max_km'), center=body.get('center'),
         overrides=body.get('overrides') or {}, include_inactive=bool(body.get('include_inactive'))))
 # ---- end Channel Map ----
+# --- Link Watch routes ---
+@app.route('/api/reports/noise')
+def api_noise_report():
+    """Noise-floor watch: all radios' status, or ?node= one radio's series,
+    baseline and hour-of-day profile."""
+    hours = max(1, min(24 * 31, request.args.get('hours', 72, type=int)))
+    days = max(1, min(31, request.args.get('days', 7, type=int)))
+    return jsonify(link_watch.noise_report(node=request.args.get('node') or None, hours=hours, days=days))
+
+
+@app.route('/api/reports/one-way')
+def api_one_way_report():
+    """One-way link alarm: flagged, pending and recently cleared RF pairs."""
+    hours = max(1, min(24 * 31, request.args.get('hours', 24, type=int)))
+    return jsonify(link_watch.one_way_report(hours=hours))
+# --- end Link Watch routes ---
 
 
 @app.route('/api/rf-stats/diagnose/<a>/<b>')
