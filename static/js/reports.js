@@ -42,9 +42,15 @@ const ReportsModule = {
         }
         document.querySelectorAll('.rpt-event-cat').forEach(cb =>
             cb.addEventListener('change', () => this.load()));
+        $('rpt-show-explained')?.addEventListener('change', () => this.render());
 
         // Sorting: click any header in a report table.
         document.getElementById('reports-view')?.addEventListener('click', (e) => {
+            const exclude = e.target.closest('button[data-exclude-node]');
+            if (exclude) {
+                this.excludeNode(exclude.dataset.excludeNode, exclude);
+                return;
+            }
             const th = e.target.closest('th[data-sort]');
             if (th) {
                 const tableId = th.closest('[data-table]').dataset.table;
@@ -253,9 +259,13 @@ const ReportsModule = {
         document.getElementById('rpt-events-hint').textContent =
             `${d.events.length}${d.events_truncated ? '+ (newest shown)' : ''} events`;
 
-        this.renderTable('rpt-nodes', d.nodes, [
+        this.renderUnreachable();
+        const showExplained = document.getElementById('rpt-show-explained')?.checked;
+        const nodeRows = showExplained ? d.nodes : d.nodes.filter(n => !n.explained);
+        this.renderTable('rpt-nodes', nodeRows, [
             ['name', 'Node'], ['ip', 'IP'], ['model', 'Model'],
             ['polls', 'Polls'], ['reachable_pct', 'Reachable %', 1], ['unreachable', 'Unreachable'],
+            ['cause_label', 'Unreachable Cause'],
             ['degraded', 'Degraded'], ['avg_response_ms', 'Avg Resp (ms)', 0],
             ['max_response_ms', 'Max Resp (ms)', 0], ['avg_load1', 'Avg Load', 2],
             ['max_load1', 'Max Load', 2], ['reboots', 'Reboots'], ['warnings', 'Warnings'],
@@ -306,6 +316,71 @@ const ReportsModule = {
         ], () => '', { key: 'when', dir: 'desc' });
     },
 
+    // Why nodes were unreachable (unreachable.py); explained causes hidden by default.
+    renderUnreachable() {
+        const el = document.getElementById('rpt-unreachable');
+        if (!el) return;
+        const all = this.data.unreachable || [];
+        const showExplained = document.getElementById('rpt-show-explained')?.checked;
+        const rows = showExplained ? all : all.filter(r => !r.explained);
+        const hidden = all.length - rows.length;
+        const hint = document.getElementById('rpt-unreach-hint');
+        if (hint) {
+            hint.textContent = `${all.filter(r => !r.explained).length} real, ` +
+                `${all.filter(r => r.explained).length} explained` +
+                (hidden ? ` (${hidden} hidden)` : '');
+        }
+        if (!rows.length) {
+            el.innerHTML = `<p class="log-empty">${all.length
+                ? 'Every unreachable node in this window has an explanation. Tick "Show explained" to list them.'
+                : 'No failed polls in this window.'}</p>`;
+            return;
+        }
+        const body = rows.map(r => {
+            const counts = [`${r.failed_polls} failed poll(s)`];
+            if (r.answered_polls) counts.push(`${r.answered_polls} answered`);
+            if (r.probe_ok || r.probe_fail) counts.push(`probes ${r.probe_ok} ok / ${r.probe_fail} failed`);
+            const action = r.can_exclude
+                ? `<button class="btn btn-small btn-secondary" data-exclude-node="${this.esc(r.name)}"
+                     title="Never poll this node (scan boundary: exclude)">Exclude from scanning</button>`
+                : (r.boundary ? `<small>boundary: ${this.esc(r.boundary)}</small>` : '');
+            return `<tr class="rpt-clickable rpt-cause-${this.esc(r.severity)}" data-node="${this.esc(r.name)}">
+                <td><strong>${this.esc(r.name)}</strong></td>
+                <td><span class="rpt-cause-badge rpt-cause-${this.esc(r.severity)}">${this.esc(r.cause_label)}</span></td>
+                <td class="rpt-cause-detail">${this.esc(r.detail)}
+                    ${r.evidence.length ? `<ul>${r.evidence.map(x => `<li>${this.esc(x)}</li>`).join('')}</ul>` : ''}</td>
+                <td>${this.esc(counts.join(', '))}</td>
+                <td>${this.esc(r.last_success || 'never')}</td>
+                <td>${action}</td></tr>`;
+        }).join('');
+        el.innerHTML = `<div class="table-scroll-wrapper rpt-table-wrap"><table class="info-table rpt-table rpt-unreach-table">
+            <thead><tr><th>Node</th><th>Cause</th><th>Why</th><th>Polls</th><th>Last Answered</th><th></th></tr></thead>
+            <tbody>${body}</tbody></table></div>`;
+    },
+
+    async excludeNode(name, button) {
+        if (!confirm(`Stop scanning ${name}? It will never be polled (scan boundary "exclude"). ` +
+                     'You can clear this on the Diagnostics tab.')) return;
+        button.disabled = true;
+        try {
+            const resp = await fetch(`/api/scan-boundaries/${encodeURIComponent(name)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: 'exclude' })
+            });
+            const result = await resp.json();
+            if (!resp.ok || !result.success) throw new Error(result.error || 'Failed to exclude node');
+            for (const r of this.data.unreachable || []) {
+                if (r.name === name) { r.can_exclude = false; r.boundary = 'exclude'; }
+            }
+            this.renderUnreachable();
+            this.setStatus(`${name} excluded from scanning (next scan)`);
+        } catch (error) {
+            button.disabled = false;
+            this.setStatus(`Exclude failed: ${error.message}`);
+        }
+    },
+
     renderSummary() {
         const s = this.data.summary;
         const tiles = [
@@ -313,6 +388,8 @@ const ReportsModule = {
             ['Links', s.links],
             ['Node Polls', s.polls],
             ['Reachable', s.reachable_pct === null ? '-' : `${s.reachable_pct}%`],
+            ['Down / Intermittent', `${s.really_down_nodes ?? 0} / ${s.intermittent_nodes ?? 0}`],
+            ['Explained Unreachable', `${s.explained_unreachable_nodes ?? 0} nodes`],
             ['Link Samples', s.link_samples],
             ['Avg Quality', s.avg_quality === null ? '-' : `${s.avg_quality}%`],
             ['iPerf Tests', s.iperf_tests],
@@ -385,6 +462,7 @@ const ReportsModule = {
                     { label: 'Info events', backgroundColor: '#95a5a6', data: [], stack: 'c' },
                     { label: 'Link drops/blocks', backgroundColor: '#e74c3c', data: [], stack: 'c' },
                     { label: 'Unreachable polls', backgroundColor: '#8e44ad', data: [], stack: 'c' },
+                    { label: 'Explained unreachable', backgroundColor: '#d7bde2', data: [], stack: 'c', hidden: true },
                     {
                         label: 'Avg link quality %', type: 'line', borderColor: '#27ae60',
                         backgroundColor: 'transparent', data: [], yAxisID: 'q', tension: 0.3,
@@ -426,7 +504,8 @@ const ReportsModule = {
         chart.data.datasets[1].data = pts('info');
         chart.data.datasets[2].data = pts('link_trouble');
         chart.data.datasets[3].data = pts('unreachable');
-        chart.data.datasets[4].data = pts('avg_quality');
+        chart.data.datasets[4].data = pts('explained_unreachable');
+        chart.data.datasets[5].data = pts('avg_quality');
         chart.options.scales.x = { ...this.timeScale(this.data.window), stacked: true, offset: false };
         chart.update('none');
     },

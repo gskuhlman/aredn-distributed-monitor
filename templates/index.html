@@ -519,6 +519,15 @@
                             <div id="rpt-detail-extra"></div>
                         </div>
 
+                        <!-- Unreachable causes (unreachable.py) -->
+                        <div class="diag-section">
+                            <h3>Unreachable Nodes <small class="form-hint" id="rpt-unreach-hint">why polls failed; only "Down" and "Intermittent" count as unreachable</small></h3>
+                            <label class="checkbox-label rpt-unreach-toggle">
+                                <input type="checkbox" id="rpt-show-explained"> Show explained (legacy tunnels, stale entries, placeholders, starting-node outages...)
+                            </label>
+                            <div id="rpt-unreachable"></div>
+                        </div>
+
                         <div class="diag-section">
                             <h3>Nodes <small class="form-hint">scanner polls in the window; click a row for charts</small></h3>
                             <div class="table-scroll-wrapper rpt-table-wrap" id="rpt-nodes"></div>
@@ -970,6 +979,7 @@
     <script src="{{ url_for('static', filename='js/rf-stats.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-diagnosis.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rf-channel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/unreachable-cause.js') }}"></script>
     <script src="{{ url_for('static', filename='js/nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/diagnostics.js') }}"></script>
     <script src="{{ url_for('static', filename='js/infra-review.js') }}"></script>

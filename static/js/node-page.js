@@ -216,6 +216,8 @@ const NodePage = {
                 </table>
             ` : ''}
         `;
+        const cause = UnreachableCause.render(this.data.unreachable_cause, this.escapeHtml.bind(this));
+        if (cause) document.getElementById('node-summary').insertAdjacentHTML('afterbegin', cause);
     },
 
     renderNodeHealth() {

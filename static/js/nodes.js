@@ -436,6 +436,8 @@ const NodesModule = {
                 </div>
             `;
 
+            html += UnreachableCause.render(data.unreachable_cause, this.escapeHtml.bind(this));
+
             if (node.is_link_only) {
                 html += `
                     <div class="node-detail-section">

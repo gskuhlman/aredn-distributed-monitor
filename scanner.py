@@ -42,20 +42,52 @@ def build_sysinfo_url(ip_or_hostname, full=True):
     return f"http://{host}/cgi-bin/sysinfo.json?lqm=1&hosts=1&services=1&services_local=1"
 
 
+# Why the last fetch of each URL failed (see fetch_fail_reason); read by the
+# scan commit to record the cause with the failed health sample.
+_fetch_failures = {}
+
+
+def fetch_fail_reason(exc):
+    """Short failure cause for a requests exception (unreachable classifier)."""
+    if isinstance(exc, requests.exceptions.ConnectTimeout):
+        return 'connect_timeout'
+    if isinstance(exc, requests.exceptions.Timeout):
+        return 'timeout'
+    if isinstance(exc, requests.exceptions.HTTPError):
+        code = getattr(exc.response, 'status_code', None)
+        return f'http_{code}' if code else 'http_error'
+    text = str(exc).lower()
+    if any(s in text for s in ('name resolution', 'getaddrinfo', 'name or service not known',
+                               'nodename nor servname', 'failed to resolve')):
+        return 'dns'
+    if 'refused' in text or '10061' in text:
+        return 'refused'
+    if any(s in text for s in ('unreachable', 'no route', '10065', '10051')):
+        return 'no_route'
+    if 'timed out' in text or '10060' in text:
+        return 'connect_timeout'
+    return 'connection_error'
+
+
 def fetch_node_info(url):
     """Fetch sysinfo.json from a node"""
     try:
         response = requests.get(url, timeout=config.REQUEST_TIMEOUT)
         response.raise_for_status()
-        return response.json()
-    except requests.exceptions.Timeout:
+        data = response.json()
+        _fetch_failures.pop(url, None)
+        return data
+    except requests.exceptions.Timeout as e:
         logger.warning(f"Timeout fetching {url}")
+        _fetch_failures[url] = fetch_fail_reason(e)
         return None
     except requests.exceptions.RequestException as e:
         logger.warning(f"Error fetching {url}: {e}")
+        _fetch_failures[url] = fetch_fail_reason(e)
         return None
     except ValueError as e:
         logger.warning(f"Invalid JSON from {url}: {e}")
+        _fetch_failures[url] = 'bad_json'
         return None
 
 
@@ -72,6 +104,9 @@ def fetch_node_with_fallback(url):
         # bare sysinfo answering means the node is up but degraded, not down.
         data = fetch_node_info(build_sysinfo_url(url, full=False))
         degraded = data is not None
+        bare_reason = _fetch_failures.pop(build_sysinfo_url(url, full=False), None)
+        if not degraded and bare_reason and url not in _fetch_failures:
+            _fetch_failures[url] = bare_reason
         if degraded:
             logger.warning(f"Full sysinfo failed, bare sysinfo succeeded (degraded): {url}")
     return data, degraded, int((monotonic() - started) * 1000)
@@ -370,7 +405,8 @@ def discover_neighbors(data, show_tunnels):
             discovered_nodes.append({
                 'hostname': hostname,
                 'ip': discover_ip,
-                'url': build_sysinfo_url(discover_ip)
+                'url': build_sysinfo_url(discover_ip),
+                'link_type': tracker.get('type')
             })
     return discovered_nodes
 
@@ -634,6 +670,8 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
     show_tunnels = get_show_tunnels()
     # (item, fetch result) pairs in BFS order, committed only after the scan.
     fetched_results = []
+    # url -> (reporting neighbor, its LQM link type), recorded with failed polls.
+    poll_via = {}
 
     def process_result(url, depth, target_hint, data, degraded, response_ms):
         """Commit one fetched node (all DB writes happen here, serially, and
@@ -663,8 +701,11 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
             # Record an unreachable health sample so the scanner-to-node downtime
             # is visible in the time series under the real node name.
             if config.NODE_HEALTH_ENABLED:
+                reporter, via_type = poll_via.get(url.lower(), (None, None))
                 database.update_node_health(
-                    failed_target, reachable=False, response_ms=response_ms
+                    failed_target, reachable=False, response_ms=response_ms,
+                    fail_reason=_fetch_failures.pop(url, None),
+                    reported_by=reporter, via_link_type=via_type
                 )
             return
 
@@ -797,6 +838,7 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
         for node_info in discovered:
             if node_info.get('hostname'):
                 seen_names.add(node_info['hostname'])
+            poll_via.setdefault(node_info['url'].lower(), (node_name, node_info.get('link_type')))
         if depth < max_depth and not supernode and not at_boundary:
             for node_info in discovered:
                 node_url = node_info['url']
