@@ -23,7 +23,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now aredn-monitor
 
 # Validate Python syntax
-python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py change_log.py
+python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py change_log.py channel_map.py
 
 # Bootstrap CouchDB databases and indexes when COUCH_URL is configured
 python couch_client.py
@@ -51,6 +51,7 @@ There is no full test suite or linting currently configured.
 - `link_diagnostics.py`: Pair diagnosis for the RF Stats link view. Combines both ends' LQM trackers (including a MAC-only alias when one end lost the other's hostname), promoted LQM history columns, state log, node health/config, each end's full RF neighbor list (receiver-wide loss, near-far/overpowering neighbors with a suggested power cut), and radios at each site or in each antenna's beam tagged by channel relation (same/overlap/adjacent/near/clear) into ranked findings and a verdict; `run_live_checks` pings/traceroutes between the two nodes via their CGI.
 - `infra_audit.py`: Infrastructure Review (Diagnostics tab): audits infrastructure nodes' stored radio settings (optionally refreshed live) for site channel plans, overlapping radios in antenna beams, azimuth vs. neighbor bearings, PtP pairing, firmware, user blocks, reachability, near-far, plus a verdict per RF link touching infrastructure.
 - `change_log.py`: Change log (Changes tab): manual channel/power/antenna/firmware/other entries plus `auto` entries imported from `frequency_change`, `radio_config_change` and `firmware_change` events (SQLite `change_log`, `event_id` unique). `compare()` measures every RF link of the changed node (or the given pair) over equal windows before/after the change: LQ, quality, SNR, noise (signal - SNR), retry/fail rates from cumulative counters, bitrates, ping, node-reported peer downs, reachability, with per-metric better/worse/same verdicts and aligned series.
+- `channel_map.py`: Channel Map tab data: every located radio (channel, width, edges, antenna beam; beamwidth from stored value, antenna description or gain), sites (radios within 150 m), RF links, and channel conflicts (overlap/adjacent/near, not same channel) between radios on one mast or within 25 km with at least one aimed at the other, ranked by severity. Radios inactive but seen in the last 7 days still count. What-if overrides (frequency/width per radio) are applied in memory only and compared against the stored plan.
 - `config.py`: Central configuration and environment-variable overrides.
 
 ### Frontend Components
@@ -62,6 +63,7 @@ There is no full test suite or linting currently configured.
 - `static/js/rf-stats.js`: Chart.js graphs for quality, SNR, latency, throughput, and RF test actions.
 - `static/js/link-diagnosis.js`: RF Stats pair diagnosis panel (verdict, findings, direction/node comparison, colocated radios, state log, live path check, per-direction LQM charts).
 - `static/js/infra-review.js`: Infrastructure Review section on the Diagnostics tab (findings, per-site spectrum chart and settings table, link verdicts).
+- `static/js/channel-map.js`: Channel Map tab (Leaflet 1.9.4 lazy-loaded from cdnjs, OpenStreetMap tiles): radios colored by frequency, beam wedges, RF links, dashed conflict lines and mast rings, filters (scope, band, frequency range, severity), radio side panel, and what-if channel plan. Hooks its own tab button; no changes to rf-stats.js tab switching.
 - `static/js/rf-channel.js`: Shared node channel display (centre/width/edge frequencies and channel numbers) and connected-peer channel relation (overlap/adjacent/near/same/clear) for the Nodes tab detail panel and node page; values come from `infra_audit.annotate_link_rf` via `/api/nodes/detail` and `/api/nodes/full` (`node.rf_span`, `link.peer_rf`).
 - `static/js/changes.js`: Changes tab (change list, filters, add form, before/after metrics and overlay charts; `/#changes/<id>` deep link). Also registers a `changeMarkers` Chart.js plugin that RF Stats uses to draw change times on link charts.
 - `static/js/node-changes.js`: Node page Changes section with an inline Add change form.
@@ -130,6 +132,7 @@ Infrastructure routes:
 
 - `GET /api/nodes/infrastructure`, `POST /api/nodes/infrastructure/<name>` `{infrastructure: bool, site?}`: mark towers/high sites. Site defaults to the location code in the name (`w0gq-col-...` -> `COL`); site names come from the `site_names` setting over defaults (COL Collins Tower, MMC Mt Mercy Hospital, EOC Linn County EOC). Stored in SQLite `infrastructure_nodes`, exposed as `is_infrastructure` on node and graph JSON.
 - `GET|POST /api/reports/infrastructure` (`POST {refresh: true}` re-reads settings from the nodes first)
+- `GET /api/channel-map?scope&max_km&center&include_inactive`, `POST /api/channel-map/what-if` `{overrides: {name: {frequency, chanbw}} | "name freq width" lines, scope?, ...}`: channel map data and a non-persistent what-if recompute (response adds `what_if` with baseline counts, resolved/introduced/changed conflicts)
 
 Mesh health and scan-boundary routes:
 

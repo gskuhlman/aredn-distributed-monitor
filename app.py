@@ -26,6 +26,7 @@ import reports
 import link_diagnostics
 import infra_audit
 import change_log
+import channel_map
 import link_health
 import mesh_diagnostics
 import incident_report
@@ -818,6 +819,29 @@ def api_infrastructure_review():
     if result.get('gateway_unreachable'):
         return jsonify(result), 503
     return jsonify(result)
+
+
+# ---- Channel Map (TODO #3) ----
+@app.route('/api/channel-map')
+def api_channel_map():
+    """Located radios, channel conflicts and RF links for the Channel Map tab."""
+    return jsonify(channel_map.build_map(
+        scope=request.args.get('scope', 'all'),
+        max_km=request.args.get('max_km'),
+        center=request.args.get('center'),
+        include_inactive=request.args.get('include_inactive') in ('1', 'true')))
+
+
+@app.route('/api/channel-map/what-if', methods=['POST'])
+def api_channel_map_what_if():
+    """Recompute conflicts with temporary channel overrides (nothing is saved).
+    Body: {overrides: {name: {frequency, chanbw}} or "name freq width" lines,
+    scope?, max_km?, center?, include_inactive?}"""
+    body = request.get_json(silent=True) or {}
+    return jsonify(channel_map.build_map(
+        scope=body.get('scope', 'all'), max_km=body.get('max_km'), center=body.get('center'),
+        overrides=body.get('overrides') or {}, include_inactive=bool(body.get('include_inactive'))))
+# ---- end Channel Map ----
 
 
 @app.route('/api/rf-stats/diagnose/<a>/<b>')

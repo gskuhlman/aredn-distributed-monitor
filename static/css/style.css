@@ -2060,3 +2060,62 @@ body {
 .chg-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; margin: 8px 0 14px; }
 .chg-chart { position: relative; height: 220px; }
 @media (max-width: 600px) { .chg-form-grid .chg-wide { grid-column: span 1; } }
+/* ============ Channel Map (TODO #3) ============ */
+.cm-layout { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; }
+.cm-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px;
+    background: white; border-bottom: 1px solid #e0e0e0; }
+.cm-controls .form-input { width: auto; }
+.cm-range { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; }
+.cm-range input[type="range"] { width: 110px; }
+.cm-num { width: 80px !important; }
+.cm-body { flex: 1; display: flex; min-height: 0; }
+.cm-map-wrap { flex: 1; position: relative; min-width: 0; }
+.cm-map { position: absolute; inset: 0; background: #eef1f4; }
+.cm-side { width: 380px; max-width: 45%; overflow-y: auto; padding: 10px 12px; background: #f7f8fa;
+    border-left: 1px solid #e0e0e0; display: flex; flex-direction: column; gap: 10px; font-size: 0.85rem; }
+.cm-side h4 { margin: 8px 0 4px; font-size: 0.85rem; color: #2c3e50; }
+.cm-panel-title { margin: 0 0 6px; font-size: 1rem; display: flex; gap: 8px; align-items: center; }
+.cm-table td:first-child { white-space: nowrap; color: #666; width: 1%; }
+.cm-list { margin: 0; padding-left: 16px; }
+.cm-list li { margin: 2px 0; }
+.cm-conf { cursor: pointer; }
+.cm-conf:hover { text-decoration: underline; }
+.cm-sev-critical { color: #c0392b; }
+.cm-sev-warning { color: #b9600f; }
+.cm-sev-info { color: #8a7300; }
+.cm-counts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.cm-whatif-flag { font-size: 0.75rem; font-weight: 600; color: #6c3483; border: 1px dashed #6c3483;
+    border-radius: 3px; padding: 0 6px; }
+.cm-warn { color: #c0392b; font-weight: 600; }
+.cm-whatif-text { width: 100%; font-family: monospace; font-size: 0.8rem; resize: vertical; }
+.cm-whatif-actions, .cm-quick-whatif { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+.cm-icon { background: none; border: none; }
+.cm-dot { display: block; width: 14px; height: 14px; border-radius: 50%; border: 3px solid #263238;
+    box-sizing: border-box; box-shadow: 0 0 0 1px white; }
+.cm-dot.cm-infra { border-radius: 2px; transform: rotate(45deg); }
+.cm-dot.cm-whatif { outline: 2px dashed #6c3483; outline-offset: 2px; }
+.cm-dot.cm-stale { opacity: 0.45; }
+.cm-dot.cm-selected { box-shadow: 0 0 0 2px white, 0 0 0 4px #2980b9; }
+.cm-legend { position: absolute; left: 10px; bottom: 22px; z-index: 500; width: 340px; max-width: calc(100% - 20px);
+    background: rgba(255, 255, 255, 0.94); border-radius: 6px; padding: 8px 10px; font-size: 0.72rem;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
+.cm-legend-title { font-weight: 600; margin-bottom: 3px; }
+.cm-scale { position: relative; height: 12px; border-radius: 2px; }
+.cm-ham { position: absolute; top: -3px; bottom: -3px; border: 1px solid #263238; border-radius: 2px; }
+.cm-wifi-row { position: relative; height: 6px; margin-top: 2px; }
+.cm-wifi { position: absolute; top: 0; height: 6px; background: repeating-linear-gradient(45deg, #888 0 2px, transparent 2px 4px); }
+.cm-wifi-heavy { background: repeating-linear-gradient(45deg, #c0392b 0 2px, transparent 2px 4px); }
+.cm-wifi-moderate { background: repeating-linear-gradient(45deg, #e67e22 0 2px, transparent 2px 4px); }
+.cm-ticks { position: relative; height: 12px; }
+.cm-tick { position: absolute; transform: translateX(-50%); color: #555; }
+.cm-legend-keys { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 4px 0; }
+.cm-legend-keys span { display: inline-flex; align-items: center; gap: 4px; }
+.cm-key-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.cm-infra-key { border-radius: 1px; transform: rotate(45deg); border: 2px solid #263238; width: 8px; height: 8px; }
+.cm-key-line { display: inline-block; width: 18px; border-top: 3px solid; }
+.cm-key-line.cm-dashed { border-top-style: dashed; }
+@media (max-width: 800px) {
+    .cm-body { flex-direction: column; }
+    .cm-map-wrap { min-height: 60vh; }
+    .cm-side { width: auto; max-width: none; border-left: none; border-top: 1px solid #e0e0e0; }
+}

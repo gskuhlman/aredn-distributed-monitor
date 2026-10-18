@@ -32,6 +32,7 @@
                     <button class="tab-btn" data-tab="voip">VOIP</button>
                     <button class="tab-btn" data-tab="reports">Reports</button>
                     <button class="tab-btn" data-tab="changes">Changes</button>
+                    <button class="tab-btn" data-tab="channel-map">Channel Map</button>
                 </nav>
             </div>
             <div class="header-controls">
@@ -607,6 +608,69 @@
                 </div>
             </div>
             <!-- end Changes View -->
+            <!-- Channel Map View (TODO #3) -->
+            <div id="channel-map-view" class="view-container">
+                <div class="cm-layout">
+                    <div class="cm-controls">
+                        <select id="cm-scope" class="form-input" title="Which nodes to show">
+                            <option value="all">All Nodes</option>
+                            <option value="selected">Selected Nodes</option>
+                            <option value="selected-connected">Selected Nodes + Connected</option>
+                            <option value="infrastructure">Infrastructure Nodes</option>
+                            <option value="infrastructure-connected" selected>Infrastructure + Connected</option>
+                            <option value="rf">RF-only Nodes</option>
+                        </select>
+                        <select id="cm-band" class="form-input" title="Band">
+                            <option value="all">All bands</option>
+                            <option value="5-ham" selected>5 GHz ham (5650–5925)</option>
+                            <option value="5">5 GHz (all)</option>
+                            <option value="2.4">2.4 GHz</option>
+                            <option value="3">3 GHz</option>
+                        </select>
+                        <select id="cm-severity" class="form-input" title="Conflicts to draw">
+                            <option value="info">All conflicts</option>
+                            <option value="warning" selected>Warning + critical</option>
+                            <option value="critical">Critical only</option>
+                        </select>
+                        <label class="header-checkbox"><input type="checkbox" id="cm-beams" checked> Beams</label>
+                        <label class="header-checkbox"><input type="checkbox" id="cm-links" checked> RF links</label>
+                        <label class="header-checkbox"><input type="checkbox" id="cm-conflicts" checked> Conflicts</label>
+                        <label class="header-checkbox"><input type="checkbox" id="cm-conflicts-only"> Conflicting radios only</label>
+                        <label class="header-checkbox" title="Include radios not seen for more than 7 days"><input type="checkbox" id="cm-inactive"> Old radios</label>
+                        <span class="cm-range">
+                            <label>MHz <input type="number" id="cm-fmin" class="form-input cm-num" value="5650" step="5"></label>
+                            <input type="range" id="cm-fmin-range" min="5600" max="5950" step="5" value="5650" aria-label="Lowest frequency">
+                            <input type="range" id="cm-fmax-range" min="5600" max="5950" step="5" value="5950" aria-label="Highest frequency">
+                            <label>to <input type="number" id="cm-fmax" class="form-input cm-num" value="5950" step="5"></label>
+                        </span>
+                        <button id="cm-reload" class="btn btn-secondary">Reload</button>
+                        <span id="cm-status" class="nodes-count"></span>
+                    </div>
+                    <div class="cm-body">
+                        <div class="cm-map-wrap">
+                            <div id="cm-map" class="cm-map"></div>
+                            <div id="cm-legend" class="cm-legend"></div>
+                        </div>
+                        <aside class="cm-side">
+                            <div id="cm-summary"></div>
+                            <div id="cm-panel"><p class="form-hint">Click a radio for its settings and conflicts.</p></div>
+                            <details class="diag-details" id="cm-whatif-box">
+                                <summary>What-if channel plan</summary>
+                                <p class="form-hint">One radio per line: <code>name frequency [width]</code>.
+                                    Nothing is saved; conflicts are recomputed as if these channels were set.</p>
+                                <textarea id="cm-whatif-text" class="form-input cm-whatif-text" rows="8"
+                                    placeholder="w0gq-col-rkt-s 5865 20"></textarea>
+                                <div class="cm-whatif-actions">
+                                    <button id="cm-whatif-run" class="btn btn-primary btn-small">Apply what-if</button>
+                                    <button id="cm-whatif-example" class="btn btn-secondary btn-small" title="Load the proposed Collins/kf9mt plan">Collins plan</button>
+                                    <button id="cm-whatif-clear" class="btn btn-secondary btn-small">Clear</button>
+                                </div>
+                                <div id="cm-whatif-result"></div>
+                            </details>
+                        </aside>
+                    </div>
+                </div>
+            </div>
 
             <!-- VOIP View -->
             <div id="voip-view" class="view-container">
@@ -903,5 +967,6 @@
     <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reports.js') }}"></script>
     <script src="{{ url_for('static', filename='js/changes.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/channel-map.js') }}"></script>
 </body>
 </html>

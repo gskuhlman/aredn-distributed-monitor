@@ -14,7 +14,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 - [ ] 2. **"Why is this node unreachable?" classifier.** Never resolves, legacy TUN
       tunnel route only, answers ping but not HTTP, not seen in more than 30 days, behind a supernode, or
       starting-node outage. Count only "really down" nodes as unreachable in Reports.
-- [ ] 3. **Area channel map.** Map with each radio colored by frequency, antenna beams
+- [x] 3. **Area channel map.** Map with each radio colored by frequency, antenna beams
       as wedges, and lines between radios whose channels overlap and point at each other.
 - [ ] 4. **Channel planner.** Pick a site (or radios plus their clients) and get suggested
       channels using band edges, busy WiFi ranges, beams, guard bands, and clients that
