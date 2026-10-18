@@ -185,6 +185,16 @@ def process_node_data(data, refresh_services=True):
             except (ValueError, TypeError):
                 pass  # Ignore if frequencies aren't valid numbers
 
+        # Firmware upgrade/downgrade (feeds the change log, TODO #1)
+        old_fw = existing_node.get('firmware_version') or ''
+        if old_fw and firmware and old_fw != firmware:
+            events.append({
+                'type': database.EVENT_FIRMWARE_CHANGE,
+                'node': node_name,
+                'details': f"Firmware changed: {old_fw} -> {firmware}",
+                'severity': 'info'
+            })
+
     # Upsert the node
     database.upsert_node(
         name=node_name,

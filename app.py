@@ -25,6 +25,7 @@ import gateway
 import reports
 import link_diagnostics
 import infra_audit
+import change_log
 import link_health
 import mesh_diagnostics
 import incident_report
@@ -835,6 +836,50 @@ def api_rf_diagnose_pair_live(a, b):
     if result.get('error'):
         return jsonify(result), 400
     return jsonify(result)
+
+
+# --- change log (TODO #1) ---------------------------------------------------
+
+@app.route('/api/changes', methods=['GET'])
+def api_list_changes():
+    """Channel/power/antenna/firmware changes, newest first."""
+    node = (request.args.get('node') or '').strip().lower() or None
+    hours = request.args.get('hours', type=int)
+    limit = max(1, min(2000, request.args.get('limit', 500, type=int)))
+    return jsonify({'changes': change_log.list_changes(node=node, hours=hours, limit=limit),
+                    'categories': list(change_log.CATEGORIES)})
+
+
+@app.route('/api/changes', methods=['POST'])
+def api_add_change():
+    """Record a manual change {node_name, description, category?, timestamp?, peer_node?, author?}."""
+    data = request.get_json(silent=True) or {}
+    try:
+        change = change_log.add_change(
+            data.get('node_name'), data.get('description'), data.get('category') or 'other',
+            data.get('timestamp'), data.get('peer_node'), data.get('author'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({'success': True, 'change': change})
+
+
+@app.route('/api/changes/<int:change_id>', methods=['DELETE'])
+def api_delete_change(change_id):
+    if not change_log.delete_change(change_id):
+        return jsonify({'error': 'Change not found'}), 404
+    return jsonify({'success': True})
+
+
+@app.route('/api/changes/<int:change_id>/compare')
+def api_compare_change(change_id):
+    """Before vs. after stats for every RF link of the changed node."""
+    hours = request.args.get('hours', 24, type=int)
+    result = change_log.compare_change(change_id, window_hours=hours)
+    if result is None:
+        return jsonify({'error': 'Change not found'}), 404
+    return jsonify(result)
+
+# --- end change log ---------------------------------------------------------
 
 
 @app.route('/api/rf-stats/summary')

@@ -161,6 +161,27 @@ def init_db():
             )
         ''')
 
+        # --- change log (TODO #1) ---------------------------------------
+        # Operator/auto record of channel, power, antenna and firmware changes,
+        # so a before/after comparison can show whether a change helped.
+        # source 'auto' rows are imported from events (event_id is unique).
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS change_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME NOT NULL,
+                node_name TEXT NOT NULL,
+                peer_node TEXT,
+                category TEXT NOT NULL DEFAULT 'other',
+                description TEXT,
+                source TEXT NOT NULL DEFAULT 'manual',
+                author TEXT,
+                event_id INTEGER UNIQUE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_change_log_node ON change_log(node_name, timestamp)')
+        # --- end change log ----------------------------------------------
+
         # Scan boundaries: operator-chosen nodes that limit BFS discovery so a
         # local event isn't polluted by remote meshes. mode is 'exclude' (never
         # poll this node, so nothing beyond it is reached through it) or 'stop'
@@ -1382,6 +1403,7 @@ EVENT_NODE_REBOOT = 'node_reboot'
 EVENT_GATEWAY_LOST = 'gateway_lost'
 EVENT_RADIO_CONFIG_CHANGE = 'radio_config_change'
 EVENT_GATEWAY_RESTORED = 'gateway_restored'
+EVENT_FIRMWARE_CHANGE = 'firmware_change'
 
 
 def trim_connectivity_log(days=None):

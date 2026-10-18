@@ -8,7 +8,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 
 ## Top picks
 
-- [ ] 1. **Change log + before/after.** Record channel/power/antenna changes (from
+- [x] 1. **Change log + before/after.** Record channel/power/antenna changes (from
       `radio_config_change` events or manual entry); show a link's LQ, SNR, noise and
       retries for 24 h before vs. after, side by side.
 - [ ] 2. **"Why is this node unreachable?" classifier.** Never resolves, legacy TUN

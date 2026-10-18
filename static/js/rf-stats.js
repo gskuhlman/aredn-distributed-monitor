@@ -568,6 +568,9 @@ const RFStats = {
             const history = await response.json();
 
             this.updateCharts(history);
+            if (typeof ChangesModule !== 'undefined') {
+                ChangesModule.markCharts(Object.values(this.charts), source, target);
+            }
 
         } catch (error) {
             console.error('Error loading link history:', error);
@@ -809,6 +812,7 @@ function initTabSwitching() {
 
             // Hide all views, then activate the selected one.
             allViews.forEach(v => v && v.classList.remove('active'));
+            document.querySelectorAll('.view-container.active').forEach(v => v.classList.remove('active'));
             if (legend) legend.style.display = tab === 'network' ? 'block' : 'none';
 
             if (tab === 'network') {
@@ -841,6 +845,13 @@ function initTabSwitching() {
                 if (typeof ReportsModule !== 'undefined') {
                     ReportsModule.init();
                     ReportsModule.load();
+                }
+            } else if (tab === 'changes') {
+                const changesView = document.getElementById('changes-view');
+                if (changesView) changesView.classList.add('active');
+                if (typeof ChangesModule !== 'undefined') {
+                    ChangesModule.init();
+                    ChangesModule.load();
                 }
             }
         });

@@ -31,6 +31,7 @@
                     <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
                     <button class="tab-btn" data-tab="voip">VOIP</button>
                     <button class="tab-btn" data-tab="reports">Reports</button>
+                    <button class="tab-btn" data-tab="changes">Changes</button>
                 </nav>
             </div>
             <div class="header-controls">
@@ -535,6 +536,78 @@
                 </div>
             </div>
 
+            <!-- Changes View (TODO #1) -->
+            <div id="changes-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="nodes-header">
+                        <div class="nodes-header-left">
+                            <input type="text" id="chg-search" class="form-input" placeholder="Search nodes or descriptions...">
+                            <select id="chg-scope" class="form-input">
+                                <option value="all">All Nodes</option>
+                                <option value="selected">Selected Nodes</option>
+                                <option value="infrastructure">Infrastructure Nodes</option>
+                            </select>
+                            <select id="chg-category" class="form-input">
+                                <option value="all">All categories</option>
+                                <option value="channel">Channel</option>
+                                <option value="power">Power</option>
+                                <option value="antenna">Antenna</option>
+                                <option value="firmware">Firmware</option>
+                                <option value="other">Other</option>
+                            </select>
+                            <select id="chg-hours" class="form-input">
+                                <option value="168">Last 7 days</option>
+                                <option value="720" selected>Last 30 days</option>
+                                <option value="all">All</option>
+                            </select>
+                            <button id="chg-add-toggle" class="btn btn-primary">Add change</button>
+                        </div>
+                        <span id="chg-status" class="nodes-count"></span>
+                    </div>
+                    <div id="chg-form" class="diag-section chg-form" hidden>
+                        <h3>Record a change</h3>
+                        <div class="chg-form-grid">
+                            <label>Node <input type="text" id="chg-node" class="form-input" list="chg-node-names" placeholder="w0gq-col-rkt-s"></label>
+                            <label>Link peer (optional) <input type="text" id="chg-peer" class="form-input" list="chg-node-names"></label>
+                            <label>Category
+                                <select id="chg-cat" class="form-input">
+                                    <option value="channel">Channel</option>
+                                    <option value="power">Power</option>
+                                    <option value="antenna">Antenna</option>
+                                    <option value="firmware">Firmware</option>
+                                    <option value="other" selected>Other</option>
+                                </select>
+                            </label>
+                            <label>When <input type="datetime-local" id="chg-time" class="form-input" step="60"></label>
+                            <label class="chg-wide">Description <input type="text" id="chg-desc" class="form-input" placeholder="Moved to ch 173 (5865 MHz)"></label>
+                            <label>By (optional) <input type="text" id="chg-author" class="form-input"></label>
+                        </div>
+                        <datalist id="chg-node-names"></datalist>
+                        <div class="chg-form-actions">
+                            <button id="chg-save" class="btn btn-primary">Save</button>
+                            <button id="chg-cancel" class="btn btn-secondary">Cancel</button>
+                        </div>
+                    </div>
+                    <div class="diag-section">
+                        <h3>Change log <small class="form-hint">channel, radio-setting and firmware changes are added automatically from scans</small></h3>
+                        <div class="table-scroll-wrapper" id="chg-list"></div>
+                    </div>
+                    <div class="chg-window-row">
+                        <label class="header-checkbox">Compare window
+                            <select id="chg-window" class="form-input">
+                                <option value="6">6 hours each side</option>
+                                <option value="12">12 hours each side</option>
+                                <option value="24" selected>24 hours each side</option>
+                                <option value="72">72 hours each side</option>
+                                <option value="168">1 week each side</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div id="chg-compare"></div>
+                </div>
+            </div>
+            <!-- end Changes View -->
+
             <!-- VOIP View -->
             <div id="voip-view" class="view-container">
                 <div class="nodes-container">
@@ -829,5 +902,6 @@
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reports.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/changes.js') }}"></script>
 </body>
 </html>

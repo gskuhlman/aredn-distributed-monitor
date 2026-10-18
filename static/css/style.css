@@ -2031,3 +2031,32 @@ body {
 .infra-badge-warning { background: #e67e22; }
 .infra-badge-info { background: #3498db; }
 .infra-badge-ok { background: #27ae60; }
+
+/* --- Changes tab (TODO #1) ------------------------------------------------ */
+.chg-table .chg-desc { white-space: normal; min-width: 220px; }
+.chg-table tr.chg-active td { background: #eaf2f8; }
+.chg-actions { display: flex; gap: 4px; }
+.chg-cat { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 0.8em; color: #fff; background: #7f8c8d; }
+.chg-cat-channel { background: #2e86c1; }
+.chg-cat-power { background: #d35400; }
+.chg-cat-antenna { background: #8e44ad; }
+.chg-cat-firmware { background: #16a085; }
+.chg-infra { margin-left: 4px; color: #8e44ad; }
+.chg-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 12px; }
+.chg-form-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 0.9em; }
+.chg-form-grid .chg-wide { grid-column: span 2; }
+.chg-form-actions { margin-top: 10px; display: flex; gap: 8px; }
+.chg-window-row { margin: 8px 0; }
+.chg-summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.chg-verdict { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.8em; font-weight: 600; color: #fff; background: #95a5a6; }
+.chg-v-better { background: #27ae60; }
+.chg-v-worse { background: #c0392b; }
+.chg-v-same { background: #7f8c8d; }
+.chg-v-na { background: #bdc3c7; color: #2c3e50; }
+.chg-metrics tr.chg-row-better td { background: #e9f7ef; }
+.chg-metrics tr.chg-row-worse td { background: #fdedec; }
+.chg-metrics tr.chg-row-na td { color: #95a5a6; }
+.chg-dir { margin: 10px 0 4px; font-size: 0.95em; }
+.chg-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; margin: 8px 0 14px; }
+.chg-chart { position: relative; height: 220px; }
+@media (max-width: 600px) { .chg-form-grid .chg-wide { grid-column: span 1; } }

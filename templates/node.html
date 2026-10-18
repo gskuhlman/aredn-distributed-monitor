@@ -91,6 +91,33 @@
                 <div id="node-link-health"></div>
             </section>
 
+            <!-- Changes (TODO #1) -->
+            <section class="node-page-section">
+                <h2>Changes <button id="node-chg-add" class="btn btn-small btn-primary">Add change</button></h2>
+                <div id="node-chg-form" class="chg-form" hidden>
+                    <div class="chg-form-grid">
+                        <label>Category
+                            <select id="node-chg-cat" class="form-input">
+                                <option value="channel">Channel</option>
+                                <option value="power">Power</option>
+                                <option value="antenna">Antenna</option>
+                                <option value="firmware">Firmware</option>
+                                <option value="other" selected>Other</option>
+                            </select>
+                        </label>
+                        <label>Link peer (optional) <input type="text" id="node-chg-peer" class="form-input" list="node-chg-peers"></label>
+                        <label>When <input type="datetime-local" id="node-chg-time" class="form-input" step="60"></label>
+                        <label class="chg-wide">Description <input type="text" id="node-chg-desc" class="form-input" placeholder="Lowered TX power 3 dB"></label>
+                    </div>
+                    <datalist id="node-chg-peers"></datalist>
+                    <div class="chg-form-actions">
+                        <button id="node-chg-save" class="btn btn-primary">Save</button>
+                        <button id="node-chg-cancel" class="btn btn-secondary">Cancel</button>
+                    </div>
+                </div>
+                <div id="node-changes"><p class="loading">Loading...</p></div>
+            </section>
+
             <section class="node-page-section">
                 <h2>Incident Probes</h2>
                 <p class="health-footnote">High-rate bidirectional pings captured automatically while a watched link is dropped, LQM-blocked, or marginal. Forward and reverse rows isolate which direction is failing.</p>
@@ -146,5 +173,6 @@
     </script>
     <script src="{{ url_for('static', filename='js/rf-channel.js') }}"></script>
     <script src="{{ url_for('static', filename='js/node-page.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/node-changes.js') }}"></script>
 </body>
 </html>
