@@ -345,6 +345,16 @@
                             <div id="infra-review"><p class="log-empty">Not run yet.</p></div>
                         </div>
 
+                        <!-- Notifications (#21) -->
+                        <div class="diag-section">
+                            <details id="notify-section" class="notify-section">
+                                <summary><h3>Notifications <small class="form-hint">email, Discord, ntfy or webhook alerts for important events</small>
+                                    <span id="notify-badge" class="notify-badge"></span></h3></summary>
+                                <div id="notify-panel"><p class="log-empty">Loading...</p></div>
+                            </details>
+                        </div>
+                        <!-- End notifications -->
+
                         <div class="diag-section">
                             <h3>Mesh Health Check <small class="form-hint">network-wide problem finder, scoped by scan boundaries</small></h3>
                             <div class="mh-controls">
@@ -826,6 +836,7 @@
     <script src="{{ url_for('static', filename='js/nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/diagnostics.js') }}"></script>
     <script src="{{ url_for('static', filename='js/infra-review.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reports.js') }}"></script>

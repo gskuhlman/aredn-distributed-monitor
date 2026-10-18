@@ -23,7 +23,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now aredn-monitor
 
 # Validate Python syntax
-python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py
+python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py notify.py
 
 # Bootstrap CouchDB databases and indexes when COUCH_URL is configured
 python couch_client.py
@@ -50,6 +50,7 @@ There is no full test suite or linting currently configured.
 - `reports.py`: Read-only time-window reporting (Reports tab): per-node poll health, per-link RF stats, state changes, events, VoIP, and bucketed series, filtered like the other pages.
 - `link_diagnostics.py`: Pair diagnosis for the RF Stats link view. Combines both ends' LQM trackers (including a MAC-only alias when one end lost the other's hostname), promoted LQM history columns, state log, node health/config, each end's full RF neighbor list (receiver-wide loss, near-far/overpowering neighbors with a suggested power cut), and radios at each site or in each antenna's beam tagged by channel relation (same/overlap/adjacent/near/clear) into ranked findings and a verdict; `run_live_checks` pings/traceroutes between the two nodes via their CGI.
 - `infra_audit.py`: Infrastructure Review (Diagnostics tab): audits infrastructure nodes' stored radio settings (optionally refreshed live) for site channel plans, overlapping radios in antenna beams, azimuth vs. neighbor bearings, PtP pairing, firmware, user blocks, reachability, near-far, plus a verdict per RF link touching infrastructure.
+- `notify.py`: Operator notifications (email/SMTP, Discord webhook, ntfy, generic JSON webhook). `database.log_event` hands each committed event to listeners; `notify.install()` (called only from the `__main__` startup path) registers a non-blocking listener plus a worker that applies rules (event types, min severity, scope any/infrastructure/selected/node list, channels) and anti-spam: mute-until, quiet hours, `is_suppressed()` hook (for future maintenance windows), per (rule, node/link, type) cooldown, flap hold (problem + recovery within N minutes -> one "flapped" note; recoveries only for alerted problems), and per-channel digest. Tables `notification_config`, `notification_rules`, `notifications_log` (retention = `CONNECTIVITY_LOG_RETENTION_DAYS`).
 - `config.py`: Central configuration and environment-variable overrides.
 
 ### Frontend Components
@@ -60,6 +61,7 @@ There is no full test suite or linting currently configured.
 - `static/js/nodes.js`: Nodes table, filters, detail panel, node history charts, and delete action.
 - `static/js/rf-stats.js`: Chart.js graphs for quality, SNR, latency, throughput, and RF test actions.
 - `static/js/link-diagnosis.js`: RF Stats pair diagnosis panel (verdict, findings, direction/node comparison, colocated radios, state log, live path check, per-direction LQM charts).
+- `static/js/notifications.js`: Notifications section on the Diagnostics tab (channels, timing, quiet hours, mute, rules, send log, per-channel test).
 - `static/js/infra-review.js`: Infrastructure Review section on the Diagnostics tab (findings, per-site spectrum chart and settings table, link verdicts).
 - `static/js/rf-channel.js`: Shared node channel display (centre/width/edge frequencies and channel numbers) and connected-peer channel relation (overlap/adjacent/near/same/clear) for the Nodes tab detail panel and node page; values come from `infra_audit.annotate_link_rf` via `/api/nodes/detail` and `/api/nodes/full` (`node.rf_span`, `link.peer_rf`).
 - `static/js/reports.js`: Reports tab: start/end window scrubbing (presets, prev/next, slider), filters, timeline, tables, and node/link drill-down charts.
@@ -117,6 +119,11 @@ Existing dashboard routes:
 - `GET /api/events`
 - `GET/POST /api/rf-stats/*`
 - `GET /api/rf-stats/diagnose/<a>/<b>?hours=N`, `POST /api/rf-stats/diagnose/<a>/<b>/live`: pair diagnosis and live path check
+
+Notification routes (secrets always masked as `********`; posting the mask back keeps the stored value, an empty string clears it):
+
+- `GET/POST /api/notifications/settings`, `GET/POST /api/notifications/rules`, `DELETE /api/notifications/rules/<id>`
+- `POST /api/notifications/test` `{channel}`, `GET /api/notifications/log?limit`
 
 Infrastructure routes:
 
@@ -185,6 +192,7 @@ Important settings in `config.py` and environment variables:
 - `VOIP_AGENT_PORT` / `VOIP_PROBE_UDP_PORT`: remote agent control (8765) and UDP probe (8766) ports.
 - `VOIP_STREAM_PPS` / `VOIP_STREAM_PACKET_BYTES`: streamed-session defaults (50 pps x 172 bytes ≈ 20ms RTP).
 - `VOIP_SESSION_ROUTE_INTERVAL` / `VOIP_SESSION_MAX_SECONDS`: route-refresh cadence and session safety cap.
+- `NOTIFY_SMTP_PASSWORD`, `NOTIFY_DISCORD_WEBHOOK`, `NOTIFY_NTFY_TOKEN`, `NOTIFY_WEBHOOK_TOKEN`: optional env overrides for notification secrets (otherwise stored in the local `notification_config` table, edited on the Diagnostics tab).
 
 Settings edited through `/api/settings` persist to SQLite and currently affect legacy scanner behavior.
 
@@ -201,4 +209,5 @@ Infrastructure nodes (towers/high sites, marked like Selected nodes) appear as a
 - Treat network failures as expected behavior and record failed observations.
 - Use UTC timestamps in observation documents.
 - Avoid storing secrets in replicated monitoring documents.
+- Notification secrets stay local: only the SQLite `notification_config` table or `NOTIFY_*` env vars; never in the `settings` table (returned by `/api/settings`), CouchDB, logs, or API responses.
 - Keep normal CouchDB writes append-only to avoid replication conflicts.

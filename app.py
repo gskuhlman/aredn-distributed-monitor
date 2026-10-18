@@ -32,6 +32,7 @@ import troubleshoot
 import voip
 import voip_session
 import couch_client
+import notify
 
 # Configure logging
 logging.basicConfig(
@@ -1405,6 +1406,73 @@ def process_iperf_queue_task():
         rf_stats.process_iperf_queue(socketio)
 
 
+# ============ Notifications (#21) ============
+# Secrets are masked in every response; see notify.py.
+
+@app.route('/api/notifications/settings', methods=['GET'])
+def api_notifications_settings():
+    return jsonify({
+        'config': notify.masked_config(),
+        'status': notify.status(),
+        'event_types': notify.EVENT_TYPES,
+        'severities': list(notify.SEVERITY_RANK.keys()),
+        'scopes': notify.SCOPES,
+        'channels': notify.CHANNELS,
+    })
+
+
+@app.route('/api/notifications/settings', methods=['POST'])
+def api_notifications_update_settings():
+    try:
+        cfg = notify.update_config(request.get_json(silent=True) or {})
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({'success': True, 'config': cfg, 'status': notify.status()})
+
+
+@app.route('/api/notifications/rules', methods=['GET'])
+def api_notifications_rules():
+    return jsonify({'rules': notify.get_rules()})
+
+
+@app.route('/api/notifications/rules', methods=['POST'])
+def api_notifications_save_rule():
+    try:
+        rule = notify.save_rule(request.get_json(silent=True) or {})
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except LookupError as exc:
+        return jsonify({'error': str(exc)}), 404
+    return jsonify({'success': True, 'rule': rule})
+
+
+@app.route('/api/notifications/rules', methods=['DELETE'])
+@app.route('/api/notifications/rules/<int:rule_id>', methods=['DELETE'])
+def api_notifications_delete_rule(rule_id=None):
+    rule_id = rule_id or request.args.get('id', type=int) or (request.get_json(silent=True) or {}).get('id')
+    if not rule_id:
+        return jsonify({'error': 'Rule id required'}), 400
+    if not notify.delete_rule(rule_id):
+        return jsonify({'error': 'Rule not found'}), 404
+    return jsonify({'success': True})
+
+
+@app.route('/api/notifications/test', methods=['POST'])
+def api_notifications_test():
+    channel = (request.get_json(silent=True) or {}).get('channel')
+    if channel not in notify.CHANNELS:
+        return jsonify({'error': 'Unknown channel'}), 400
+    result = notify.send_test(channel)
+    return jsonify(result), (200 if result.get('success') else 502)
+
+
+@app.route('/api/notifications/log')
+def api_notifications_log():
+    return jsonify({'log': notify.get_log(request.args.get('limit', 100, type=int))})
+
+# ============ End notifications ============
+
+
 def cleanup_history_task():
     """Background task for cleaning up old history"""
     rf_stats.cleanup_old_history()
@@ -1476,6 +1544,9 @@ if __name__ == '__main__':
     if not config.DEBUG or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         # Start scheduler
         start_scheduler()
+
+        # Notifications: listen to logged events (sends only when enabled)
+        notify.install(socketio.start_background_task)
 
         if auto_scan_enabled():
             logger.info("Initial scan scheduled to run in 5 seconds...")

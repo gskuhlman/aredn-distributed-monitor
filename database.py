@@ -1431,6 +1431,28 @@ def append_connectivity_log(timestamp, event_type, node_name=None, details=None,
     return True
 
 
+# ---- event listeners (notifications) ----
+# Callables registered here receive each logged event as a dict after it is
+# committed. They must not block; failures are swallowed so logging never
+# breaks because of a listener. notify.install() registers one.
+_event_listeners = []
+
+
+def add_event_listener(listener):
+    if listener not in _event_listeners:
+        _event_listeners.append(listener)
+
+
+def _notify_event_listeners(event):
+    for listener in list(_event_listeners):
+        try:
+            listener(event)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Event listener failed: %s", type(exc).__name__)
+# ---- end event listeners ----
+
+
 def log_event(event_type, node_name=None, details=None, severity='info'):
     """Log an event to the database"""
     now = local_timestamp()
@@ -1441,7 +1463,11 @@ def log_event(event_type, node_name=None, details=None, severity='info'):
             VALUES (?, ?, ?, ?, ?)
         ''', (now, event_type, node_name, details, severity))
         append_connectivity_log(now, event_type, node_name, details, severity)
-        return cursor.lastrowid
+        event_id = cursor.lastrowid
+    if _event_listeners:
+        _notify_event_listeners({'id': event_id, 'timestamp': now, 'event_type': event_type,
+                                 'node_name': node_name, 'details': details, 'severity': severity})
+    return event_id
 
 
 def get_events(limit=100, offset=0, event_types=None):
