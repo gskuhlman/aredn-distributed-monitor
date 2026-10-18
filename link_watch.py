@@ -411,30 +411,34 @@ def check_one_way(now=None):
     events, touched = [], {}
     for key, r in results.items():
         state = states.get(key) or _new_state(key)
+        prev_deaf = (state.get('detail') or {}).get('deaf') or []
         action = _step(state, r['one_way'], config.ONE_WAY_SCANS, now_s)
         state['updated_at'] = now_s
         if r['one_way'] or state['active']:
             state['detail'] = r
         a, b = r['pair']
-        node = (r['deaf'] or [a])[0]
+        # Event shape (shared with link_dropped and matched by notifications):
+        # node_name = one end (the deaf one), details start "RF link to <peer>".
+        node = (r['deaf'] or prev_deaf or [a])[0]
+        peer = b if node == a else a
         touches_infra = bool({a, b} & infra)
         if action == 'raise':
             _emit(events, database.EVENT_ONE_WAY_LINK, node,
-                  f"One-way RF link {a} ↔ {b}: " + ' | '.join(r['reasons'])
+                  f"RF link to {peer}: one-way, " + ' | '.join(r['reasons'])
                   + f". Evidence: {_evidence(r)}",
                   'critical' if touches_infra else 'warning')
             state['escalated'] = 1 if touches_infra else 0
         elif action == 'clear':
             _emit(events, database.EVENT_ONE_WAY_LINK_CLEARED, node,
-                  f"RF link {a} ↔ {b} works both ways again (one-way since {state['since']}). "
+                  f"RF link to {peer}: works both ways again (one-way since {state['since']}). "
                   f"Evidence: {_evidence(r)}", 'info')
         elif state['active'] and not state['escalated']:
             since = ld._parse_ts(state['since'])
             if since and (now - since).total_seconds() >= config.ONE_WAY_ESCALATE_MINUTES * 60:
                 state['escalated'] = 1
                 _emit(events, database.EVENT_ONE_WAY_LINK, node,
-                      f"RF link {a} ↔ {b} still one-way after "
-                      f"{config.ONE_WAY_ESCALATE_MINUTES} min (since {state['since']}): "
+                      f"RF link to {peer}: still one-way after "
+                      f"{config.ONE_WAY_ESCALATE_MINUTES} min (since {state['since']}), "
                       + ' | '.join(r['reasons']), 'critical')
         touched[key] = state
 
@@ -446,11 +450,13 @@ def check_one_way(now=None):
         seen = ld._parse_ts(state.get('updated_at'))
         if seen and (now - seen).total_seconds() >= config.ONE_WAY_FORGET_MINUTES * 60:
             a, b = key.split('|', 1)
+            node = ((state.get('detail') or {}).get('deaf') or [a])[0]
+            peer = b if node == a else a
             state['active'] = 0
             state['cleared_at'] = now_s
             state['updated_at'] = now_s
-            _emit(events, database.EVENT_ONE_WAY_LINK_CLEARED, a,
-                  f"RF link {a} ↔ {b} is no longer seen as an RF pair; one-way alarm "
+            _emit(events, database.EVENT_ONE_WAY_LINK_CLEARED, node,
+                  f"RF link to {peer}: no longer seen as an RF pair; one-way alarm "
                   f"(since {state['since']}) closed without confirming a fix.", 'info')
             touched[key] = state
     if touched:

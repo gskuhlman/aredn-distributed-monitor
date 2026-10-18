@@ -130,7 +130,7 @@ Link Watch routes:
 - `GET /api/reports/noise?hours=72&days=7`: every radio's current noise, baseline, delta and alarm state; with `&node=<name>`, that radio's series, baseline and 24-hour profile
 - `GET /api/reports/one-way?hours=24`: `active` (alarmed), `pending` (one-way now, not yet confirmed) and `cleared` (within `hours`) RF pairs with reasons and both ends' LQ/quality/SNR/cost
 
-Link Watch events (transitions only, with hysteresis; also categorized in Reports): `noise_jump` (warning), `noise_cleared` (info), `one_way_link` (warning, or critical when it touches infrastructure or is still one-way after `ONE_WAY_ESCALATE_MINUTES`), `one_way_link_cleared` (info; also raised when a flagged pair stops being evaluated for `ONE_WAY_FORGET_MINUTES`).
+Link Watch events (transitions only, with hysteresis; also categorized in Reports): `noise_jump` (warning), `noise_cleared` (info), `one_way_link` (warning, or critical when it touches infrastructure or is still one-way after `ONE_WAY_ESCALATE_MINUTES`), `one_way_link_cleared` (info; also raised when a flagged pair stops being evaluated for `ONE_WAY_FORGET_MINUTES`). Format: noise events have `node_name` = the radio; one-way events have `node_name` = the deaf end and details starting `RF link to <peer>: ...` (same shape as `link_dropped`, matched by notifications).
 
 Mesh health and scan-boundary routes:
 
