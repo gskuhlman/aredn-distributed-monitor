@@ -800,6 +800,45 @@
                                 </div>
                                 <div id="cm-whatif-result"></div>
                             </details>
+                            <!-- Channel planner (#4, channel-planner.js) -->
+                            <details class="diag-details" id="cp-box">
+                                <summary>Plan channels</summary>
+                                <p class="form-hint">Suggests channels for a site or a list of radios: whole channel inside the band,
+                                    sectors keep their clients, clear of mast neighbours and radios in the beams, away from busy WiFi.
+                                    Only frequency and width are changed; nothing is saved.</p>
+                                <div class="cp-form">
+                                    <label>Plan for
+                                        <select id="cp-target" class="form-input">
+                                            <option value="site" selected>Site</option>
+                                            <option value="radios">Radios</option>
+                                        </select>
+                                    </label>
+                                    <select id="cp-site" class="form-input" title="Site code"></select>
+                                    <input type="text" id="cp-radios" class="form-input" hidden placeholder="radio names, comma separated">
+                                    <label>Band <input type="number" id="cp-band-low" class="form-input cm-num" value="5650" step="5">
+                                        – <input type="number" id="cp-band-high" class="form-input cm-num" value="5925" step="5"> MHz</label>
+                                    <span class="cp-widths">Widths:
+                                        <label class="header-checkbox"><input type="checkbox" id="cp-keep-width" checked> keep current</label>
+                                        <label class="header-checkbox"><input type="checkbox" class="cp-width" value="10"> 10</label>
+                                        <label class="header-checkbox"><input type="checkbox" class="cp-width" value="20" checked> 20</label>
+                                        <label class="header-checkbox"><input type="checkbox" class="cp-width" value="40"> 40</label>
+                                    </span>
+                                    <label class="header-checkbox" title="Sectors and the RF-linked radios they serve (and both ends of a PtP link) get one channel">
+                                        <input type="checkbox" id="cp-move-clients" checked> Move clients with their sector</label>
+                                    <input type="text" id="cp-locked" class="form-input" placeholder="locked radios (keep as is)">
+                                    <label class="header-checkbox" title="Also score the plan in the what-if box above">
+                                        <input type="checkbox" id="cp-compare" checked> Compare with what-if box</label>
+                                    <label>Plans <select id="cp-top" class="form-input">
+                                        <option>1</option><option selected>3</option><option>5</option></select></label>
+                                    <label title="Length of the maintenance window created by Schedule">Window
+                                        <select id="cp-maint-hours" class="form-input">
+                                            <option value="1">1 h</option><option value="2" selected>2 h</option>
+                                            <option value="4">4 h</option><option value="8">8 h</option></select></label>
+                                    <button id="cp-run" class="btn btn-primary btn-small">Suggest channels</button>
+                                    <span id="cp-status" class="form-hint"></span>
+                                </div>
+                                <div id="cp-results"></div>
+                            </details>
                         </aside>
                     </div>
                 </div>
@@ -1116,5 +1155,6 @@
     <script src="{{ url_for('static', filename='js/collector-health.js') }}"></script>
     <script src="{{ url_for('static', filename='js/changes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/channel-map.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/channel-planner.js') }}"></script>
 </body>
 </html>

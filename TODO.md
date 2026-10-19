@@ -16,7 +16,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
       starting-node outage. Count only "really down" nodes as unreachable in Reports.
 - [x] 3. **Area channel map.** Map with each radio colored by frequency, antenna beams
       as wedges, and lines between radios whose channels overlap and point at each other.
-- [ ] 4. **Channel planner.** Pick a site (or radios plus their clients) and get suggested
+- [x] 4. **Channel planner.** Pick a site (or radios plus their clients) and get suggested
       channels using band edges, busy WiFi ranges, beams, guard bands, and clients that
       must follow their sector. Simulate the result before applying it.
 - [ ] 5. **Health score + "what changed?"** Score each node/link 0–100 over time;

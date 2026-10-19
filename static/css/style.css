@@ -2112,6 +2112,22 @@ body {
     box-sizing: border-box; box-shadow: 0 0 0 1px white; }
 .cm-dot.cm-infra { border-radius: 2px; transform: rotate(45deg); }
 .cm-dot.cm-whatif { outline: 2px dashed #6c3483; outline-offset: 2px; }
+
+/* Channel planner (#4) */
+.cm-side.cm-side-wide { width: 680px; max-width: 60%; }
+.cp-form { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 6px 0 10px; font-size: 0.82rem; }
+.cp-form .form-input { width: auto; }
+.cp-form #cp-radios, .cp-form #cp-locked { flex: 1 1 200px; }
+.cp-widths { display: inline-flex; gap: 6px; align-items: center; }
+.cp-plan > summary { font-size: 0.85rem; }
+.cp-counts { color: #555; font-weight: normal; }
+.cp-table td, .cp-table th { font-size: 0.8rem; white-space: nowrap; }
+.cp-table tr.cp-changed td { background: #fef9e7; }
+.cp-delta { font-size: 0.8rem; margin: 6px 0; }
+.cp-group { margin: 6px 0 10px; font-size: 0.82rem; }
+.cp-issues li { color: #a04000; }
+.cp-band { fill: #eaf2f8; }
+.cp-wifi { fill: #f5cba7; fill-opacity: 0.35; }
 .cm-dot.cm-stale { opacity: 0.45; }
 .cm-dot.cm-selected { box-shadow: 0 0 0 2px white, 0 0 0 4px #2980b9; }
 .cm-legend { position: absolute; left: 10px; bottom: 22px; z-index: 500; width: 340px; max-width: calc(100% - 20px);
@@ -2135,7 +2151,7 @@ body {
 @media (max-width: 800px) {
     .cm-body { flex-direction: column; }
     .cm-map-wrap { min-height: 60vh; }
-    .cm-side { width: auto; max-width: none; border-left: none; border-top: 1px solid #e0e0e0; }
+    .cm-side, .cm-side.cm-side-wide { width: auto; max-width: none; border-left: none; border-top: 1px solid #e0e0e0; }
 }
 /* ---- Notifications (#21) ---- */
 .notify-section > summary { cursor: pointer; list-style: revert; }

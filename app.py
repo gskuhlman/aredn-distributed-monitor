@@ -39,6 +39,7 @@ import infra_audit
 import drift
 import change_log
 import channel_map
+import channel_planner
 import link_watch
 import collector_health
 import link_health
@@ -955,6 +956,42 @@ def api_channel_map_what_if():
     return jsonify(channel_map.build_map(
         scope=body.get('scope', 'all'), max_km=body.get('max_km'), center=body.get('center'),
         overrides=body.get('overrides') or {}, include_inactive=bool(body.get('include_inactive'))))
+
+
+# ---- Channel planner (TODO #4) ----
+@app.route('/api/channel-planner', methods=['POST'])
+def api_channel_planner():
+    """Ranked channel plans for a site or radio list (nothing is saved).
+    Body: {site? | radios?: [...], band?: [low, high], widths?: [..] | {name: [..]},
+    locked?: [...], move_clients?: bool, top?: N, compare?: "name freq width" lines}"""
+    body = request.get_json(silent=True) or {}
+    radios = body.get('radios')
+    if isinstance(radios, str):
+        radios = [n for n in radios.replace(',', ' ').split() if n]
+    locked = body.get('locked')
+    if isinstance(locked, str):
+        locked = [n for n in locked.replace(',', ' ').split() if n]
+    band = body.get('band')
+    if band:
+        try:
+            band = [float(band[0]), float(band[1])]
+        except (TypeError, ValueError, IndexError):
+            return jsonify({'error': 'band must be [low, high] in MHz'}), 400
+        if band[1] - band[0] < 10:
+            return jsonify({'error': 'band is too narrow'}), 400
+    if not body.get('site') and not radios:
+        return jsonify({'error': 'site or radios is required'}), 400
+    try:
+        top = max(1, min(10, int(body.get('top') or 3)))
+    except (TypeError, ValueError):
+        top = 3
+    result = channel_planner.plan(
+        site=body.get('site'), radios=radios, band=band, widths=body.get('widths'),
+        locked=locked, move_clients=body.get('move_clients', True) is not False,
+        top=top, compare=body.get('compare') or None)
+    if result.get('error'):
+        return jsonify(result), 400
+    return jsonify(result)
 # ---- end Channel Map ----
 # --- Link Watch routes ---
 @app.route('/api/reports/noise')
