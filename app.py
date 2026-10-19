@@ -33,6 +33,7 @@ import reports
 import unreachable
 import link_diagnostics
 import infra_audit
+import drift
 import change_log
 import channel_map
 import link_watch
@@ -865,6 +866,17 @@ def api_infrastructure_review():
     if result.get('gateway_unreachable'):
         return jsonify(result), 503
     return jsonify(result)
+
+
+@app.route('/api/reports/drift')
+def api_settings_drift():
+    """Firmware/settings drift across RF links, sites and the whole mesh."""
+    scope = request.args.get('scope', 'all')
+    try:
+        return jsonify(drift.run_report(scope=scope))
+    except Exception as e:
+        logger.exception("Settings drift report failed")
+        return jsonify({'error': str(e)}), 500
 
 
 # ---- Channel Map (TODO #3) ----
