@@ -5,21 +5,31 @@
 const VOIPModule = {
     initialized: false,
     endpoints: [],
+    tags: { permanent: new Set(), event: new Set() },
 
     init() {
         if (this.initialized) return;
         this.initialized = true;
         document.getElementById('voip-run')?.addEventListener('click', () => this.runTest());
         document.getElementById('voip-ping-all')?.addEventListener('click', () => this.pingAll());
+        document.getElementById('voip-infra-filter')?.addEventListener('change', () => this.applyInfraFilter());
     },
 
     async load() {
         this.setStatus('Loading endpoints...');
         try {
-            const resp = await fetch('/api/voip/endpoints');
+            const [resp, tagsResp] = await Promise.all([
+                fetch('/api/voip/endpoints'),
+                fetch('/api/nodes/tags')
+            ]);
             this.endpoints = resp.ok ? await resp.json() : [];
+            const tags = tagsResp.ok ? await tagsResp.json() : {};
+            this.tags = {
+                permanent: new Set(tags.permanent || []),
+                event: new Set(tags.event || [])
+            };
             this.renderEndpoints();
-            this.populatePickers();
+            this.applyInfraFilter();
             this.setStatus(`${this.endpoints.length} endpoint(s)`);
             // Populate reachability/latency/jitter/MOS automatically on load.
             if (this.endpoints.length) this.pingAll();
@@ -29,19 +39,36 @@ const VOIPModule = {
         }
     },
 
+    endpointMatchesInfra(e) {
+        const value = document.getElementById('voip-infra-filter')?.value || 'all';
+        const node = String(e.node || '').toLowerCase();
+        return InfraFilter.matchesFlags(this.tags.permanent.has(node), this.tags.event.has(node), value);
+    },
+
+    // Hide non-matching endpoint rows (keeping any ping results already shown)
+    // and limit the From/To pickers to matching endpoints.
+    applyInfraFilter() {
+        document.querySelectorAll('#voip-endpoints-body tr[data-node]').forEach(tr => {
+            const e = this.endpoints[Number(tr.getAttribute('data-index'))];
+            tr.style.display = e && this.endpointMatchesInfra(e) ? '' : 'none';
+        });
+        this.populatePickers();
+    },
+
     populatePickers() {
         const src = document.getElementById('voip-source');
         const tgt = document.getElementById('voip-target');
         if (!src || !tgt) return;
+        const endpoints = this.endpoints.filter(e => this.endpointMatchesInfra(e));
         // Source value = node (the AREDN vantage that runs the probes).
         // Target value = the device IP when known (test the specific device), else node.
         const label = e => `${this.esc(e.node)} — ${this.esc(e.device)} (${this.esc(e.type)})`;
-        src.innerHTML = this.endpoints.map(e => `<option value="${this.esc(e.node)}">${label(e)}</option>`).join('');
-        tgt.innerHTML = this.endpoints.map(e => `<option value="${this.esc(e.device_ip || e.node)}">${label(e)}</option>`).join('');
-        if (this.endpoints.length) {
-            const pbx = this.endpoints.find(e => e.type === 'pbx') || this.endpoints[0];
+        src.innerHTML = endpoints.map(e => `<option value="${this.esc(e.node)}">${label(e)}</option>`).join('');
+        tgt.innerHTML = endpoints.map(e => `<option value="${this.esc(e.device_ip || e.node)}">${label(e)}</option>`).join('');
+        if (endpoints.length) {
+            const pbx = endpoints.find(e => e.type === 'pbx') || endpoints[0];
             src.value = pbx.node;
-            const other = this.endpoints.find(e => e.node !== pbx.node) || this.endpoints[0];
+            const other = endpoints.find(e => e.node !== pbx.node) || endpoints[0];
             tgt.value = other.device_ip || other.node;
         }
     },
@@ -53,10 +80,10 @@ const VOIPModule = {
             body.innerHTML = '<tr><td colspan="8" class="log-empty">No phone/PBX services detected.</td></tr>';
             return;
         }
-        body.innerHTML = this.endpoints.map(e => {
+        body.innerHTML = this.endpoints.map((e, index) => {
             const ip = e.device_ip || '';
             return `
-            <tr data-ip="${this.esc(ip)}">
+            <tr data-ip="${this.esc(ip)}" data-node="${this.esc(e.node)}" data-index="${index}">
                 <td><a href="/nodes/${encodeURIComponent(e.node)}">${this.esc(e.node)}</a></td>
                 <td>${this.esc(e.device || '')}</td>
                 <td>${this.esc(e.type)}</td>

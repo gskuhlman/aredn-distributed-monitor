@@ -194,6 +194,17 @@ def init_db():
             )
         ''')
 
+        # Infrastructure tags (permanent / event); independent of each other
+        # and of selected_nodes. Local config, not replicated.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS node_tags (
+                node_name TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                tagged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (node_name, tag)
+            )
+        ''')
+
         # Saved graph layout (node positions from the vis.js network map)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS node_positions (
@@ -456,6 +467,7 @@ def delete_node(name):
         deleted = cursor.rowcount
         cursor.execute('DELETE FROM selected_nodes WHERE node_name = ?', (name,))
         cursor.execute('DELETE FROM infrastructure_nodes WHERE node_name = ?', (name,))
+        cursor.execute('DELETE FROM node_tags WHERE node_name = ?', (name,))
         return deleted
 
 
@@ -482,6 +494,8 @@ def prune_old_nodes(days):
         cursor.execute(f'DELETE FROM nodes WHERE name IN ({placeholders})', names)
         cursor.execute(f'DELETE FROM selected_nodes WHERE node_name IN ({placeholders})', names)
         cursor.execute(f'DELETE FROM infrastructure_nodes WHERE node_name IN ({placeholders})', names)
+        # node_tags are kept on purpose: they record intent (e.g. permanent
+        # infrastructure) and should reapply if the node returns.
         return len(names)
 
 
@@ -633,12 +647,14 @@ def get_observed_node(name):
         node['is_selected'] = is_node_selected(name)
         node.update(infrastructure_info(name))
         node['scan_boundary'] = get_scan_boundaries().get(name)
+        node.update(node_tag_flags(name))
         return node
     link_only = build_link_only_node(name)
     if link_only:
         link_only['is_selected'] = is_node_selected(name)
         link_only.update(infrastructure_info(name))
         link_only['scan_boundary'] = get_scan_boundaries().get(name)
+        link_only.update(node_tag_flags(name))
     return link_only
 
 
@@ -648,6 +664,7 @@ def get_all_observed_nodes():
     node_names = {node['name'] for node in nodes}
     boundaries = get_scan_boundaries()
     infra = get_infrastructure_nodes()
+    tags_map = get_node_tags_map()
     observed = []
 
     for node in nodes:
@@ -658,6 +675,7 @@ def get_all_observed_nodes():
         item['is_infrastructure'] = item['name'] in infra
         item['infrastructure_site'] = infra.get(item['name'])
         item['scan_boundary'] = boundaries.get(item['name'])
+        item.update(node_tag_flags(item['name'], tags_map))
         item['links_count'] = len(get_node_all_links(item['name']))
         item['active_links_count'] = len(get_node_links(item['name']))
         item['services_list'] = get_node_services(item['name'])
@@ -682,6 +700,7 @@ def get_all_observed_nodes():
             link_only['is_infrastructure'] = name in infra
             link_only['infrastructure_site'] = infra.get(name)
             link_only['scan_boundary'] = boundaries.get(name)
+            link_only.update(node_tag_flags(name, tags_map))
             observed.append(link_only)
 
     return sorted(observed, key=lambda item: item.get('name') or '')
@@ -1340,6 +1359,58 @@ def set_scan_boundary(name, mode):
         else:
             cursor.execute('DELETE FROM scan_boundaries WHERE node_name = ?', (node_name,))
     return get_scan_boundaries().get(node_name)
+
+
+# ============ Infrastructure Tag Operations ============
+
+NODE_TAGS = ('permanent', 'event')
+
+
+def get_node_tags_map():
+    """Return {node_name: set(tags)} for every tagged node."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT node_name, tag FROM node_tags')
+        tags = {}
+        for row in cursor.fetchall():
+            tags.setdefault(row['node_name'], set()).add(row['tag'])
+        return tags
+
+
+def get_tagged_node_names():
+    """Return {tag: [node names]} for each infrastructure tag."""
+    result = {tag: [] for tag in NODE_TAGS}
+    for name, tags in sorted(get_node_tags_map().items()):
+        for tag in tags:
+            if tag in result:
+                result[tag].append(name)
+    return result
+
+
+def node_tag_flags(name, tags_map=None):
+    """Return the is_permanent / is_event flags for a node."""
+    if tags_map is None:
+        tags_map = get_node_tags_map()
+    tags = tags_map.get(name, set())
+    return {f'is_{tag}': tag in tags for tag in NODE_TAGS}
+
+
+def set_node_tag(name, tag, enabled):
+    """Add or remove an infrastructure tag on a node."""
+    if tag not in NODE_TAGS:
+        raise ValueError(f"Unknown tag: {tag}")
+    node_name = (name or '').lower()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if enabled:
+            cursor.execute('''
+                INSERT INTO node_tags (node_name, tag, tagged_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(node_name, tag) DO UPDATE SET tagged_at = excluded.tagged_at
+            ''', (node_name, tag, local_timestamp()))
+        else:
+            cursor.execute('DELETE FROM node_tags WHERE node_name = ? AND tag = ?', (node_name, tag))
+    return node_tag_flags(node_name)
 
 
 # ============ Node Layout Operations ============
@@ -2770,6 +2841,7 @@ def get_network_graph_data():
     selected_node_names = set(get_selected_node_names())
     infra_nodes = get_infrastructure_nodes()
     scan_boundaries = get_scan_boundaries()
+    tags_map = get_node_tags_map()
 
     # Create sets for quick lookup
     all_node_names = {n['name'] for n in all_nodes}
@@ -2862,6 +2934,7 @@ def get_network_graph_data():
             'is_selected': node_name in selected_node_names,
             'is_infrastructure': node_name in infra_nodes,
             'scan_boundary': scan_boundaries.get(node_name),
+            **node_tag_flags(node_name, tags_map),
             'reported_links': reported_links
         })
 
@@ -2949,6 +3022,7 @@ def get_network_graph_data():
             'is_selected': node_name in selected_node_names,
             'is_infrastructure': node_name in infra_nodes,
             'scan_boundary': scan_boundaries.get(node_name),
+            **node_tag_flags(node_name, tags_map),
             'is_inactive': node.get('is_inactive', False),
             'is_link_only': link_only,
             'reach_status': reach_status,

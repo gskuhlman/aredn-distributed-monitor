@@ -389,7 +389,7 @@ def discover_neighbors(data, show_tunnels):
 
     discovered_nodes = []
     for mac, tracker in trackers.items():
-        _, hostname, _ = tracker_hostnames(mac, tracker)
+        tracker_hostname, hostname, _ = tracker_hostnames(mac, tracker)
         if not hostname:
             continue
         # A saved link type reported disconnected is not traversed.
@@ -399,13 +399,18 @@ def discover_neighbors(data, show_tunnels):
         # This ensures we discover all nodes even if connected only via tunnels.
         # Fall back to the tracker 'ip' field when canonical_ip is null —
         # Babel firmware leaves canonical_ip empty for OLSR DTD neighbors but
-        # populates 'ip' from its own discovery.
+        # populates 'ip' from its own discovery. Some firmware reports no IP
+        # at all for Wireguard tunnel neighbors, so fall back to the mesh DNS
+        # name; otherwise a seed whose only neighbors are tunnels stops BFS.
         discover_ip = tracker.get('canonical_ip') or tracker.get('ip')
-        if tracker.get('routable') and discover_ip:
+        discover_host = discover_ip or (
+            f"{tracker_hostname}.local.mesh" if tracker_hostname else None
+        )
+        if tracker.get('routable') and discover_host:
             discovered_nodes.append({
                 'hostname': hostname,
                 'ip': discover_ip,
-                'url': build_sysinfo_url(discover_ip),
+                'url': build_sysinfo_url(discover_host),
                 'link_type': tracker.get('type')
             })
     return discovered_nodes

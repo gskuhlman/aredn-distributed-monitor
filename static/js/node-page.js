@@ -26,6 +26,11 @@ const NodePage = {
         document.getElementById('node-infrastructure-toggle')?.addEventListener('change', (event) => {
             this.setInfrastructure(event.target.checked);
         });
+        for (const tag of ['permanent', 'event']) {
+            document.getElementById(`node-${tag}-toggle`)?.addEventListener('change', (event) => {
+                this.setTag(tag, event.target.checked);
+            });
+        }
         await this.load();
     },
 
@@ -80,6 +85,10 @@ const NodePage = {
         const boundarySelect = document.getElementById('node-boundary-select');
         if (boundarySelect) {
             boundarySelect.value = node.scan_boundary || '';
+        }
+        for (const tag of ['permanent', 'event']) {
+            const tagToggle = document.getElementById(`node-${tag}-toggle`);
+            if (tagToggle) tagToggle.checked = Boolean(node[`is_${tag}`]);
         }
         this.renderSummary();
         this.renderNodeHealth();
@@ -174,6 +183,32 @@ const NodePage = {
         } catch (error) {
             if (toggle) toggle.checked = !infrastructure;
             this.showToast('error', 'Update Failed', error.message);
+        } finally {
+            if (toggle) toggle.disabled = false;
+        }
+    },
+
+    async setTag(tag, enabled) {
+        const toggle = document.getElementById(`node-${tag}-toggle`);
+        if (toggle) toggle.disabled = true;
+        try {
+            const response = await fetch(`/api/nodes/tags/${encodeURIComponent(this.nodeName)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tag, enabled })
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) throw new Error(result.error || 'Failed to update node');
+            if (this.data?.node) {
+                this.data.node.is_permanent = result.is_permanent;
+                this.data.node.is_event = result.is_event;
+            }
+            if (toggle) toggle.checked = result[`is_${tag}`];
+            const label = tag === 'permanent' ? 'Permanent' : 'Event';
+            this.showToast('success', enabled ? `Tagged ${label}` : `${label} Tag Removed`, this.nodeName);
+        } catch (error) {
+            if (toggle) toggle.checked = !enabled;
+            this.showToast('error', 'Tag Update Failed', error.message);
         } finally {
             if (toggle) toggle.disabled = false;
         }

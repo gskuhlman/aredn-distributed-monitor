@@ -21,6 +21,7 @@ const DiagnosticsModule = {
         document.getElementById('diag-hours')?.addEventListener('change', () => this.load());
         document.getElementById('diag-status-filter')?.addEventListener('change', () => this.applyView());
         document.getElementById('diag-type-filter')?.addEventListener('change', () => this.applyView());
+        document.getElementById('diag-infra-filter')?.addEventListener('change', () => this.applyView());
         document.getElementById('diag-sort')?.addEventListener('change', () => this.applyView());
         document.getElementById('mh-run')?.addEventListener('click', () => this.loadHealth());
         document.getElementById('mh-severity')?.addEventListener('change', () => this.applyView());
@@ -282,10 +283,15 @@ const DiagnosticsModule = {
             selected: this.selectedNodeNames(), selectedConnected: this.selectedConnectedNames(),
             infrastructure, infrastructureConnected: this.withConnected(infrastructure)
         };
+        const infra = document.getElementById('diag-infra-filter')?.value || 'all';
+        // Graph nodes cover link-only endpoints missing from nodeMap.
+        const infraLookup = InfraFilter.lookup([...(this.networkData.nodes || []), ...Object.values(this.nodeMap)]);
+        const infraPasses = l => InfraFilter.linkMatches(infraLookup, l.source_node, l.target_node, infra);
 
         const flaps = this.sortRows(
             this.flaps.filter(l =>
                 this.linkPasses(l.source_node, l.target_node, search, status, ctx)
+                && infraPasses(l)
                 && (typeFilter === 'all' || this.linkTypeBucket(l.link_type) === typeFilter)),
             sortBy
         );
@@ -294,6 +300,7 @@ const DiagnosticsModule = {
         const asym = this.sortRows(
             this.asym.filter(l =>
                 this.linkPasses(l.source_node, l.target_node, search, status, ctx)
+                && infraPasses(l)
                 && (typeFilter === 'all' || typeFilter === 'rf')),
             sortBy
         );
