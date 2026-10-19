@@ -8,6 +8,7 @@ Main entry point for the web application
 # times out before reaching the mesh node's DNS, so localnode.local.mesh
 # fails to resolve. Must be set before eventlet is imported.
 import os
+import struct
 os.environ.setdefault('EVENTLET_NO_GREENDNS', 'yes')
 
 # Monkey-patch standard library for eventlet compatibility
@@ -893,22 +894,37 @@ def api_settings_drift():
 
 
 # ---- Channel Map (TODO #3) ----
-def _offline_map_path():
-    path = os.path.join(config.OFFLINE_MAP_DIR, config.OFFLINE_MAP_FILE)
-    return path if os.path.isfile(path) else None
+def _pmtiles_header(path):
+    """Zoom range and bounds from a PMTiles v3 header (first 127 bytes)."""
+    with open(path, 'rb') as f:
+        head = f.read(127)
+    if len(head) < 127 or head[:7] != b'PMTiles' or head[7] != 3:
+        return None
+    min_zoom, max_zoom = head[100], head[101]
+    west, south, east, north = (v / 1e7 for v in struct.unpack('<4i', head[102:118]))
+    return {'min_zoom': min_zoom, 'max_zoom': max_zoom, 'bounds': [west, south, east, north]}
 
 
 @app.route('/api/map/base')
 def api_map_base():
-    """Which base map the Channel Map should use: the local .pmtiles extract
-    when present, otherwise online OpenStreetMap tiles."""
-    path = _offline_map_path()
-    if not path:
-        return jsonify({'offline': False})
-    stat = os.stat(path)
-    return jsonify({'offline': True, 'url': f'/maps/{config.OFFLINE_MAP_FILE}',
-                    'size_bytes': stat.st_size,
-                    'updated': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')})
+    """Offline base map layers for the Channel Map: every .pmtiles extract in
+    the maps folder, least detailed first (drawn underneath). Empty means
+    online OpenStreetMap tiles."""
+    layers = []
+    folder = config.OFFLINE_MAP_DIR
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        path = os.path.join(folder, name)
+        if not name.endswith('.pmtiles') or not os.path.isfile(path):
+            continue
+        header = _pmtiles_header(path)
+        if not header:
+            continue
+        stat = os.stat(path)
+        layers.append({'name': name[:-len('.pmtiles')], 'url': f'/maps/{name}', 'size_bytes': stat.st_size,
+                       'updated': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M'),
+                       **header})
+    layers.sort(key=lambda l: (l['max_zoom'], -(l['bounds'][2] - l['bounds'][0]) * (l['bounds'][3] - l['bounds'][1])))
+    return jsonify({'offline': bool(layers), 'layers': layers})
 
 
 @app.route('/maps/<path:filename>')

@@ -10,6 +10,12 @@ the map; the app picks the file up without a restart.
     python fetch_offline_map.py                    # around the mesh, zoom 0-15
     python fetch_offline_map.py --radius-km 100 --maxzoom 14
     python fetch_offline_map.py --bbox=-92.2,41.6,-91.2,42.4
+
+Several files in the maps folder are layered: a wide, less detailed map
+underneath (e.g. the state at zoom 14) and a detailed local one on top.
+
+    python fetch_offline_map.py --bbox=-96.64,40.37,-90.14,43.51 --maxzoom 14 --output iowa
+    python fetch_offline_map.py --bbox=-92.30,41.42,-90.89,42.65 --maxzoom 15 --output linn-area
 """
 import argparse
 import json
@@ -84,6 +90,8 @@ def main():
     parser.add_argument('--margin-km', type=float, default=15, help='extra border around those nodes')
     parser.add_argument('--maxzoom', type=int, default=15, help='highest zoom level (15 = street detail)')
     parser.add_argument('--source', help='.pmtiles URL or file to extract from (default: newest daily build)')
+    parser.add_argument('--output', default=config.OFFLINE_MAP_FILE,
+                        help='file name in the maps folder (several files are layered by detail)')
     parser.add_argument('--dry-run', action='store_true', help='show the area and download size only')
     args = parser.parse_args()
 
@@ -106,7 +114,8 @@ def main():
                  'in the tools/ folder or on PATH.')
     source = args.source or latest_build()
     os.makedirs(config.OFFLINE_MAP_DIR, exist_ok=True)
-    target = os.path.join(config.OFFLINE_MAP_DIR, config.OFFLINE_MAP_FILE)
+    name = args.output if args.output.endswith('.pmtiles') else args.output + '.pmtiles'
+    target = os.path.join(config.OFFLINE_MAP_DIR, os.path.basename(name))
     temp = target + '.part'
     cmd = [cli, 'extract', source, temp, f'--bbox={west:.5f},{south:.5f},{east:.5f},{north:.5f}',
            f'--maxzoom={args.maxzoom}']

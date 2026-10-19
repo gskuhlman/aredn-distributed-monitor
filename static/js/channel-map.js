@@ -117,12 +117,20 @@ const ChannelMap = {
             attribution: '&copy; OpenStreetMap contributors'
         });
         if (this.baseMap.offline) {
-            const offline = protomapsL.leafletLayer({
-                url: this.baseMap.url, flavor: 'light', lang: 'en', maxZoom: 19,
-                attribution: '&copy; OpenStreetMap contributors · Protomaps (offline, ' +
-                    `${this.esc(this.baseMap.updated)})`
+            // Least detailed layer first, drawn underneath and enlarged past
+            // its zoom; each more detailed layer only draws inside its own
+            // bounds, from the zoom where the layer below runs out.
+            const layers = this.baseMap.layers.map((m, i, all) => {
+                const [west, south, east, north] = m.bounds;
+                return protomapsL.leafletLayer({
+                    url: m.url, flavor: 'light', lang: 'en', maxZoom: 19, maxDataZoom: m.max_zoom,
+                    minZoom: i ? all[i - 1].max_zoom + 1 : 0,
+                    bounds: i ? [[south, west], [north, east]] : undefined,
+                    attribution: i ? '' : '&copy; OpenStreetMap contributors · Protomaps (offline, ' +
+                        `${this.esc(m.updated)})`
+                });
             });
-            offline.addTo(this.map);
+            const offline = L.layerGroup(layers).addTo(this.map);
             L.control.layers({ 'Offline map': offline, 'OpenStreetMap (online)': online },
                 null, { position: 'topright' }).addTo(this.map);
         } else {

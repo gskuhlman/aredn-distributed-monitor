@@ -30,7 +30,8 @@ python couch_client.py
 
 # Offline base map for the Channel Map (needs the go-pmtiles CLI in tools/ or on PATH)
 python fetch_offline_map.py --dry-run
-python fetch_offline_map.py
+python fetch_offline_map.py --bbox=-96.64,40.37,-90.14,43.51 --maxzoom 14 --output iowa
+python fetch_offline_map.py --bbox=-92.30,41.42,-90.89,42.65 --maxzoom 15 --output linn-area
 ```
 
 There is no full test suite or linting currently configured.
@@ -76,7 +77,7 @@ There is no full test suite or linting currently configured.
 - `static/js/drift.js`: Settings Drift section on the Diagnostics tab (findings, firmware histogram, per-site table highlighting cells that differ from the site majority, RF link table). Self-initializing; reuses `InfraReview.renderFinding`.
 - `static/js/notifications.js`: Notifications section on the Diagnostics tab (channels, timing, quiet hours, mute, rules, send log, per-channel test).
 - `static/js/infra-review.js`: Infrastructure Review section on the Diagnostics tab (findings, per-site spectrum chart and settings table, link verdicts).
-- `static/js/channel-map.js`: Channel Map tab (bundled Leaflet 1.9.4 in `static/vendor`, lazy-loaded; base map is the offline Protomaps extract `maps/area.pmtiles` drawn by bundled protomaps-leaflet 5.1.0 when present, with online OpenStreetMap tiles as a switchable fallback): radios colored by frequency, beam wedges, RF links, dashed conflict lines and mast rings, filters (scope, band, frequency range, severity), radio side panel, and what-if channel plan. Hooks its own tab button; no changes to rf-stats.js tab switching.
+- `static/js/channel-map.js`: Channel Map tab (bundled Leaflet 1.9.4 in `static/vendor`, lazy-loaded; base map is the offline Protomaps extracts in `maps/` drawn by bundled protomaps-leaflet 5.1.0 when present, stacked least detailed first, each more detailed layer only inside its bounds and above the zoom where the layer below runs out, with online OpenStreetMap tiles as a switchable fallback): radios colored by frequency, beam wedges, RF links, dashed conflict lines and mast rings, filters (scope, band, frequency range, severity), radio side panel, and what-if channel plan. Hooks its own tab button; no changes to rf-stats.js tab switching.
 - `static/js/cleanup.js`: Cleanup section on the Diagnostics tab (candidates grouped by reason, per-group select-all, Exclude / Un-exclude / Delete with a confirm).
 - `static/js/collector-health.js`: Starting Node section of the Reports tab (status tiles, outage timeline, response-time and polls charts, hour-of-day outage profile, outage table, Check now); loaded by `ReportsModule.load()` with the Reports window.
 - `static/js/maintenance.js`: Maintenance section on the Diagnostics tab (create form with scope/site/nodes, now + 1/2/4/8 h or start/end, change-log option; list with End now / +1 h / Cancel), the header banner on the main and node pages while a window is active (polled every minute plus the `maintenance_update` Socket.IO event), and the node page "Start maintenance" quick action (this node or its site).
@@ -162,7 +163,7 @@ Infrastructure routes:
 - `GET /api/nodes/infrastructure`, `POST /api/nodes/infrastructure/<name>` `{infrastructure: bool, site?}`: mark towers/high sites. Site defaults to the location code in the name (`w0gq-col-...` -> `COL`); site names come from the `site_names` setting over defaults (COL Collins Tower, MMC Mt Mercy Hospital, EOC Linn County EOC). Stored in SQLite `infrastructure_nodes`, exposed as `is_infrastructure` on node and graph JSON.
 - `GET /api/reports/drift?scope=all|infrastructure|infrastructure-connected|selected|selected-connected`: settings drift report (`findings`, `links`, `sites` with `norms` and per-radio `differs`, `firmware` histogram, `latest_release`)
 - `GET|POST /api/reports/infrastructure` (`POST {refresh: true}` re-reads settings from the nodes first)
-- `GET /api/map/base`: `{offline, url, size_bytes, updated}` for the offline map; `GET /maps/<file>.pmtiles` serves it with HTTP range requests
+- `GET /api/map/base`: `{offline, layers: [{name, url, min_zoom, max_zoom, bounds, size_bytes, updated}]}` for every `.pmtiles` file in `OFFLINE_MAP_DIR` (from each file's header), least detailed first; `GET /maps/<file>.pmtiles` serves them with HTTP range requests
 - `GET /api/channel-map?scope&max_km&center&include_inactive`, `POST /api/channel-map/what-if` `{overrides: {name: {frequency, chanbw}} | "name freq width" lines, scope?, ...}`: channel map data and a non-persistent what-if recompute (response adds `what_if` with baseline counts, resolved/introduced/changed conflicts)
 
 Cleanup routes (`names` is a list; protected nodes are always refused and listed in `refused`):
@@ -246,7 +247,7 @@ Important settings in `config.py` and environment variables:
 - `VOIP_AGENT_PORT` / `VOIP_PROBE_UDP_PORT`: remote agent control (8765) and UDP probe (8766) ports.
 - `VOIP_STREAM_PPS` / `VOIP_STREAM_PACKET_BYTES`: streamed-session defaults (50 pps x 172 bytes ≈ 20ms RTP).
 - `VOIP_SESSION_ROUTE_INTERVAL` / `VOIP_SESSION_MAX_SECONDS`: route-refresh cadence and session safety cap.
-- `OFFLINE_MAP_DIR` (`maps`) / `OFFLINE_MAP_FILE` (`area.pmtiles`): offline Channel Map base map, written by `fetch_offline_map.py` (newest Protomaps daily build, extracted around the located nodes within `--radius-km` of their median position).
+- `OFFLINE_MAP_DIR` (`maps`) / `OFFLINE_MAP_FILE` (`area.pmtiles`, the script's default `--output`): offline Channel Map base maps, all files in the folder layered by detail, written by `fetch_offline_map.py` (newest Protomaps daily build, extracted around the located nodes within `--radius-km` of their median position).
 - `NOTIFY_SMTP_PASSWORD`, `NOTIFY_DISCORD_WEBHOOK`, `NOTIFY_NTFY_TOKEN`, `NOTIFY_WEBHOOK_TOKEN`: optional env overrides for notification secrets (otherwise stored in the local `notification_config` table, edited on the Diagnostics tab).
 - `LINK_WATCH_ENABLED`; noise: `NOISE_JUMP_DB` (5), `NOISE_CLEAR_DB` (2), `NOISE_JUMP_SCANS` (2), `NOISE_BASELINE_HOURS` (72), `NOISE_BASELINE_EXCLUDE_MINUTES` (60), `NOISE_MIN_BASELINE_SAMPLES` (20), `NOISE_HOUR_MIN_DAYS` (3); one-way: `ONE_WAY_HIGH_LQ` (80), `ONE_WAY_LOW_LQ` (40), `ONE_WAY_SNR_OK` (15 dB), `ONE_WAY_SCANS` (2), `ONE_WAY_ESCALATE_MINUTES` (60), `ONE_WAY_FORGET_MINUTES` (60).
 - `MAINTENANCE_GRACE_MINUTES` (10): alarms and notifications stay held this long after a maintenance window ends.
