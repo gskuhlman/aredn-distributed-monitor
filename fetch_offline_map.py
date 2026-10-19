@@ -9,7 +9,7 @@ the map; the app picks the file up without a restart.
     python fetch_offline_map.py --dry-run          # show area and size only
     python fetch_offline_map.py                    # around the mesh, zoom 0-15
     python fetch_offline_map.py --radius-km 100 --maxzoom 14
-    python fetch_offline_map.py --bbox -92.2,41.6,-91.2,42.4
+    python fetch_offline_map.py --bbox=-92.2,41.6,-91.2,42.4
 """
 import argparse
 import json
@@ -60,7 +60,8 @@ def mesh_bbox(radius_km, margin_km):
 
 
 def latest_build():
-    with urllib.request.urlopen(BUILDS_URL, timeout=20) as resp:
+    req = urllib.request.Request(BUILDS_URL, headers={'User-Agent': 'aredn-monitor-fetch-offline-map'})
+    with urllib.request.urlopen(req, timeout=20) as resp:
         builds = json.load(resp)
     keys = sorted(b['key'] for b in builds if b.get('key', '').endswith('.pmtiles'))
     if not keys:
