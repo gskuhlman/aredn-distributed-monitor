@@ -14,6 +14,7 @@ strings, so the window is compared in that form too.
 from datetime import datetime, timedelta
 
 import database
+import maintenance
 import unreachable as unreachable_causes
 
 TS_FMT = '%Y-%m-%d %H:%M:%S'
@@ -37,7 +38,8 @@ EVENT_CATEGORIES = {
              'link_blocked', 'link_unblocked',
              'one_way_link', 'one_way_link_cleared'),
     'freq': ('frequency_change',),
-    'system': ('gateway_lost', 'gateway_restored'),
+    'system': ('gateway_lost', 'gateway_restored',
+               'maintenance_scheduled', 'maintenance_started', 'maintenance_ended'),
 }
 
 # Link state-log states that mean the link was impaired.
@@ -290,6 +292,15 @@ def window_report(start, end, scope='all', link_type='all', search='',
             if c:
                 row.update({'cause': c['cause'], 'cause_label': c['cause_label'],
                             'explained': c['explained'], 'can_exclude': c['can_exclude']})
+                # Failed polls inside a maintenance window are not failures.
+                maint = c.get('maintenance_failed_polls') or 0
+                if maint:
+                    row['maintenance_unreachable'] = maint
+                    row['unreachable'] = max(0, (row.get('unreachable') or 0) - maint)
+                    polls = row.get('polls') or 0
+                    row['reachable_pct'] = (round(100.0 * (polls - row['unreachable']) / polls, 1)
+                                            if polls else None)
+        windows = maintenance.windows_between(s, e, conn)
         explained_names = sorted(n for n, c in causes.items() if c['explained'])
         explained_sql = f' AND node_name NOT IN ({_in(explained_names)})' if explained_names else ''
 
@@ -346,6 +357,11 @@ def window_report(start, end, scope='all', link_type='all', search='',
             WHERE timestamp >= ? AND timestamp < ?{ev_sql}{ev_node_sql}
             ORDER BY timestamp DESC LIMIT {MAX_ROWS + 1}
         ''', list(win) + ev_params)]
+        for ev in events:
+            w = maintenance.event_window(ev, windows) if windows else None
+            ev['in_maintenance'] = bool(w)
+            if w:
+                ev['maintenance_id'] = w['id']
 
         # ---- VoIP (session timestamps are ISO with offset; compare the local part)
         voip_tests = [dict(r) for r in cur.execute(f'''
@@ -401,6 +417,37 @@ def window_report(start, end, scope='all', link_type='all', search='',
                   AND node_name IN ({_in(explained_names)})
                 GROUP BY b
             ''', list(b) + list(win) + explained_names), 'explained_unreachable')
+        if windows:
+            # Move warnings and failed polls inside maintenance windows to
+            # their own series so the normal ones show only unplanned trouble.
+            maint = {}
+            for r in cur.execute(f'''
+                SELECT {_bucket_expr()} AS b, timestamp, node_name, details FROM events
+                WHERE timestamp >= ? AND timestamp < ?
+                  AND severity IN ('warning', 'error', 'critical'){ev_sql}{ev_node_sql}
+            ''', list(b) + list(win) + ev_params):
+                if maintenance.event_window(dict(r), windows):
+                    maint.setdefault(r['b'], {}).setdefault('warnings', 0)
+                    maint[r['b']]['warnings'] += 1
+            explained = set(explained_names)
+            for r in cur.execute(f'''
+                SELECT {_bucket_expr()} AS b, timestamp, node_name FROM node_health_history
+                WHERE timestamp >= ? AND timestamp < ? AND probe_via IS NULL AND reachable = 0{node_sql}
+            ''', list(b) + list(win)):
+                if maintenance.covering_window(r['node_name'], r['timestamp'], windows=windows):
+                    key = 'explained_unreachable' if r['node_name'] in explained else 'unreachable'
+                    m = maint.setdefault(r['b'], {})
+                    m[key] = m.get(key, 0) + 1
+            for i, m in maint.items():
+                row = timeline.setdefault(i, {})
+                moved = 0
+                for key in ('warnings', 'unreachable', 'explained_unreachable'):
+                    if m.get(key):
+                        row[key] = max(0, (row.get(key) or 0) - m[key])
+                        if key != 'warnings':
+                            moved += m[key]
+                row['maintenance_warnings'] = m.get('warnings', 0)
+                row['maintenance_unreachable'] = moved
         add(cur.execute(f'''
             SELECT {_bucket_expr()} AS b, AVG(quality) FROM link_history
             WHERE timestamp >= ? AND timestamp < ? AND quality IS NOT NULL
@@ -422,12 +469,17 @@ def window_report(start, end, scope='all', link_type='all', search='',
             'link_trouble': row.get('link_trouble') or 0,
             'unreachable': row.get('unreachable') or 0,
             'explained_unreachable': row.get('explained_unreachable') or 0,
+            'maintenance_warnings': row.get('maintenance_warnings') or 0,
+            'maintenance_unreachable': row.get('maintenance_unreachable') or 0,
+            'in_maintenance': any(w['start_time'] <= (t + timedelta(seconds=bucket)).strftime(TS_FMT)
+                                  and w['effective_end'] > t.strftime(TS_FMT) for w in windows),
             'avg_quality': round(row['avg_quality'], 1) if row.get('avg_quality') is not None else None,
         })
 
     polls = sum(n.get('polls') or 0 for n in nodes)
     # Failed polls of nodes whose failure is explained (legacy tunnel, stale,
     # placeholder, starting-node outage...) are not counted as unreachable.
+    # Failed polls inside maintenance windows were already taken out per node.
     explained_polls = sum(n.get('unreachable') or 0 for n in nodes if n.get('explained'))
     unreachable = sum(n.get('unreachable') or 0 for n in nodes) - explained_polls
     cause_summary = unreachable_causes.summarize(causes)
@@ -448,6 +500,9 @@ def window_report(start, end, scope='all', link_type='all', search='',
             'unreachable_polls': unreachable,
             'reachable_pct': round(100.0 * (polls - unreachable) / polls, 1) if polls else None,
             'explained_unreachable_polls': explained_polls,
+            'maintenance_unreachable_polls': sum(n.get('maintenance_unreachable') or 0 for n in nodes),
+            'maintenance_windows': len(windows),
+            'maintenance_events': sum(1 for ev in events[:MAX_ROWS] if ev.get('in_maintenance')),
             'really_down_nodes': cause_summary['really_down_nodes'],
             'intermittent_nodes': cause_summary['intermittent_nodes'],
             'explained_unreachable_nodes': cause_summary['explained_nodes'],
@@ -458,12 +513,14 @@ def window_report(start, end, scope='all', link_type='all', search='',
             'transitions': len(transitions[:MAX_ROWS]),
             'events': len(events[:MAX_ROWS]),
             'warnings': sum(1 for ev in events[:MAX_ROWS]
-                            if ev['severity'] in ('warning', 'error', 'critical')),
+                            if ev['severity'] in ('warning', 'error', 'critical')
+                            and not ev.get('in_maintenance')),
             'gateway_outages': gateway_outages,
             'voip_tests': len(voip_tests),
             'voip_sessions': len(voip_sessions),
         },
         'timeline': timeline_rows,
+        'maintenance': maintenance.report_windows(s, e),
         'nodes': nodes,
         'unreachable': unreachable_rows,
         'links': links,

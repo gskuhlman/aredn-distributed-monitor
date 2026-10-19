@@ -23,7 +23,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now aredn-monitor
 
 # Validate Python syntax
-python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py change_log.py channel_map.py notify.py unreachable.py link_watch.py
+python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py change_log.py channel_map.py notify.py unreachable.py link_watch.py maintenance.py
 
 # Bootstrap CouchDB databases and indexes when COUCH_URL is configured
 python couch_client.py
@@ -55,6 +55,7 @@ There is no full test suite or linting currently configured.
 - `notify.py`: Operator notifications (email/SMTP, Discord webhook, ntfy, generic JSON webhook). `database.log_event` hands each committed event to listeners; `notify.install()` (called only from the `__main__` startup path) registers a non-blocking listener plus a worker that applies rules (event types, min severity, scope any/infrastructure/selected/node list, channels) and anti-spam: mute-until, quiet hours, `is_suppressed()` hook (for future maintenance windows), per (rule, node/link, type) cooldown, flap hold (problem + recovery within N minutes -> one "flapped" note; recoveries only for alerted problems), and per-channel digest. Tables `notification_config`, `notification_rules`, `notifications_log` (retention = `CONNECTIVITY_LOG_RETENTION_DAYS`).
 - `unreachable.py`: Unreachable classifier. Sorts every node with failed scanner polls or mesh probes in a window into a cause (starting_node_outage, placeholder, excluded, legacy_tunnel_only, pings_no_http, intermittent, stale, not_routable, behind_supernode, never_resolves, really_down). Only `really_down`/`intermittent` count as unreachable in Reports; the rest are explained. Uses `fail_reason`/`reported_by`/`via_link_type`, which the scanner records on failed polls in `node_health_history`, plus links/nodes state for older rows.
 - `link_watch.py`: Link Watch, run after every committed (never aborted) scan from `scheduled_scan`. Noise-floor watch: each radio's noise (signal - SNR from its own trackers in `link_history`) vs. a rolling baseline (same hour of day once 3+ days exist, else window median, last hour excluded). One-way link alarm: an RF pair where one end hears the other well and the other doesn't (LQ asymmetry, infinite Babel cost with good SNR, MAC-only identity, not listed at all), reusing `link_diagnostics._direction`; only judged when both ends were polled recently and they aren't wired together. Hysteresis state in SQLite `link_watch_state`; events fire on transitions only.
+- `maintenance.py`: Maintenance windows (Diagnostics tab, node page, header banner). SQLite `maintenance_windows` (start/end local times, scope `all` | `site` | `nodes`, optional `include_rf_peers` so a sector's RF clients are covered too, note, author, optional linked `change_log` entry). A link is in maintenance when either end is; each window's effective end adds `MAINTENANCE_GRACE_MINUTES`. Consumers: `notify.is_suppressed` (events for covered nodes/links, or any event during an `all` window, are logged as suppressed and never sent; their recoveries are dropped), `link_watch` (no raise/clear/escalate for covered radios/pairs, counters reset; a radio's noise baseline restarts after each window that covered it), `unreachable` (failed polls inside a window are set aside; only-maintenance failures get cause `maintenance`, explained), `reports` (window list, per-bucket shading, events flagged `in_maintenance` and left out of the warning count, maintenance failed polls moved to their own series). Logs `maintenance_scheduled`/`maintenance_started`/`maintenance_ended` system events.
 - `config.py`: Central configuration and environment-variable overrides.
 
 ### Frontend Components
@@ -68,6 +69,7 @@ There is no full test suite or linting currently configured.
 - `static/js/notifications.js`: Notifications section on the Diagnostics tab (channels, timing, quiet hours, mute, rules, send log, per-channel test).
 - `static/js/infra-review.js`: Infrastructure Review section on the Diagnostics tab (findings, per-site spectrum chart and settings table, link verdicts).
 - `static/js/channel-map.js`: Channel Map tab (Leaflet 1.9.4 lazy-loaded from cdnjs, OpenStreetMap tiles): radios colored by frequency, beam wedges, RF links, dashed conflict lines and mast rings, filters (scope, band, frequency range, severity), radio side panel, and what-if channel plan. Hooks its own tab button; no changes to rf-stats.js tab switching.
+- `static/js/maintenance.js`: Maintenance section on the Diagnostics tab (create form with scope/site/nodes, now + 1/2/4/8 h or start/end, change-log option; list with End now / +1 h / Cancel), the header banner on the main and node pages while a window is active (polled every minute plus the `maintenance_update` Socket.IO event), and the node page "Start maintenance" quick action (this node or its site).
 - `static/js/link-watch.js`: Link Watch section on the Diagnostics tab (one-way alarms with a Diagnose button into RF Stats, noise table, per-radio noise series with baseline and hour-of-day profile).
 - `static/js/rf-channel.js`: Shared node channel display (centre/width/edge frequencies and channel numbers) and connected-peer channel relation (overlap/adjacent/near/same/clear) for the Nodes tab detail panel and node page; values come from `infra_audit.annotate_link_rf` via `/api/nodes/detail` and `/api/nodes/full` (`node.rf_span`, `link.peer_rf`).
 - `static/js/changes.js`: Changes tab (change list, filters, add form, before/after metrics and overlay charts; `/#changes/<id>` deep link). Also registers a `changeMarkers` Chart.js plugin that RF Stats uses to draw change times on link charts.
@@ -133,6 +135,13 @@ Change log routes:
 
 - `GET /api/changes?node&hours&limit`, `POST /api/changes` `{node_name, description, category?, timestamp?, peer_node?, author?}`, `DELETE /api/changes/<id>`
 - `GET /api/changes/<id>/compare?hours=24`: before vs. after stats for the changed node's RF links (the before window shrinks to match while the after window is still filling)
+Maintenance window routes (maintenance.py):
+
+- `GET /api/maintenance?days=14` (windows with status active/grace/upcoming/past and covered nodes, plus `active`, `grace_minutes`, `sites`), `GET /api/maintenance/active`
+- `POST /api/maintenance` `{scope, site?, nodes?, start?, end? | duration_minutes?, note?, author?, include_rf_peers?, change_log?}`
+- `PATCH /api/maintenance/<id>` `{end_now: true} | {extend_minutes} | {end} | {note}`, `DELETE /api/maintenance/<id>`
+- `/api/reports/window` adds `maintenance` (windows), per-event `in_maintenance`, per-bucket `in_maintenance`/`maintenance_warnings`/`maintenance_unreachable`, per-node `maintenance_unreachable`, and summary `maintenance_windows`/`maintenance_events`/`maintenance_unreachable_polls`; `/api/nodes/full/<name>` adds `maintenance` `{active, site}`.
+
 Notification routes (secrets always masked as `********`; posting the mask back keeps the stored value, an empty string clears it):
 
 - `GET/POST /api/notifications/settings`, `GET/POST /api/notifications/rules`, `DELETE /api/notifications/rules/<id>`
@@ -179,6 +188,7 @@ VoIP session routes (streamed two-ended / one-ended probes):
 Server emits:
 
 - `scan_started`
+- `maintenance_update` (`{active}` after a window is created, changed or deleted)
 - `scan_complete`
 - `network_update`
 - `link_dropped`
@@ -216,6 +226,7 @@ Important settings in `config.py` and environment variables:
 - `VOIP_SESSION_ROUTE_INTERVAL` / `VOIP_SESSION_MAX_SECONDS`: route-refresh cadence and session safety cap.
 - `NOTIFY_SMTP_PASSWORD`, `NOTIFY_DISCORD_WEBHOOK`, `NOTIFY_NTFY_TOKEN`, `NOTIFY_WEBHOOK_TOKEN`: optional env overrides for notification secrets (otherwise stored in the local `notification_config` table, edited on the Diagnostics tab).
 - `LINK_WATCH_ENABLED`; noise: `NOISE_JUMP_DB` (5), `NOISE_CLEAR_DB` (2), `NOISE_JUMP_SCANS` (2), `NOISE_BASELINE_HOURS` (72), `NOISE_BASELINE_EXCLUDE_MINUTES` (60), `NOISE_MIN_BASELINE_SAMPLES` (20), `NOISE_HOUR_MIN_DAYS` (3); one-way: `ONE_WAY_HIGH_LQ` (80), `ONE_WAY_LOW_LQ` (40), `ONE_WAY_SNR_OK` (15 dB), `ONE_WAY_SCANS` (2), `ONE_WAY_ESCALATE_MINUTES` (60), `ONE_WAY_FORGET_MINUTES` (60).
+- `MAINTENANCE_GRACE_MINUTES` (10): alarms and notifications stay held this long after a maintenance window ends.
 
 Settings edited through `/api/settings` persist to SQLite and currently affect legacy scanner behavior.
 

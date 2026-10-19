@@ -1646,7 +1646,11 @@ const EVENT_ICONS = {
     'noise_jump': { icon: '&#128266;', label: 'Noise Floor Jump', class: 'event-warning' },
     'noise_cleared': { icon: '&#128264;', label: 'Noise Floor Normal', class: 'event-success' },
     'one_way_link': { icon: '&#10145;', label: 'One-Way Link', class: 'event-warning' },
-    'one_way_link_cleared': { icon: '&#8646;', label: 'Link Two-Way Again', class: 'event-success' }
+    'one_way_link_cleared': { icon: '&#8646;', label: 'Link Two-Way Again', class: 'event-success' },
+    // Maintenance windows (maintenance.py)
+    'maintenance_scheduled': { icon: '&#128197;', label: 'Maintenance Scheduled', class: 'event-info' },
+    'maintenance_started': { icon: '&#128679;', label: 'Maintenance Started', class: 'event-info' },
+    'maintenance_ended': { icon: '&#9989;', label: 'Maintenance Ended', class: 'event-info' }
 };
 
 /**

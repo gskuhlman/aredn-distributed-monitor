@@ -16,6 +16,13 @@ Link Watch: continuous detectors that run after every committed scan.
 
 Events fire on state transitions only. State lives in the SQLite table
 `link_watch_state` so restarts don't re-fire. Never run on aborted scans.
+
+Maintenance windows (maintenance.py): while a radio or pair is in a window
+(grace period included) nothing is raised, cleared or escalated and its
+hysteresis counters are reset, so after the window it takes the usual number
+of scans to alarm. A radio's noise baseline restarts after each window that
+covered it (samples before the window's end are dropped), so a new channel's
+noise floor is not compared with the old channel's.
 """
 
 import json
@@ -26,6 +33,7 @@ from statistics import median
 import config
 import database
 import link_diagnostics as ld
+import maintenance
 
 logger = logging.getLogger(__name__)
 
@@ -181,9 +189,24 @@ def _current(samples, now, stale_after):
     return ts, v, n
 
 
-def _radio_status(samples, now, stale_after):
+def _baseline_samples(node, samples, now, windows):
+    """Samples usable for the baseline: those after the end of the latest
+    maintenance window that covered the radio (and none inside a window)."""
+    if not windows or not samples:
+        return samples
+    intervals = maintenance.intervals_for(node, samples[0][0], now, windows)
+    if not intervals:
+        return samples
+    ended = [b for _, b in intervals if b <= now]
+    after = maintenance._fmt(max(ended)) if ended else None
+    return [x for x in samples if (after is None or x[0] >= after)
+            and not maintenance.ts_in_intervals(x[0], intervals)]
+
+
+def _radio_status(samples, now, stale_after, base_samples=None):
     cur = _current(samples, now, stale_after)
-    base, method, n_base = _baseline(samples, now, cur[0] if cur else None)
+    base, method, n_base = _baseline(samples if base_samples is None else base_samples,
+                                     now, cur[0] if cur else None)
     delta = round(cur[1] - base, 1) if cur and base is not None else None
     return {'current': cur[1] if cur else None, 'current_at': cur[0] if cur else None,
             'trackers': cur[2] if cur else None, 'baseline': base, 'baseline_method': method,
@@ -197,13 +220,23 @@ def check_noise(now=None):
     start = (now - timedelta(hours=config.NOISE_BASELINE_HOURS)).strftime(TS_FMT)
     with database.get_connection() as conn:
         buckets = _noise_buckets(conn, start, end=now_s)
+    windows = maintenance.windows_between(start, now)
     states = _load_state(KIND_NOISE)
     events, touched = [], {}
     for node, samples in buckets.items():
-        st = _radio_status(samples, now, stale_after)
+        st = _radio_status(samples, now, stale_after, _baseline_samples(node, samples, now, windows))
         if st['current'] is None:
             continue
         state = states.get(node) or _new_state(node)
+        w = maintenance.covering_window(node, now, windows=windows)
+        if w:
+            # In maintenance: hold the alarm state, restart the counters.
+            state['bad_count'] = state['good_count'] = 0
+            state['updated_at'] = now_s
+            st['maintenance'] = maintenance.describe_window(w)
+            state['detail'] = st
+            touched[node] = state
+            continue
         if st['delta'] is None:
             bad = None
         elif st['delta'] >= config.NOISE_JUMP_DB:
@@ -246,9 +279,12 @@ def noise_report(node=None, hours=72, days=7):
         buckets = _noise_buckets(conn, start, node.lower() if node else None)
     states = _load_state(KIND_NOISE)
     infra = set(database.get_infrastructure_node_names())
+    windows = maintenance.windows_between(start, now)
 
     def status(name, samples):
-        st = _radio_status(samples, now, stale_after)
+        st = _radio_status(samples, now, stale_after, _baseline_samples(name, samples, now, windows))
+        w = maintenance.covering_window(name, now, windows=windows)
+        st['maintenance'] = maintenance.describe_window(w) if w else None
         s = states.get(name) or {}
         st.update({'node': name, 'is_infrastructure': name in infra,
                    'alarm': bool(s.get('active')), 'since': s.get('since') if s.get('active') else None,
@@ -408,9 +444,20 @@ def check_one_way(now=None):
     results = evaluate_all(now)
     states = _load_state(KIND_ONE_WAY)
     infra = set(database.get_infrastructure_node_names())
+    windows = maintenance.windows_between(now, now + timedelta(seconds=1))
     events, touched = [], {}
     for key, r in results.items():
         state = states.get(key) or _new_state(key)
+        a, b = r['pair']
+        w = maintenance.covering_window(a, now, b, windows=windows)
+        if w:
+            # In maintenance: no raise/clear/escalation; counters restart.
+            state['bad_count'] = state['good_count'] = 0
+            state['updated_at'] = now_s
+            if r['one_way'] or state['active']:
+                state['detail'] = dict(r, maintenance=maintenance.describe_window(w))
+            touched[key] = state
+            continue
         prev_deaf = (state.get('detail') or {}).get('deaf') or []
         action = _step(state, r['one_way'], config.ONE_WAY_SCANS, now_s)
         state['updated_at'] = now_s
@@ -446,6 +493,9 @@ def check_one_way(now=None):
     # is cleared after ONE_WAY_FORGET_MINUTES rather than left active forever.
     for key, state in states.items():
         if key in results or not state['active']:
+            continue
+        a, b = key.split('|', 1)
+        if maintenance.covering_window(a, now, b, windows=windows):
             continue
         seen = ld._parse_ts(state.get('updated_at'))
         if seen and (now - seen).total_seconds() >= config.ONE_WAY_FORGET_MINUTES * 60:

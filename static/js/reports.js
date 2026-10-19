@@ -291,9 +291,11 @@ const ReportsModule = {
         ], row => `data-source="${this.esc(row.source_node)}" data-target="${this.esc(row.target_node)}"`,
             { key: 'timestamp', dir: 'desc' });
 
-        this.renderTable('rpt-events', d.events, [
+        // Events inside a maintenance window are listed but not counted as warnings.
+        const events = (d.events || []).map(ev => ({ ...ev, maint: ev.in_maintenance ? 'maintenance' : '' }));
+        this.renderTable('rpt-events', events, [
             ['timestamp', 'Time'], ['severity', 'Severity'], ['event_type', 'Type'],
-            ['node_name', 'Node'], ['details', 'Details']
+            ['node_name', 'Node'], ['details', 'Details'], ['maint', 'Planned']
         ], row => row.node_name ? `data-node="${this.esc(row.node_name)}"` : '',
             { key: 'timestamp', dir: 'desc' });
 
@@ -397,6 +399,8 @@ const ReportsModule = {
             ['Events', s.events],
             ['Warnings', s.warnings],
             ['Starting Node Lost', s.gateway_outages],
+            ['Maintenance', s.maintenance_windows
+                ? `${s.maintenance_windows} window(s), ${s.maintenance_events ?? 0} events` : 'none'],
             ['VoIP Tests / Sessions', `${s.voip_tests} / ${s.voip_sessions}`]
         ];
         document.getElementById('rpt-summary').innerHTML = tiles.map(([label, value]) =>
@@ -467,9 +471,30 @@ const ReportsModule = {
                         label: 'Avg link quality %', type: 'line', borderColor: '#27ae60',
                         backgroundColor: 'transparent', data: [], yAxisID: 'q', tension: 0.3,
                         pointRadius: 0, spanGaps: true
-                    }
+                    },
+                    { label: 'Warnings (maintenance)', backgroundColor: '#aed6f1', data: [], stack: 'c' },
+                    { label: 'Unreachable (maintenance)', backgroundColor: '#5dade2', data: [], stack: 'c', hidden: true }
                 ]
             },
+            plugins: [{
+                // Shade maintenance windows behind the bars.
+                id: 'maintBands',
+                beforeDatasetsDraw: (chart) => {
+                    const windows = this.data?.maintenance || [];
+                    const x = chart.scales.x;
+                    const area = chart.chartArea;
+                    if (!windows.length || !x || !area) return;
+                    const c = chart.ctx;
+                    c.save();
+                    c.fillStyle = 'rgba(93, 173, 226, 0.12)';
+                    for (const w of windows) {
+                        const x0 = Math.max(area.left, x.getPixelForValue(new Date(w.start_time.replace(' ', 'T'))));
+                        const x1 = Math.min(area.right, x.getPixelForValue(new Date(w.effective_end.replace(' ', 'T'))));
+                        if (x1 > x0) c.fillRect(x0, area.top, x1 - x0, area.bottom - area.top);
+                    }
+                    c.restore();
+                }
+            }],
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -506,6 +531,8 @@ const ReportsModule = {
         chart.data.datasets[3].data = pts('unreachable');
         chart.data.datasets[4].data = pts('explained_unreachable');
         chart.data.datasets[5].data = pts('avg_quality');
+        chart.data.datasets[6].data = pts('maintenance_warnings');
+        chart.data.datasets[7].data = pts('maintenance_unreachable');
         chart.options.scales.x = { ...this.timeScale(this.data.window), stacked: true, offset: false };
         chart.update('none');
     },
