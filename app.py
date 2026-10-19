@@ -48,6 +48,7 @@ import voip
 import voip_session
 import couch_client
 import notify
+import maintenance
 
 # Configure logging
 logging.basicConfig(
@@ -472,6 +473,7 @@ def api_get_node_full(name):
         'flap_report': database.get_link_flap_report(hours=hours, node=node_name),
         'reach': reach_map.get(node_name),
         'unreachable_cause': unreachable.node_cause(node_name, hours=hours),
+        'maintenance': _node_maintenance(node_name),
         'peer_reach': reach_map
     })
 
@@ -1016,6 +1018,70 @@ def api_compare_change(change_id):
     return jsonify(result)
 
 # --- end change log ---------------------------------------------------------
+
+
+# --- maintenance windows (TODO #22) -------------------------------------------
+
+def _node_maintenance(node_name):
+    """The window covering a node now (for the node page), plus its site code."""
+    try:
+        w = maintenance.covering_window(node_name)
+        return {'active': w, 'site': maintenance.site_of(node_name)}
+    except Exception as exc:
+        logger.debug(f"maintenance lookup failed for {node_name}: {exc}")
+        return {'active': None, 'site': None}
+
+
+@app.route('/api/maintenance', methods=['GET'])
+def api_list_maintenance():
+    """Maintenance windows ending within the last `days` (default 14), plus active ones."""
+    days = max(1, min(90, request.args.get('days', 14, type=int)))
+    return jsonify({'windows': maintenance.list_windows(days=days),
+                    'active': maintenance.active_windows(),
+                    'grace_minutes': config.MAINTENANCE_GRACE_MINUTES,
+                    'sites': database.get_site_names(), 'scopes': list(maintenance.SCOPES)})
+
+
+@app.route('/api/maintenance/active')
+def api_active_maintenance():
+    """Windows covering now (grace period included), for the header banner."""
+    return jsonify({'active': maintenance.active_windows(),
+                    'grace_minutes': config.MAINTENANCE_GRACE_MINUTES})
+
+
+@app.route('/api/maintenance', methods=['POST'])
+def api_create_maintenance():
+    """{scope, site?, nodes?, start?, end? | duration_minutes?, note?, author?,
+    include_rf_peers?, change_log?}"""
+    try:
+        window = maintenance.create_window(request.get_json(silent=True) or {})
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    socketio.emit('maintenance_update', {'active': maintenance.active_windows()})
+    return jsonify({'success': True, 'window': window})
+
+
+@app.route('/api/maintenance/<int:window_id>', methods=['PATCH'])
+def api_update_maintenance(window_id):
+    """{end_now: true} | {extend_minutes: N} | {end: ts} | {note}"""
+    try:
+        window = maintenance.update_window(window_id, request.get_json(silent=True) or {})
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    if window is None:
+        return jsonify({'error': 'Window not found'}), 404
+    socketio.emit('maintenance_update', {'active': maintenance.active_windows()})
+    return jsonify({'success': True, 'window': window})
+
+
+@app.route('/api/maintenance/<int:window_id>', methods=['DELETE'])
+def api_delete_maintenance(window_id):
+    if not maintenance.delete_window(window_id):
+        return jsonify({'error': 'Window not found'}), 404
+    socketio.emit('maintenance_update', {'active': maintenance.active_windows()})
+    return jsonify({'success': True})
+
+# --- end maintenance windows ---------------------------------------------------
 
 
 @app.route('/api/rf-stats/summary')

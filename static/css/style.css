@@ -2191,3 +2191,22 @@ tr.notify-log-suppressed td { color: #95a5a6; }
 .cleanup-act-unexclude { background: #3498db; }
 .cleanup-act-review { background: #d4ac0d; }
 .cleanup-act-keep { background: #27ae60; }
+/* Maintenance windows (#22) */
+.maint-banner { background: #d6eaf8; color: #1b4f72; border-bottom: 1px solid #85c1e9; padding: 6px 16px; font-size: 13px; }
+.maint-banner[hidden] { display: none; }
+.maint-banner-item { margin-right: 6px; }
+.maint-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin: 10px 0 14px; }
+.maint-form > label { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.maint-form > label[hidden] { display: none; }
+.maint-form > label.checkbox-label { flex-direction: row; align-items: center; }
+.maint-form .maint-wide { flex: 1 1 240px; }
+.maint-status { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; color: #fff; background: #95a5a6; }
+.maint-status-active { background: #2e86c1; }
+.maint-status-grace { background: #5dade2; }
+.maint-status-upcoming { background: #7d3c98; }
+.maint-row.maint-past { opacity: 0.7; }
+.maint-actions { white-space: nowrap; }
+.maint-actions .btn-small + .btn-small { margin-left: 4px; }
+.maint-node-action { display: inline-flex; align-items: center; gap: 6px; }
+.maint-node-form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.maint-node-form .form-input { width: auto; }

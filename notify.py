@@ -443,9 +443,20 @@ def describe(event):
 
 
 def is_suppressed(event):
-    """Hook for maintenance windows (#22). Return a reason string to suppress
-    the event, or None. Nothing is suppressed yet."""
-    return None
+    """Maintenance windows (#22): a reason string when the event's node or link
+    (either end) is in a window at the event's time (grace period included),
+    else None. Node-less events are only covered by whole-mesh windows.
+    Problems suppressed here are never 'alerted', so their recoveries are
+    dropped too, even after the window ends."""
+    try:
+        import maintenance
+        node = (event.get('node_name') or '').lower() or None
+        _, peer = event_subject(event)
+        w = maintenance.covering_window(node, event.get('timestamp'), peer)
+    except Exception as exc:   # never let the hook break the pipeline
+        logger.debug("maintenance check failed: %s", exc)
+        return None
+    return maintenance.describe_window(w) if w else None
 
 
 def _in_quiet_hours(cfg, now=None):

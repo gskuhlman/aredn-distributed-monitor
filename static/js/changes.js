@@ -283,11 +283,13 @@ const ChangesModule = {
     },
 
     /** Mark recorded changes for a link (either end, or the pair) as dashed
-     *  vertical lines on time-axis charts (RF Stats link charts). */
+     *  vertical lines on time-axis charts (RF Stats link charts), and
+     *  maintenance windows covering either end as shaded bands. */
     async markCharts(charts, source, target) {
         try {
             const [a, b] = await Promise.all([source, target].map(n =>
                 fetch(`/api/changes?node=${encodeURIComponent(n)}&limit=200`).then(r => r.json())));
+            const maint = await fetch('/api/maintenance?days=31').then(r => r.json()).catch(() => ({}));
             const pair = [source, target];
             const seen = new Set();
             const markers = [...(a.changes || []), ...(b.changes || [])]
@@ -295,6 +297,12 @@ const ChangesModule = {
                 .filter(c => !c.peer_node || (pair.includes(c.peer_node) && pair.includes(c.node_name)))
                 .map(c => ({ t: new Date(String(c.timestamp).replace(' ', 'T')).getTime(),
                              label: `${c.category}: ${c.node_name}` }));
+            for (const w of maint.windows || []) {
+                if (w.scope !== 'all' && !pair.some(n => (w.covered_nodes || []).includes(n))) continue;
+                markers.push({ t: new Date(w.start_time.replace(' ', 'T')).getTime(),
+                               end: new Date(w.end_time.replace(' ', 'T')).getTime(),
+                               label: `maintenance${w.note ? ': ' + w.note : ''}` });
+            }
             charts.forEach(ch => {
                 if (!ch) return;
                 ch.$changeMarkers = markers;
@@ -349,8 +357,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// Draws chart.$changeMarkers ([{t: ms, label}]) as dashed vertical lines on
-// charts with a time x axis. Charts without markers are untouched.
+// Draws chart.$changeMarkers ([{t: ms, label, end?}]) as dashed vertical lines
+// (or shaded bands when `end` is set, e.g. maintenance windows) on charts with
+// a time x axis. Charts without markers are untouched.
 if (typeof Chart !== 'undefined') {
     Chart.register({
         id: 'changeMarkers',
@@ -366,6 +375,18 @@ if (typeof Chart !== 'undefined') {
             ctx.lineWidth = 1.5;
             ctx.font = '10px sans-serif';
             for (const m of markers) {
+                if (m.end) {
+                    if (m.end < x.min || m.t > x.max) continue;
+                    const x0 = x.getPixelForValue(Math.max(m.t, x.min));
+                    const x1 = x.getPixelForValue(Math.min(m.end, x.max));
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(93, 173, 226, 0.15)';
+                    ctx.fillRect(x0, chartArea.top, x1 - x0, chartArea.bottom - chartArea.top);
+                    ctx.fillStyle = '#2e86c1';
+                    ctx.fillText(m.label, Math.min(x0 + 3, chartArea.right - 80), chartArea.bottom - 4);
+                    ctx.restore();
+                    continue;
+                }
                 if (!(m.t >= x.min && m.t <= x.max)) continue;
                 const px = x.getPixelForValue(m.t);
                 ctx.beginPath();

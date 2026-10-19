@@ -63,6 +63,7 @@
                 <button id="settings-btn" class="btn btn-secondary">Settings</button>
             </div>
         </header>
+        <div id="maint-banner" class="maint-banner" hidden></div>
 
         <!-- Main content -->
         <main class="main-content">
@@ -432,6 +433,15 @@
                             <div id="cleanup-list"><p class="log-empty">Not run yet. Infrastructure, Permanent/Event-tagged, selected and starting nodes are never offered.</p></div>
                         </div>
                         <!-- end Cleanup -->
+                        <!-- Maintenance windows (#22) -->
+                        <div class="diag-section">
+                            <details id="maint-section" class="notify-section">
+                                <summary><h3>Maintenance <small class="form-hint">planned work: hold alarms and leave it out of reports</small>
+                                    <span id="maint-badge" class="notify-badge"></span></h3></summary>
+                                <div id="maint-panel"><p class="log-empty">Loading...</p></div>
+                            </details>
+                        </div>
+                        <!-- End maintenance -->
 
                         <!-- Notifications (#21) -->
                         <div class="diag-section">
@@ -1097,6 +1107,7 @@
     <script src="{{ url_for('static', filename='js/infra-review.js') }}"></script>
     <script src="{{ url_for('static', filename='js/drift.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/maintenance.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-watch.js') }}"></script>
     <script src="{{ url_for('static', filename='js/cleanup.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>

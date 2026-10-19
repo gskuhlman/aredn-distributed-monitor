@@ -169,6 +169,9 @@ ONE_WAY_SCANS = env_int("ONE_WAY_SCANS", 2)
 ONE_WAY_ESCALATE_MINUTES = env_int("ONE_WAY_ESCALATE_MINUTES", 60)
 ONE_WAY_FORGET_MINUTES = env_int("ONE_WAY_FORGET_MINUTES", 60)
 # --- end Link Watch ---
+# Maintenance windows (maintenance.py): alarms stay quiet this many minutes
+# after a window ends while radios rejoin.
+MAINTENANCE_GRACE_MINUTES = env_int("MAINTENANCE_GRACE_MINUTES", 10)
 # Total incident capture window and gap between probe rounds, in seconds.
 INCIDENT_DURATION = env_int("INCIDENT_DURATION_SECONDS", 90)
 INCIDENT_PROBE_INTERVAL = env_int("INCIDENT_PROBE_INTERVAL_SECONDS", 5)

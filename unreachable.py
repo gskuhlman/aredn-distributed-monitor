@@ -5,6 +5,8 @@ A failed sysinfo poll is not proof a node is down. This module sorts every
 node with failed scanner polls in a time window into a cause, so reports can
 count only nodes that are really down and explain the rest:
 
+- maintenance: every failed poll fell inside a maintenance window covering
+  the node (maintenance.py); failures inside a window never count elsewhere
 - starting_node_outage: failures while the collector's starting node was lost
   (or legacy rows keyed to an IP fragment like "10" from before the gate)
 - placeholder: a ``mac-…`` name the LQM reported without a hostname
@@ -29,6 +31,7 @@ import re
 from datetime import datetime, timedelta
 
 import database
+import maintenance
 
 TS_FMT = '%Y-%m-%d %H:%M:%S'
 STALE_DAYS = 30
@@ -37,6 +40,8 @@ DOWN_AFTER_FAILS = 3      # consecutive failures (polls or probes) that mean "do
 LEGACY_TUNNEL_TYPES = {'TUNNEL', 'TUN', 'VTUN'}
 
 CAUSES = {
+    'maintenance': ('Maintenance', True, 'info',
+                    'Every failed poll fell inside a planned maintenance window covering this node.'),
     'starting_node_outage': ('Starting node lost', True, 'info',
                              'The collector lost its starting node (its way onto the mesh), so these '
                              'polls say nothing about this node.'),
@@ -139,10 +144,13 @@ def classify(start, end, names=None, conn=None):
         return {}
     failing = list(samples)
 
+    windows = maintenance.windows_between(start, end, conn)
     stats, reasons, via, fail_times = {}, {}, {}, {}
     for name, rows in samples.items():
         st = {'polls': 0, 'failed': 0, 'answered': 0, 'probe_ok': 0, 'probe_fail': 0,
-              'first_fail': None, 'last_fail': None, 'last_ok_any': None, 'fails_since_ok': 0}
+              'first_fail': None, 'last_fail': None, 'last_ok_any': None, 'fails_since_ok': 0,
+              'maint_failed': 0, 'maint_probe_fail': 0}
+        intervals = maintenance.intervals_for(name, start, end, windows) if windows else []
         for r in rows:
             direct = r['probe_via'] is None
             if direct:
@@ -151,6 +159,10 @@ def classify(start, end, names=None, conn=None):
                 st['answered' if direct else 'probe_ok'] += 1
                 st['last_ok_any'] = r['timestamp']
                 st['fails_since_ok'] = 0
+                continue
+            # Failures inside a maintenance window are set aside entirely.
+            if intervals and maintenance.ts_in_intervals(r['timestamp'], intervals):
+                st['maint_failed' if direct else 'maint_probe_fail'] += 1
                 continue
             st['failed' if direct else 'probe_fail'] += 1
             st['first_fail'] = st['first_fail'] or r['timestamp']
@@ -210,6 +222,10 @@ def classify(start, end, names=None, conn=None):
 def _cause(name, ctx):
     s, reps, reasons = ctx['stats'], ctx['reporters'], ctx['reasons']
     ev = []
+    if not s['failed'] and not s['probe_fail']:
+        if s['maint_failed'] or s['maint_probe_fail']:
+            return 'maintenance', [f'{s["maint_failed"]} poll(s) and {s["maint_probe_fail"]} probe(s) '
+                                   'failed inside a maintenance window']
     # The scanner itself never failed and only a stray mesh probe did: not unreachable.
     if not s['failed'] and s['fails_since_ok'] < DOWN_AFTER_FAILS and (s['answered'] or s['probe_ok']):
         return None, []
@@ -305,7 +321,8 @@ def _result(name, cause, evidence, ctx):
         'detail': detail,
         'evidence': evidence,
         'polls': s['polls'] or 0,
-        'failed_polls': s['failed'] or 0,
+        'failed_polls': (s['failed'] or 0) + (s['maint_failed'] if cause == 'maintenance' else 0),
+        'maintenance_failed_polls': s['maint_failed'] or 0,
         'answered_polls': s['answered'] or 0,
         'probe_ok': s['probe_ok'] or 0,
         'probe_fail': s['probe_fail'] or 0,

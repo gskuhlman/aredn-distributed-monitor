@@ -66,7 +66,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 - [x] 21. **Notifications.** Email, Discord, ntfy or APRS when an infrastructure node
       goes down, a sector loses a client, the starting node is lost, or a link score
       drops; respect maintenance windows.
-- [ ] 22. **Maintenance windows.** Planned work is excluded from reports and alarms.
+- [x] 22. **Maintenance windows.** Planned work is excluded from reports and alarms.
 - [ ] 23. **Notes on nodes and links.** For example "tilted 2° on 10/20" or "call
       KF9MT first", shown in diagnoses and on charts.
 - [x] 24. **Cleanup of stale and junk entries.** Exclude or delete nodes that never

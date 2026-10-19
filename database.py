@@ -1485,6 +1485,10 @@ EVENT_NOISE_JUMP = 'noise_jump'
 EVENT_NOISE_CLEARED = 'noise_cleared'
 EVENT_ONE_WAY_LINK = 'one_way_link'
 EVENT_ONE_WAY_LINK_CLEARED = 'one_way_link_cleared'
+# Maintenance windows (maintenance.py)
+EVENT_MAINTENANCE_SCHEDULED = 'maintenance_scheduled'
+EVENT_MAINTENANCE_STARTED = 'maintenance_started'
+EVENT_MAINTENANCE_ENDED = 'maintenance_ended'
 
 
 def trim_connectivity_log(days=None):
