@@ -86,7 +86,22 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 
 ## Pending radio work (outside the app)
 
-- [ ] Apply the Collins/kf9mt channel plan: sectors S and W on ch 173 (5865) and
-      N and E on ch 182 (5910), all 20 MHz; MMC↔COL on ch 135 (5675), bldg112 on ch 147 (5735) and
-      hiwt on ch 159 (5795), all 40 MHz. Move each sector's clients with it. Consider turning off sq-2hiwt and
-      sq-2bldg112 until their far ends exist. Lower kf9mt-home-litebeam's TX power.
+Collins plan from the channel planner (Channel Map → Plan channels, site COL), 2026-10-19.
+It brings Collins's own conflicts from 8 critical / 24 warning to 0 critical / 2 warning.
+
+- [ ] Start a maintenance window for COL (Diagnostics → Maintenance, site COL, RF peers
+      included) so alarms and reports ignore the change.
+- [ ] N + S sectors on ch 132 (5660/20): w0gq-col-rkt-n with kf0jcl-qth-litebeam5ac,
+      w0gq-col-rkt-s with kf9mt-home-litebeam. Opposite sectors share the channel (shared airtime).
+- [ ] E + W sectors on ch 173 (5865/20): w0gq-col-rkt-e with kj0dx-qth-ub,
+      w0gq-col-rkt-w with ka0ies-square-one.
+- [ ] MMC ↔ COL link on ch 142 (5710/40): w0gq-col-sq-2mmc and w0gq-mmc-sq-2col together.
+- [ ] Turn off w0gq-col-sq-2bldg112 and w0gq-col-sq-2hiwt until their far ends exist.
+- [ ] Move each client before (or with) its sector, so no link is stranded.
+- [ ] Lower kf9mt-home-litebeam's TX power (near-far at Collins). Never Collins's.
+- [ ] Fix ka0ies-square-one's azimuth setting: set to 135°, but Collins is at 43° from it.
+- [ ] Afterwards: check RF Stats for an rkt-n ↔ rkt-s link or clients linked to the opposite
+      sector, and compare before/after on the Changes tab.
+- [ ] Known leftovers: E/W are only 10 MHz from the EOC↔MMC dish (5805–5845, aimed toward
+      Collins); fixing that means moving MMC radios. Not Collins: k0cta-130-51-138 vs
+      w0gq-mmc-rkt-o13 and kf0jcl-qth vs kj0dx-qth-sq.
