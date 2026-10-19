@@ -21,6 +21,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 import logging
 import atexit
+import time
 import os
 from datetime import datetime, timedelta
 
@@ -36,6 +37,7 @@ import infra_audit
 import change_log
 import channel_map
 import link_watch
+import collector_health
 import link_health
 import mesh_diagnostics
 import incident_report
@@ -199,10 +201,16 @@ def scheduled_scan():
     # Notify clients that scan is starting
     socketio.emit('scan_started', {'timestamp': datetime.now().isoformat()})
 
+    scan_started = time.monotonic()
     try:
         result = run_configured_scan()
         scan_state['last_scan'] = result['timestamp']
         scan_state['last_result'] = result
+
+        # Starting-node health: measure DNS/connect/HTTP to the starting node
+        # (and the LAN gateway if that fails) off the scan path.
+        socketio.start_background_task(collector_health.record, 'scan', result,
+                                       int((time.monotonic() - scan_started) * 1000))
 
         # Check if starting node was unreachable
         if result.get('starting_node_error'):
@@ -276,6 +284,8 @@ def scheduled_scan():
     except Exception as e:
         logger.error(f"Scan error: {e}")
         socketio.emit('scan_error', {'error': str(e)})
+        socketio.start_background_task(collector_health.record, 'scan', None,
+                                       int((time.monotonic() - scan_started) * 1000), str(e))
 
     finally:
         scan_state['is_scanning'] = False
@@ -1023,6 +1033,34 @@ def api_report_unreachable():
             search=request.args.get('search', '')))
     except reports.ReportError as exc:
         return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/collector/health')
+def api_collector_health():
+    """Starting-node health (collector_health.py): start/end (local
+    YYYY-MM-DDTHH:MM) or the last `hours` (default 24)."""
+    try:
+        start = request.args.get('start')
+        end = request.args.get('end')
+        if start or end:
+            start_dt, end_dt = reports.parse_window(start, end)
+        else:
+            end_dt = datetime.now()
+            hours = min(max(request.args.get('hours', 24, type=float), 0.25), 24 * 32)
+            start_dt = end_dt - timedelta(hours=hours)
+        return jsonify(collector_health.report(start_dt.strftime(reports.TS_FMT),
+                                               end_dt.strftime(reports.TS_FMT)))
+    except reports.ReportError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/collector/health/check', methods=['POST'])
+def api_collector_health_check():
+    """Measure the path to the starting node now and store it (kind 'manual')."""
+    row = collector_health.record('manual')
+    if row is None:
+        return jsonify({'error': 'Measurement failed'}), 500
+    return jsonify({'success': True, 'check': row})
 
 
 @app.route('/api/reports/window/link/<source>/<target>')

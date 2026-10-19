@@ -23,7 +23,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now aredn-monitor
 
 # Validate Python syntax
-python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py change_log.py channel_map.py notify.py unreachable.py link_watch.py
+python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py change_log.py channel_map.py notify.py unreachable.py link_watch.py collector_health.py
 
 # Bootstrap CouchDB databases and indexes when COUCH_URL is configured
 python couch_client.py
@@ -55,6 +55,7 @@ There is no full test suite or linting currently configured.
 - `notify.py`: Operator notifications (email/SMTP, Discord webhook, ntfy, generic JSON webhook). `database.log_event` hands each committed event to listeners; `notify.install()` (called only from the `__main__` startup path) registers a non-blocking listener plus a worker that applies rules (event types, min severity, scope any/infrastructure/selected/node list, channels) and anti-spam: mute-until, quiet hours, `is_suppressed()` hook (for future maintenance windows), per (rule, node/link, type) cooldown, flap hold (problem + recovery within N minutes -> one "flapped" note; recoveries only for alerted problems), and per-channel digest. Tables `notification_config`, `notification_rules`, `notifications_log` (retention = `CONNECTIVITY_LOG_RETENTION_DAYS`).
 - `unreachable.py`: Unreachable classifier. Sorts every node with failed scanner polls or mesh probes in a window into a cause (starting_node_outage, placeholder, excluded, legacy_tunnel_only, pings_no_http, intermittent, stale, not_routable, behind_supernode, never_resolves, really_down). Only `really_down`/`intermittent` count as unreachable in Reports; the rest are explained. Uses `fail_reason`/`reported_by`/`via_link_type`, which the scanner records on failed polls in `node_health_history`, plus links/nodes state for older rows.
 - `link_watch.py`: Link Watch, run after every committed (never aborted) scan from `scheduled_scan`. Noise-floor watch: each radio's noise (signal - SNR from its own trackers in `link_history`) vs. a rolling baseline (same hour of day once 3+ days exist, else window median, last hour excluded). One-way link alarm: an RF pair where one end hears the other well and the other doesn't (LQ asymmetry, infinite Babel cost with good SNR, MAC-only identity, not listed at all), reusing `link_diagnostics._direction`; only judged when both ends were polled recently and they aren't wired together. Hysteresis state in SQLite `link_watch_state`; events fire on transitions only.
+- `collector_health.py`: Starting-node health (Reports tab "Starting Node" section). After every scan `scheduled_scan` starts a background task that measures the path to the starting node (DNS via the OS resolver, skipped for an IP; TCP connect; bare sysinfo over HTTP; error class) and, only when that fails, pings this PC's default gateway, storing it with the scan outcome (aborted, duration, nodes attempted/reachable) in SQLite `collector_health` (retention `NODE_HEALTH_RETENTION_HOURS`). `report()` derives outages (contiguous failures, cause: LAN down / DNS / refused / no answer / lost mid-scan ...), latency and DNS percentiles, lost scans, an hour-of-day profile and a bucketed series with scanner polls. Older history comes from `gateway_lost`/`gateway_restored` events and failed polls the old scanner stored under the starting node's URL slug (e.g. `10`).
 - `config.py`: Central configuration and environment-variable overrides.
 
 ### Frontend Components
@@ -68,6 +69,7 @@ There is no full test suite or linting currently configured.
 - `static/js/notifications.js`: Notifications section on the Diagnostics tab (channels, timing, quiet hours, mute, rules, send log, per-channel test).
 - `static/js/infra-review.js`: Infrastructure Review section on the Diagnostics tab (findings, per-site spectrum chart and settings table, link verdicts).
 - `static/js/channel-map.js`: Channel Map tab (Leaflet 1.9.4 lazy-loaded from cdnjs, OpenStreetMap tiles): radios colored by frequency, beam wedges, RF links, dashed conflict lines and mast rings, filters (scope, band, frequency range, severity), radio side panel, and what-if channel plan. Hooks its own tab button; no changes to rf-stats.js tab switching.
+- `static/js/collector-health.js`: Starting Node section of the Reports tab (status tiles, outage timeline, response-time and polls charts, hour-of-day outage profile, outage table, Check now); loaded by `ReportsModule.load()` with the Reports window.
 - `static/js/link-watch.js`: Link Watch section on the Diagnostics tab (one-way alarms with a Diagnose button into RF Stats, noise table, per-radio noise series with baseline and hour-of-day profile).
 - `static/js/rf-channel.js`: Shared node channel display (centre/width/edge frequencies and channel numbers) and connected-peer channel relation (overlap/adjacent/near/same/clear) for the Nodes tab detail panel and node page; values come from `infra_audit.annotate_link_rf` via `/api/nodes/detail` and `/api/nodes/full` (`node.rf_span`, `link.peer_rf`).
 - `static/js/changes.js`: Changes tab (change list, filters, add form, before/after metrics and overlay charts; `/#changes/<id>` deep link). Also registers a `changeMarkers` Chart.js plugin that RF Stats uses to draw change times on link charts.
@@ -143,6 +145,11 @@ Infrastructure routes:
 - `GET /api/nodes/infrastructure`, `POST /api/nodes/infrastructure/<name>` `{infrastructure: bool, site?}`: mark towers/high sites. Site defaults to the location code in the name (`w0gq-col-...` -> `COL`); site names come from the `site_names` setting over defaults (COL Collins Tower, MMC Mt Mercy Hospital, EOC Linn County EOC). Stored in SQLite `infrastructure_nodes`, exposed as `is_infrastructure` on node and graph JSON.
 - `GET|POST /api/reports/infrastructure` (`POST {refresh: true}` re-reads settings from the nodes first)
 - `GET /api/channel-map?scope&max_km&center&include_inactive`, `POST /api/channel-map/what-if` `{overrides: {name: {frequency, chanbw}} | "name freq width" lines, scope?, ...}`: channel map data and a non-persistent what-if recompute (response adds `what_if` with baseline counts, resolved/introduced/changed conflicts)
+
+Starting-node health routes:
+
+- `GET /api/collector/health?start&end` (or `hours`, default 24): `summary` (state, last answer, latency/DNS/connect percentiles, outages, lost scans, availability), `outages`, `series`, `hour_profile`, `recent` checks
+- `POST /api/collector/health/check`: measure the path to the starting node now and store it (kind `manual`)
 
 Link Watch routes:
 
