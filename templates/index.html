@@ -399,6 +399,24 @@
                             <div id="infra-review"><p class="log-empty">Not run yet.</p></div>
                         </div>
 
+                        <!-- Settings Drift (#12, drift.js) -->
+                        <div class="diag-section">
+                            <h3>Settings Drift <small class="form-hint">firmware and radio-setting mismatches across links, sites and the mesh</small></h3>
+                            <div class="mh-controls">
+                                <select id="drift-scope" class="form-input" title="Which nodes to compare">
+                                    <option value="all">All nodes in scope</option>
+                                    <option value="infrastructure">Infrastructure</option>
+                                    <option value="infrastructure-connected">Infrastructure + Connected</option>
+                                    <option value="selected">Selected Nodes</option>
+                                    <option value="selected-connected">Selected Nodes + Connected</option>
+                                </select>
+                                <button id="drift-run" class="btn btn-primary">Compare Settings</button>
+                                <span id="drift-status" class="form-hint"></span>
+                            </div>
+                            <div id="drift-report"><p class="log-empty">Not run yet.</p></div>
+                        </div>
+                        <!-- end Settings Drift -->
+
                         <!-- Notifications (#21) -->
                         <div class="diag-section">
                             <details id="notify-section" class="notify-section">
@@ -1043,6 +1061,7 @@
     <script src="{{ url_for('static', filename='js/nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/diagnostics.js') }}"></script>
     <script src="{{ url_for('static', filename='js/infra-review.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/drift.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-watch.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>

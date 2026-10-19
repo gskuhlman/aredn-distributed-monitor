@@ -39,7 +39,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 - [ ] 11. **Power-cut advisor.** Predict receive levels at every neighbor after a
       proposed TX power cut, so nobody drops below the SNR they need. Never cut
       infrastructure power.
-- [ ] 12. **Firmware/settings drift report.** Mismatches in firmware, mode, SSID, width,
+- [x] 12. **Firmware/settings drift report.** Mismatches in firmware, mode, SSID, width,
       distance setting and LQM settings, within a site and across each link.
 - [ ] 13. **Weather correlation.** Overlay NWS rain, temperature and wind on SNR/LQ
       (rain fade, ice, wind-shifted antennas).
