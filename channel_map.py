@@ -272,7 +272,8 @@ def _rf_links(conn, radios):
 
 
 def parse_overrides(raw):
-    """{name: {frequency, chanbw}} from a dict or 'name freq [width]' lines."""
+    """{name: {frequency, chanbw, off}} from a dict or 'name freq [width]'
+    lines; 'name off' turns a radio off."""
     out = {}
     if isinstance(raw, dict):
         items = raw.items()
@@ -281,10 +282,16 @@ def parse_overrides(raw):
         for line in str(raw or '').splitlines():
             parts = line.replace(',', ' ').split()
             if len(parts) >= 2 and not parts[0].startswith('#'):
+                if parts[1].lower() == 'off':
+                    items.append((parts[0], {'off': True}))
+                    continue
                 items.append((parts[0], {'frequency': parts[1],
                                          'chanbw': parts[2] if len(parts) > 2 else None}))
     for name, spec in items:
         spec = spec or {}
+        if spec.get('off'):
+            out[name.strip().lower()] = {'frequency': None, 'chanbw': None, 'off': True}
+            continue
         freq, width = _num(spec.get('frequency')), _num(spec.get('chanbw'))
         if freq is None and width is None:
             continue
@@ -333,6 +340,11 @@ def build_map(scope='all', max_km=None, center=None, overrides=None, include_ina
                 unknown.append(name)
                 continue
             r['original'] = {'frequency': r['frequency'], 'chanbw': r['chanbw'], 'channel': r['channel']}
+            if spec.get('off'):
+                r['rf_status'] = 'off'  # no longer transmitting: drops out of every conflict
+                r['what_if'] = True
+                applied[name] = {'off': True}
+                continue
             if spec['frequency'] is not None:
                 r['frequency'] = spec['frequency']
                 r['channel'] = ia.freq_to_channel(spec['frequency'])

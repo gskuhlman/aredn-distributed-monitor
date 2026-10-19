@@ -963,7 +963,8 @@ def api_channel_map_what_if():
 def api_channel_planner():
     """Ranked channel plans for a site or radio list (nothing is saved).
     Body: {site? | radios?: [...], band?: [low, high], widths?: [..] | {name: [..]},
-    locked?: [...], move_clients?: bool, top?: N, compare?: "name freq width" lines}"""
+    locked?: [...], move_clients?: bool, top?: N, compare?: "name freq width" lines,
+    idle_off?: bool (default true: radios with no RF links are suggested off)}"""
     body = request.get_json(silent=True) or {}
     radios = body.get('radios')
     if isinstance(radios, str):
@@ -988,7 +989,7 @@ def api_channel_planner():
     result = channel_planner.plan(
         site=body.get('site'), radios=radios, band=band, widths=body.get('widths'),
         locked=locked, move_clients=body.get('move_clients', True) is not False,
-        top=top, compare=body.get('compare') or None)
+        top=top, compare=body.get('compare') or None, idle_off=body.get('idle_off', True) is not False)
     if result.get('error'):
         return jsonify(result), 400
     return jsonify(result)

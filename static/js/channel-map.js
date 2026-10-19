@@ -110,31 +110,46 @@ const ChannelMap = {
         }
     },
 
-    createMap() {
-        this.map = L.map('cm-map', { zoomControl: true, preferCanvas: false }).setView([42.0, -91.67], 11);
-        const online = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
+    // 1x1 transparent PNG: a failed online tile shows the offline map below
+    // instead of a broken image.
+    BLANK_TILE: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+
+    onlineLayer() {
+        return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19, zIndex: 10, errorTileUrl: this.BLANK_TILE,
             attribution: '&copy; OpenStreetMap contributors'
         });
-        if (this.baseMap.offline) {
-            // Least detailed layer first, drawn underneath and enlarged past
-            // its zoom; each more detailed layer only draws inside its own
-            // bounds, from the zoom where the layer below runs out.
-            const layers = this.baseMap.layers.map((m, i, all) => {
-                const [west, south, east, north] = m.bounds;
-                return protomapsL.leafletLayer({
-                    url: m.url, flavor: 'light', lang: 'en', maxZoom: 19, maxDataZoom: m.max_zoom,
-                    minZoom: i ? all[i - 1].max_zoom + 1 : 0,
-                    bounds: i ? [[south, west], [north, east]] : undefined,
-                    attribution: i ? '' : '&copy; OpenStreetMap contributors · Protomaps (offline, ' +
-                        `${this.esc(m.updated)})`
-                });
+    },
+
+    /** Offline extracts, least detailed first: drawn underneath and enlarged
+     * past its zoom; each more detailed layer only draws inside its own
+     * bounds, from the zoom where the layer below runs out. */
+    offlineLayers() {
+        return this.baseMap.layers.map((m, i, all) => {
+            const [west, south, east, north] = m.bounds;
+            return protomapsL.leafletLayer({
+                url: m.url, flavor: 'light', lang: 'en', maxZoom: 19, maxDataZoom: m.max_zoom, zIndex: i + 1,
+                minZoom: i ? all[i - 1].max_zoom + 1 : 0,
+                bounds: i ? [[south, west], [north, east]] : undefined,
+                attribution: i ? '' : `Protomaps offline map (${this.esc(m.updated)})`
             });
-            const offline = L.layerGroup(layers).addTo(this.map);
-            L.control.layers({ 'Offline map': offline, 'OpenStreetMap (online)': online },
-                null, { position: 'topright' }).addTo(this.map);
+        });
+    },
+
+    createMap() {
+        this.map = L.map('cm-map', { zoomControl: true, preferCanvas: false }).setView([42.0, -91.67], 11);
+        if (this.baseMap.offline) {
+            // Default: online tiles over the offline map, so the map is
+            // complete with internet and still works without it. Each choice
+            // gets its own layer instances (a layer can't sit in two groups).
+            const both = L.layerGroup([...this.offlineLayers(), this.onlineLayer()]).addTo(this.map);
+            L.control.layers({
+                'Online + offline': both,
+                'Offline only': L.layerGroup(this.offlineLayers()),
+                'Online only': this.onlineLayer()
+            }, null, { position: 'topright' }).addTo(this.map);
         } else {
-            online.addTo(this.map);
+            this.onlineLayer().addTo(this.map);
         }
         this.layers = {
             beams: L.layerGroup().addTo(this.map),

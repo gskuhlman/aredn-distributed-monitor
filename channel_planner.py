@@ -13,9 +13,19 @@ inside the allowed band. A plan's cost adds:
   Channel Map severity (overlap/adjacent/near);
 - same-channel reuse between groups that face each other (back-to-back
   sectors on one mast reuse a channel cheaply);
+- infrastructure at another site aimed at the radio (either way): a backbone
+  dish (narrow beam) aimed at it must not share its channel, and every such
+  pair needs a 20 MHz guard band;
 - busy WiFi / C-V2X / TDWR ranges as a noise risk, per radio;
+- measured noise (signal - SNR from link history, scaled to 20 MHz) of the
+  radio itself or radios on its mast, on the part of the band it covers;
 - an RF link that would break because its far end isn't moving with it;
 - a small cost per radio changed, so a good current channel is kept.
+
+Point-to-point antennas (aimed, beam <= IDLE_MAX_BEAM_DEG) with no RF links
+at all, e.g. a dish whose far end doesn't exist yet, are suggested off
+instead of getting a channel (idle_off) and are left out of everyone else's
+conflicts. Omnis and sectors stay on: they serve whoever shows up.
 
 Search: greedy start plus coordinate descent from the current plan and from
 seeded random starts; distinct local optima are ranked. The planner only
@@ -25,10 +35,14 @@ changes frequency and width; it never suggests TX power changes.
 import math
 import random
 import time
+from datetime import datetime, timedelta
+from statistics import median
 
 import channel_map as cm
+import database
 import infra_audit as ia
 import link_diagnostics as ld
+import link_watch
 
 DEFAULT_BAND = cm.HAM_5GHZ
 STEP_MHZ = 5
@@ -42,6 +56,20 @@ LINK_BREAK_COST = 1000.0    # a group member's RF link to a radio left on anothe
 CHANGE_COST = 2.0           # per radio whose frequency changes
 WIDTH_CHANGE_COST = 3.0     # per radio whose width changes
 NARROWER_COST = 25.0        # per radio per halving of its width (lost capacity)
+
+# Other infrastructure sites: a backbone dish aimed at a radio must not share
+# its channel, and infrastructure aimed either way needs a 20 MHz guard band.
+NARROW_BEAM_DEG = 30        # at or below this an infrastructure antenna counts as a backbone dish
+IDLE_MAX_BEAM_DEG = 45      # only aimed point-to-point antennas are suggested off when idle
+INFRA_GUARD_MHZ = 20
+INFRA_COST = {'same_dish': SEVERITY_COST['critical'], 'same': SEVERITY_COST['warning'],
+              'overlap': SEVERITY_COST['critical'], 'adjacent': SEVERITY_COST['critical'],
+              'near': SEVERITY_COST['warning']}
+
+# Measured noise: dB above NOISE_REF_DBM (per 20 MHz) costs this much per radio.
+NOISE_HOURS = 72
+NOISE_REF_DBM = -100.0
+NOISE_DB_COST = 3.0
 
 # Noise risk per radio for a channel fully inside the range (scaled by the
 # fraction of the channel that overlaps it).
@@ -89,6 +117,13 @@ def _geometry(a, b):
         return None
     colocated = d <= cm.SITE_METERS
     a_sees, b_sees = cm._in_beam(a, b, d), cm._in_beam(b, a, d)
+    # Infrastructure at two different sites with at least one aimed at the
+    # other; 'dish' when the aimed one is a narrow-beam (backbone) antenna.
+    infra_watch = dish_watch = False
+    if not colocated and a.get('is_infrastructure') and b.get('is_infrastructure'):
+        infra_watch = a_sees or b_sees
+        dish_watch = any(sees and x.get('azimuth') is not None and (x['beamwidth'] or 360) <= NARROW_BEAM_DEG
+                         for x, sees in ((a, a_sees), (b, b_sees)))
     back_to_back = False
     if colocated and a.get('azimuth') is not None and b.get('azimuth') is not None \
             and a['beamwidth'] < 360 and b['beamwidth'] < 360:
@@ -96,11 +131,25 @@ def _geometry(a, b):
         back_to_back = ld._angle_diff(a['azimuth'], b['azimuth']) >= max(
             BACK_TO_BACK_DEG, (a['beamwidth'] + b['beamwidth']) / 2 + BEAM_GUARD_DEG)
     return {'d': d, 'colocated': colocated, 'a_sees': a_sees, 'b_sees': b_sees,
-            'back_to_back': back_to_back}
+            'back_to_back': back_to_back, 'infra_watch': infra_watch, 'dish_watch': dish_watch}
+
+
+def _infra_rule(rel, g):
+    """Infrastructure-site rule that applies to a pair, or None."""
+    if not g['infra_watch']:
+        return None
+    if rel == 'same':
+        return 'same_dish' if g['dish_watch'] else 'same'
+    return rel if rel in ('overlap', 'adjacent', 'near') else None
 
 
 def _pair_cost(rel, g):
     """Cost of two radios (different groups) on channels with relation rel."""
+    rule = _infra_rule(rel, g)
+    return max(_base_pair_cost(rel, g), INFRA_COST[rule] if rule else 0.0)
+
+
+def _base_pair_cost(rel, g):
     if rel == 'same':
         if g['colocated']:
             return 15.0 if g['back_to_back'] else 60.0
@@ -127,6 +176,47 @@ def _noise_cost(chan, members):
             cost += rng['cost'] * frac * members
             hits.append((rng['label'], round(frac * 100)))
     return cost, hits
+
+
+def _noise_samples(radios):
+    """Median measured noise per radio over NOISE_HOURS, scaled to 20 MHz, on
+    its current channel. Radios overlapping or adjacent to another radio on
+    their own mast are skipped: their noise is mostly self-inflicted."""
+    start = (datetime.now() - timedelta(hours=NOISE_HOURS)).strftime('%Y-%m-%d %H:%M:%S')
+    with database.get_connection() as conn:
+        buckets = link_watch._noise_buckets(conn, start)
+    live = [r for r in radios if cm._transmitting(r)]
+    out = []
+    for r in live:
+        samples = buckets.get(r['name'])
+        if not samples or len(samples) < 6:
+            continue
+        chan = (r['frequency'], r['chanbw'] or 20.0)
+        if any(o is not r and _relation(chan, (o['frequency'], o['chanbw'] or 20.0)) in ('same', 'overlap', 'adjacent')
+               and (ld._haversine_m(r['lat'], r['lon'], o['lat'], o['lon']) or 1e9) <= cm.SITE_METERS
+               for o in live):
+            continue
+        noise = median(v for _, v, _ in samples)
+        lo, hi = _span(*chan)
+        out.append({'name': r['name'], 'lat': r['lat'], 'lon': r['lon'], 'frequency': chan[0], 'chanbw': chan[1],
+                    'low': lo, 'high': hi, 'noise': round(noise, 1),
+                    'noise20': round(noise - 10 * math.log10(chan[1] / 20.0), 1), 'samples': len(samples)})
+    return out
+
+
+def _measured_noise(g, c):
+    """(cost, worst sample) of channel c from noise measured by the group's
+    radios or radios on their masts, on the part of the band c covers."""
+    lo, hi = _span(*c)
+    worst, ref = 0.0, None
+    for smp in g['noise_refs']:
+        overlap = min(hi, smp['high']) - max(lo, smp['low'])
+        if overlap <= 0:
+            continue
+        excess = max(0.0, smp['noise20'] - NOISE_REF_DBM) * overlap / (hi - lo)
+        if ref is None or excess > worst:
+            worst, ref = excess, dict(smp, overlap_pct=round(overlap / (hi - lo) * 100))
+    return NOISE_DB_COST * worst * len(g['members']), ref
 
 
 def _groups(planned, radios, links, move_clients):
@@ -169,7 +259,7 @@ def _candidates(band, widths):
 
 
 def plan(site=None, radios=None, band=None, widths=None, locked=None, move_clients=True,
-         top=3, compare=None, seed=1):
+         top=3, compare=None, seed=1, idle_off=True):
     """Ranked channel plans for a site code or radio list. widths: None =
     keep each group's width, a list for every group, or {name: [..]}."""
     started = time.time()
@@ -197,6 +287,15 @@ def plan(site=None, radios=None, band=None, widths=None, locked=None, move_clien
             return {'error': 'None of the radios were found with a location'}
 
     links = base['links']
+    # Point-to-point antennas with no RF link at all: suggest turning them
+    # off rather than giving them a channel (they only add noise for others).
+    linked = {n for l in links for n in (l['a'], l['b'])}
+    idle = []
+    if idle_off:
+        idle = sorted(n for n in planned if n not in linked and n not in locked
+                      and cm._transmitting(by_name[n]) and by_name[n].get('azimuth') is not None
+                      and (by_name[n]['beamwidth'] or 360) <= IDLE_MAX_BEAM_DEG)
+        planned -= set(idle)
     groups = []
     for g in _groups(planned, by_name, links, move_clients):
         live = [n for n in g if cm._transmitting(by_name[n])]
@@ -220,12 +319,13 @@ def plan(site=None, radios=None, band=None, widths=None, locked=None, move_clien
                        'locked': bool(locked & set(live)),
                        'mismatch': len({(by_name[n]['frequency'], by_name[n]['chanbw']) for n in live}) > 1,
                        'cands': _candidates(band, allowed)})
-    if not groups:
+    if not groups and not idle:
         return {'error': 'Nothing to plan', 'notes': notes}
 
     planned_names = {n for g in groups for n in g['members']}
-    fixed = [r for r in base['radios'] if r['name'] not in planned_names
+    fixed = [r for r in base['radios'] if r['name'] not in planned_names and r['name'] not in idle
              and cm._transmitting(r) and r['recent'] and (r['band'] or '').startswith('5')]
+    noise = _noise_samples([r for r in base['radios'] if r['name'] not in idle])
     for g in groups:
         if g['locked']:
             g['cands'] = [g['current']]
@@ -248,6 +348,9 @@ def plan(site=None, radios=None, band=None, widths=None, locked=None, move_clien
                 if a in g['members'] and b not in g['members']:
                     peers[b] = a
         g['link_peers'] = peers
+        g['noise_refs'] = [smp for smp in noise if any(
+            (ld._haversine_m(by_name[n]['lat'], by_name[n]['lon'], smp['lat'], smp['lon']) or 1e9) <= cm.SITE_METERS
+            for n in g['members'])]
         g['cost'] = {c: _single_cost(g, c, by_name) for c in set(g['cands']) | {g['current']}}
 
     # Group-pair cost depends only on the spectral relation: precompute it.
@@ -333,10 +436,15 @@ def plan(site=None, radios=None, band=None, widths=None, locked=None, move_clien
                     'mismatch': g['mismatch'], 'candidates': len(g['cands'])} for g in groups],
         'notes': notes, 'searched': len(starts), 'distinct_optima': len(seen),
         'current': _describe(list(current), groups, by_name, fixed, pair_w, current_cost, current=True),
+        'turn_off': [{'name': n, 'is_infrastructure': by_name[n].get('is_infrastructure'),
+                      'frequency': by_name[n]['frequency'], 'chanbw': by_name[n]['chanbw'],
+                      'reason': 'point-to-point antenna with no RF links: nothing to serve until its far '
+                                'end exists, and while on it only adds noise for nearby radios'} for n in idle],
+        'noise_samples': len(noise),
         'plans': [],
     }
     for assign, cost in ranked:
-        p = _describe(list(assign), groups, by_name, fixed, pair_w, cost)
+        p = _describe(list(assign), groups, by_name, fixed, pair_w, cost, idle=idle)
         p['what_if'] = _what_if(p['what_if_text'])
         result['plans'].append(p)
     if compare:
@@ -353,7 +461,7 @@ def _issues(i, c, assign, groups, by_name, fixed):
         rel = _relation(c, (f['frequency'], f['chanbw'] or 20.0))
         cost = _pair_cost(rel, gm)
         if cost:
-            out.append({'a': n, 'b': f['name'], 'relation': rel, 'cost': cost,
+            out.append({'a': n, 'b': f['name'], 'relation': rel, 'cost': cost, 'rule': _infra_rule(rel, gm),
                         'gap_mhz': _gap(c, (f['frequency'], f['chanbw'] or 20.0)),
                         'colocated': gm['colocated'], 'distance_m': round(gm['d'])})
     for j, other in enumerate(groups):
@@ -365,7 +473,8 @@ def _issues(i, c, assign, groups, by_name, fixed):
                 gm = _geometry(by_name[a], by_name[b])
                 cost = _pair_cost(rel, gm) if gm else 0
                 if cost and a < b:
-                    out.append({'a': a, 'b': b, 'relation': rel, 'cost': cost, 'gap_mhz': _gap(c, assign[j]),
+                    out.append({'a': a, 'b': b, 'relation': rel, 'cost': cost,
+                                'rule': _infra_rule(rel, gm), 'gap_mhz': _gap(c, assign[j]),
                                 'colocated': gm['colocated'], 'distance_m': round(gm['d'])})
     for peer, member in g['link_peers'].items():
         p = by_name.get(peer)
@@ -421,6 +530,19 @@ def _reasons(i, c, assign, groups, by_name, fixed, issues):
             reasons.append(f'only {gmin:.0f} MHz guard band to {who} on the mast')
         else:
             reasons.append(f'overlaps {who} on the mast by {-gmin:.0f} MHz')
+    infra = [x for x in issues if x.get('rule')]
+    if not infra and any(gm['infra_watch'] for _, _, gm in g['fixed_geo']):
+        reasons.append(f'{INFRA_GUARD_MHZ} MHz or more clear of infrastructure at other sites aimed this way')
+    for x in infra:
+        if x['rule'] == 'same_dish':
+            reasons.append(f"same channel as backbone dish {x['b']} at another site, aimed at {x['a']}")
+        else:
+            reasons.append(f"less than {INFRA_GUARD_MHZ} MHz from infrastructure radio {x['b']} at another site "
+                           f"({x['relation']}, {x['distance_m'] / 1000:.1f} km)")
+    _, ref = _measured_noise(g, c)
+    if ref:
+        reasons.append(f"measured noise {ref['noise20']:g} dBm (per 20 MHz) at {ref['name']} on "
+                       f"{ref['frequency']:g}/{ref['chanbw']:g}, covering {ref['overlap_pct']}% of this channel")
     hits = _noise_cost(c, 1)[1]
     if not hits:
         reasons.append('outside busy WiFi ranges')
@@ -433,7 +555,7 @@ def _reasons(i, c, assign, groups, by_name, fixed, issues):
     return reasons
 
 
-def _describe(assign, groups, by_name, fixed, pair_w, cost, current=False):
+def _describe(assign, groups, by_name, fixed, pair_w, cost, current=False, idle=()):
     radios, lines, counts = [], [], {'critical': 0, 'warning': 0, 'info': 0, 'same_channel': 0, 'link_break': 0}
     seen_issue = set()
     group_out = []
@@ -447,6 +569,9 @@ def _describe(assign, groups, by_name, fixed, pair_w, cost, current=False):
             seen_issue.add(key)
             if iss['relation'] == 'same':
                 counts['same_channel'] += 1
+                if iss.get('rule'):
+                    iss['severity'] = next(s for s, v in SEVERITY_COST.items() if v == iss['cost'])
+                    counts[iss['severity']] += 1
             elif iss['relation'] == 'link_break':
                 counts['link_break'] += 1
             else:
@@ -473,6 +598,14 @@ def _describe(assign, groups, by_name, fixed, pair_w, cost, current=False):
                           'frequency': c[0], 'chanbw': c[1], 'channel': ia.freq_to_channel(c[0]),
                           'reasons': _reasons(i, c, assign, groups, by_name, fixed, issues),
                           'issues': sorted(issues, key=lambda x: -x['cost'])})
+    for n in idle:
+        r = by_name[n]
+        radios.append({'name': n, 'group': None, 'is_infrastructure': r.get('is_infrastructure'), 'off': True,
+                       'old': {'frequency': r['frequency'], 'chanbw': r['chanbw'],
+                               'channel': ia.freq_to_channel(r['frequency']), 'low': r['low'], 'high': r['high']},
+                       'new': {'frequency': None, 'chanbw': None, 'channel': None, 'off': True},
+                       'changed': True})
+        lines.append(f'{n} off')
     return {'cost': round(cost, 1), 'counts': counts, 'radios': radios, 'groups': group_out,
             'changes': sum(1 for r in radios if r['changed']),
             'what_if_text': '\n'.join(lines) if not current else ''}
@@ -524,6 +657,7 @@ def _single_cost(g, c, by_name):
         if p and p.get('frequency') and (p['frequency'], p['chanbw'] or 20.0) != c:
             cost += LINK_BREAK_COST
     cost += _noise_cost(c, len(g['members']))[0]
+    cost += _measured_noise(g, c)[0]
     for n in g['members']:
         r = by_name[n]
         cost += CHANGE_COST if r['frequency'] != c[0] else 0

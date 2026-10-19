@@ -64,6 +64,7 @@ const ChannelPlanner = {
             widths: document.getElementById('cp-keep-width').checked ? null : widths,
             locked: document.getElementById('cp-locked').value,
             move_clients: document.getElementById('cp-move-clients').checked,
+            idle_off: document.getElementById('cp-idle-off')?.checked !== false,
             top: Number(document.getElementById('cp-top').value) || 3
         };
         if (bySite) body.site = document.getElementById('cp-site').value;
@@ -120,6 +121,9 @@ const ChannelPlanner = {
                 Radios in a group share one channel${d.move_clients ? ' (sectors with their RF-linked clients, PtP ends together)' : ''}.
                 Lower score is better.</p>
             ${notes ? `<ul class="diag-evidence">${notes}</ul>` : ''}
+            ${d.turn_off?.length ? `<p class="node-warning">Suggested off (every plan below includes this):
+                ${d.turn_off.map(t => `<strong>${this.esc(t.name)}</strong> (now ${t.frequency}/${t.chanbw || '20?'})`).join(', ')}
+                · ${this.esc(d.turn_off[0].reason)}.</p>` : ''}
             ${this.renderPlan(d.current, 'Current channels', null)}
             ${d.plans.map((p, i) => this.renderPlan(p, `Plan ${i + 1}`, String(i))).join('')}
             ${d.compare ? this.renderPlan(d.compare, 'Your what-if plan', 'compare') : ''}`;
@@ -160,6 +164,10 @@ const ChannelPlanner = {
         const rows = p.radios.map(r => {
             const o = r.old, n = r.new;
             const oldText = o.frequency != null ? `${o.frequency}/${o.chanbw || '20?'} <small>ch ${o.channel ?? '?'}</small>` : '-';
+            if (r.off) {
+                return `<tr class="cp-changed"><td>${this.esc(r.name)}${r.is_infrastructure ? ' <small>(infra)</small>' : ''}</td>
+                    <td>${oldText}</td><td>→</td><td><strong>off</strong></td><td><small>no RF links</small></td></tr>`;
+            }
             return `<tr class="${r.changed ? 'cp-changed' : ''}">
                 <td>${this.esc(r.name)}${r.is_infrastructure ? ' <small>(infra)</small>' : ''}</td>
                 <td>${oldText}</td>
@@ -175,7 +183,9 @@ const ChannelPlanner = {
     renderGroups(p) {
         return `<details class="diag-details"><summary>Why these channels</summary>${p.groups.map(g => {
             const issues = g.issues.slice(0, 6).map(i => {
-                const label = i.relation === 'link_break' ? 'link breaks'
+                const label = i.rule === 'same_dish' ? 'same channel as a backbone dish aimed here'
+                    : i.rule ? 'under 20 MHz from infrastructure at another site'
+                    : i.relation === 'link_break' ? 'link breaks'
                     : i.relation === 'same' ? 'shares channel' : (i.severity || i.relation);
                 const where = i.colocated ? 'same mast' : i.distance_m != null ? `${(i.distance_m / 1000).toFixed(1)} km` : '';
                 const gap = i.gap_mhz == null || i.relation === 'same' ? ''
@@ -261,7 +271,7 @@ const ChannelPlanner = {
         button.disabled = true;
         try {
             const note = `Channel plan${this.result.site ? ' for ' + this.result.site : ''}: ` +
-                changed.map(r => `${r.name} ${r.new.frequency}/${r.new.chanbw}`).join(', ');
+                changed.map(r => r.off ? `${r.name} off` : `${r.name} ${r.new.frequency}/${r.new.chanbw}`).join(', ');
             const resp = await fetch('/api/maintenance', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ scope: 'nodes', nodes: changed.map(r => r.name),
@@ -276,7 +286,7 @@ const ChannelPlanner = {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ node_name: r.name, category: 'channel',
                         description: `Channel plan: ${o.frequency ?? '?'}/${o.chanbw ?? '?'} MHz (ch ${o.channel ?? '?'}) → ` +
-                            `${r.new.frequency}/${r.new.chanbw} MHz (ch ${r.new.channel})` })
+                            (r.off ? 'radio off (no RF links)' : `${r.new.frequency}/${r.new.chanbw} MHz (ch ${r.new.channel})`) })
                 });
                 if (res.ok) logged++;
             }
