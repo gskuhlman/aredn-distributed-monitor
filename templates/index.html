@@ -399,6 +399,23 @@
                             <div id="infra-review"><p class="log-empty">Not run yet.</p></div>
                         </div>
 
+                        <!-- Cleanup (#24, cleanup.js) -->
+                        <div class="diag-section">
+                            <h3>Cleanup <small class="form-hint">fake, placeholder, stale and known-unreachable nodes; exclude them from scanning or delete their records</small></h3>
+                            <div class="mh-controls">
+                                <label class="form-hint" for="cleanup-stale-days">Stale after</label>
+                                <input type="number" id="cleanup-stale-days" class="form-input cleanup-days" value="30" min="1" max="365"> <span class="form-hint">days</span>
+                                <button id="cleanup-run" class="btn btn-primary">Find Candidates</button>
+                                <button id="cleanup-exclude" class="btn btn-secondary" disabled title="Never poll the selected nodes (scan boundary: exclude)">Exclude</button>
+                                <button id="cleanup-unexclude" class="btn btn-secondary" disabled title="Poll the selected nodes again">Un-exclude</button>
+                                <button id="cleanup-delete" class="btn btn-danger" disabled title="Delete the selected node records and their history">Delete</button>
+                                <span id="cleanup-count" class="form-hint"></span>
+                                <span id="cleanup-status" class="form-hint"></span>
+                            </div>
+                            <div id="cleanup-list"><p class="log-empty">Not run yet. Infrastructure, Permanent/Event-tagged, selected and starting nodes are never offered.</p></div>
+                        </div>
+                        <!-- end Cleanup -->
+
                         <!-- Notifications (#21) -->
                         <div class="diag-section">
                             <details id="notify-section" class="notify-section">
@@ -1045,6 +1062,7 @@
     <script src="{{ url_for('static', filename='js/infra-review.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-watch.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/cleanup.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reports.js') }}"></script>

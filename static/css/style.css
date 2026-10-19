@@ -2163,3 +2163,13 @@ tr.notify-log-suppressed td { color: #95a5a6; }
 .lw-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
 .lw-chart { position: relative; height: 240px; }
 /* --- end Link Watch --- */
+
+/* ---- Cleanup (Diagnostics tab) ---- */
+.cleanup-days { width: 70px; }
+.cleanup-table td:first-child, .cleanup-table th:first-child { width: 28px; text-align: center; }
+.cleanup-notes { font-size: 0.82rem; }
+.cleanup-act-delete { background: #c0392b; }
+.cleanup-act-exclude { background: #e67e22; }
+.cleanup-act-unexclude { background: #3498db; }
+.cleanup-act-review { background: #d4ac0d; }
+.cleanup-act-keep { background: #27ae60; }

@@ -4,6 +4,7 @@ Handles node discovery and polling
 """
 
 import json
+import re
 import requests
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -143,7 +144,7 @@ def process_node_data(data, refresh_services=True):
         return None, []
 
     node_name = data.get('node', '').lower()
-    if not node_name:
+    if not is_valid_node_name(node_name):
         return None, []
 
     events = []
@@ -611,7 +612,28 @@ def gateway_reachable(gateway_url):
     return gateway.probe(url_host(gateway_url))
 
 
-def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_url=None):
+def failed_poll_name(url, target_hint=None):
+    """Node name to record a failed poll under, or None if it can't be named.
+
+    The neighbor-reported hostname wins. Otherwise a bare-IP URL is looked up
+    by IP, never sliced: the URL slug of 10.208.237.248 is "10", which once
+    piled up as a fake node while the starting node was down."""
+    if target_hint:
+        return target_hint.lower()
+    host = url_host(url)
+    if re.fullmatch(r'[\d.]+', host or ''):
+        return database.get_node_name_by_ip(host)
+    name = observations.target_from_url(url)
+    return name if is_valid_node_name(name) else None
+
+
+def is_valid_node_name(name):
+    """False for empty names and bare numbers / IP fragments ("10", "10.208")."""
+    return bool(name) and not re.fullmatch(r'[\d.]+', name)
+
+
+def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_url=None,
+                     start_name=None):
     """
     Discover the network starting from a node.
     Uses BFS traversal to find all connected nodes.
@@ -628,6 +650,8 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
         start_url: Starting node URL
         max_depth: Maximum hops from starting node (default from settings/config)
         gateway_url: Node whose reachability gates the scan (default: start_url)
+        start_name: Known node name of start_url, so a failed poll of a bare
+            IP is recorded under that name
     """
     if start_url is None:
         # Check for override in settings
@@ -651,7 +675,7 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
     # Queue contains tuples of (url, depth, target_hint). target_hint is the
     # neighbor-reported LQM hostname for a discovered node, so a FAILED poll can
     # be recorded under the real node name instead of the URL/IP-derived slug.
-    queue = [(start_url, 0, None)]
+    queue = [(start_url, 0, start_name)]
     nodes_found = 0
     links_found = 0
     errors = []
@@ -690,13 +714,11 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
             error_msg = f"Failed to fetch: {url}"
             errors.append(error_msg)
             # Prefer the neighbor-reported hostname so failures are keyed to the
-            # real node name; fall back to the URL slug for the seed node. Note
-            # target_from_url yields a useless "10" for bare IP URLs, which is
-            # exactly the case the hint fixes.
-            failed_target = (target_hint or '').lower() or observations.target_from_url(url)
+            # real node name; a bare IP is looked up, never sliced into "10".
+            failed_target = failed_poll_name(url, target_hint)
             observation_docs.append(
                 observations.build_failed_node_observation(
-                    target=failed_target,
+                    target=failed_target or url_host(url),
                     collector_id=config.COLLECTOR_ID,
                     collector_site=config.COLLECTOR_SITE,
                     observed_at=observed_at,
@@ -705,7 +727,7 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
             )
             # Record an unreachable health sample so the scanner-to-node downtime
             # is visible in the time series under the real node name.
-            if config.NODE_HEALTH_ENABLED:
+            if config.NODE_HEALTH_ENABLED and failed_target:
                 reporter, via_type = poll_via.get(url.lower(), (None, None))
                 database.update_node_health(
                     failed_target, reachable=False, response_ms=response_ms,
@@ -1252,7 +1274,7 @@ def finish_scan_result(result, scan_started):
     return result
 
 
-def run_targeted_scan(target, max_depth=0):
+def run_targeted_scan(target, max_depth=0, target_name=None):
     """
     Scan one requested node without running global stale-node/link cleanup.
 
@@ -1267,7 +1289,7 @@ def run_targeted_scan(target, max_depth=0):
     # the mesh at all, the target failing says nothing about the target.
     result = discover_network(
         start_url=start_url, max_depth=max_depth, record_depth=False,
-        gateway_url=get_starting_node_url()
+        gateway_url=get_starting_node_url(), start_name=target_name
     )
 
     all_events = gateway_transition_events(result) + result.get('events', [])
