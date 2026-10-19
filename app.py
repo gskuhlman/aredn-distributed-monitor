@@ -31,6 +31,7 @@ import rf_stats
 import gateway
 import reports
 import unreachable
+import cleanup
 import link_diagnostics
 import infra_audit
 import drift
@@ -138,7 +139,7 @@ def run_configured_scan():
             result['errors'].append(f'Selected node "{node_name}" has no pollable IP address')
             continue
 
-        node_result = scanner.run_targeted_scan(node['ip'], max_depth=0)
+        node_result = scanner.run_targeted_scan(node['ip'], max_depth=0, target_name=node_name)
         result['events'].extend(node_result.get('events', []))
         if node_result.get('aborted'):
             # Lost the starting node: stop, the remaining nodes can't be judged.
@@ -476,7 +477,7 @@ def api_scan_node(name):
         return jsonify({'error': f'Node "{node_name}" has no IP address'}), 400
 
     try:
-        result = scanner.run_targeted_scan(node['ip'], max_depth=0)
+        result = scanner.run_targeted_scan(node['ip'], max_depth=0, target_name=node_name)
         if result.get('aborted'):
             return jsonify({'error': result.get('starting_node_error'), 'result': result}), 503
         network_data = database.get_network_graph_data()
@@ -1135,6 +1136,54 @@ def api_set_scan_boundary(name):
         'mode': result,
         'boundaries': database.get_scan_boundaries()
     })
+
+
+# ============ Cleanup (stale and junk nodes) ============
+
+@app.route('/api/cleanup/candidates')
+def api_cleanup_candidates():
+    """Junk, stale and known-unreachable nodes, grouped by reason."""
+    stale_days = max(1, request.args.get('stale_days', cleanup.STALE_DAYS, type=int))
+    hours = min(max(1, request.args.get('hours', cleanup.WINDOW_HOURS, type=int)), 24 * 31)
+    return jsonify(cleanup.candidates(stale_days=stale_days, hours=hours))
+
+
+def _cleanup_names():
+    data = request.get_json(silent=True) or {}
+    names = data.get('names')
+    if not isinstance(names, list) or not names:
+        return None, bool(data.get('force'))
+    return names, bool(data.get('force'))
+
+
+@app.route('/api/cleanup/exclude', methods=['POST'])
+def api_cleanup_exclude():
+    """Exclude nodes from scanning: {names: [...], force?}."""
+    names, force = _cleanup_names()
+    if names is None:
+        return jsonify({'error': 'names must be a non-empty list'}), 400
+    return jsonify({'success': True, **cleanup.exclude(names, force=force)})
+
+
+@app.route('/api/cleanup/unexclude', methods=['POST'])
+def api_cleanup_unexclude():
+    """Remove the exclude scan boundary from nodes: {names: [...]}."""
+    names, _ = _cleanup_names()
+    if names is None:
+        return jsonify({'error': 'names must be a non-empty list'}), 400
+    return jsonify({'success': True, **cleanup.unexclude(names)})
+
+
+@app.route('/api/cleanup/delete', methods=['POST'])
+def api_cleanup_delete():
+    """Delete node records and their history: {names: [...], force?}."""
+    names, force = _cleanup_names()
+    if names is None:
+        return jsonify({'error': 'names must be a non-empty list'}), 400
+    result = cleanup.delete(names, force=force)
+    if result['deleted']:
+        socketio.emit('network_update', database.get_network_graph_data())
+    return jsonify({'success': True, **result})
 
 
 @app.route('/api/reports/link-state/<source>/<target>')

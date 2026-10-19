@@ -69,7 +69,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 - [ ] 22. **Maintenance windows.** Planned work is excluded from reports and alarms.
 - [ ] 23. **Notes on nodes and links.** For example "tilted 2° on 10/20" or "call
       KF9MT first", shown in diagnoses and on charts.
-- [ ] 24. **Cleanup of stale and junk entries.** Exclude or delete nodes that never
+- [x] 24. **Cleanup of stale and junk entries.** Exclude or delete nodes that never
       answer (k9lrd-home, the fake "10" node, `mac-…` placeholders). Exclude the
       kc0wkp-ar750 legacy TUN clients from scanning.
 - [ ] 25. **Weekly report.** Saved or emailed summary of the worst links, new problems,
