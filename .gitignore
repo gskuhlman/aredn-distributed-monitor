@@ -42,3 +42,7 @@ Thumbs.db
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Offline map extract and the pmtiles CLI (fetch_offline_map.py)
+maps/
+tools/pmtiles*

@@ -80,6 +80,12 @@ COUCH_DB = os.environ.get("COUCH_DB", "aredn_monitor")
 LOCAL_CONFIG_DB = os.environ.get("LOCAL_CONFIG_DB", "aredn_local_config")
 STORE_RAW_SYSINFO = env_bool("STORE_RAW_SYSINFO", False)
 
+# Offline base map for the Channel Map tab: a Protomaps .pmtiles extract
+# (made by fetch_offline_map.py). Used instead of online OpenStreetMap tiles
+# when the file exists.
+OFFLINE_MAP_DIR = os.environ.get("OFFLINE_MAP_DIR", "maps")
+OFFLINE_MAP_FILE = os.environ.get("OFFLINE_MAP_FILE", "area.pmtiles")
+
 # ============ RF Statistics Configuration ============
 
 # Enable/disable RF stats collection

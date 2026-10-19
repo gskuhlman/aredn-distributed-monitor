@@ -4,12 +4,15 @@
  * channel conflicts as dashed lines. All conflict rules live in
  * channel_map.py; the what-if plan is recomputed server-side and never saved.
  *
- * Self-contained: hooks its own tab button and lazy-loads Leaflet from cdnjs
- * the first time the tab opens (the rest of the app works without it).
+ * Self-contained: hooks its own tab button and lazy-loads the bundled Leaflet
+ * the first time the tab opens (the rest of the app works without it). The
+ * base map is the local Protomaps extract when /api/map/base finds one
+ * (fully offline), otherwise online OpenStreetMap tiles.
  */
 const ChannelMap = {
-    LEAFLET_JS: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
-    LEAFLET_CSS: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
+    LEAFLET_JS: '/static/vendor/leaflet-1.9.4/leaflet.js',
+    LEAFLET_CSS: '/static/vendor/leaflet-1.9.4/leaflet.css',
+    PROTOMAPS_JS: '/static/vendor/protomaps-leaflet-5.1.0.min.js',
     HAM_LOW: 5650,
     HAM_HIGH: 5925,
     SEVERITY_RANK: { critical: 0, warning: 1, info: 2 },
@@ -31,6 +34,7 @@ const ChannelMap = {
     selected: null,
     fitted: false,
     leafletPromise: null,
+    baseMap: null,
 
     hookTab() {
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -54,9 +58,10 @@ const ChannelMap = {
         }
         try {
             await this.loadLeaflet();
+            if (!this.baseMap) await this.loadBaseMap();
         } catch (error) {
             document.getElementById('cm-map').innerHTML =
-                '<p class="log-empty">The map library (Leaflet) could not be loaded. It comes from cdnjs, so this PC needs internet access for the map.</p>';
+                '<p class="log-empty">The map library (Leaflet) could not be loaded.</p>';
             return;
         }
         if (!this.map) this.createMap();
@@ -81,12 +86,48 @@ const ChannelMap = {
         return this.leafletPromise;
     },
 
+    loadScript(src) {
+        return new Promise((resolve, reject) => {
+            const js = document.createElement('script');
+            js.src = src;
+            js.onload = () => resolve();
+            js.onerror = () => reject(new Error(`${src} failed to load`));
+            document.head.appendChild(js);
+        });
+    },
+
+    /** Use the local .pmtiles extract when the server has one. */
+    async loadBaseMap() {
+        this.baseMap = { offline: false };
+        try {
+            const info = await (await fetch('/api/map/base')).json();
+            if (info.offline) {
+                if (!window.protomapsL) await this.loadScript(this.PROTOMAPS_JS);
+                this.baseMap = info;
+            }
+        } catch (error) {
+            console.warn('Offline map unavailable, using online tiles:', error);
+        }
+    },
+
     createMap() {
         this.map = L.map('cm-map', { zoomControl: true, preferCanvas: false }).setView([42.0, -91.67], 11);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        const online = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(this.map);
+        });
+        if (this.baseMap.offline) {
+            const offline = protomapsL.leafletLayer({
+                url: this.baseMap.url, flavor: 'light', lang: 'en', maxZoom: 19,
+                attribution: '&copy; OpenStreetMap contributors · Protomaps (offline, ' +
+                    `${this.esc(this.baseMap.updated)})`
+            });
+            offline.addTo(this.map);
+            L.control.layers({ 'Offline map': offline, 'OpenStreetMap (online)': online },
+                null, { position: 'topright' }).addTo(this.map);
+        } else {
+            online.addTo(this.map);
+        }
         this.layers = {
             beams: L.layerGroup().addTo(this.map),
             links: L.layerGroup().addTo(this.map),

@@ -15,7 +15,7 @@ os.environ.setdefault('EVENTLET_NO_GREENDNS', 'yes')
 import eventlet
 eventlet.monkey_patch()
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_from_directory, abort
 from flask_socketio import SocketIO, emit
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
@@ -868,6 +868,33 @@ def api_infrastructure_review():
 
 
 # ---- Channel Map (TODO #3) ----
+def _offline_map_path():
+    path = os.path.join(config.OFFLINE_MAP_DIR, config.OFFLINE_MAP_FILE)
+    return path if os.path.isfile(path) else None
+
+
+@app.route('/api/map/base')
+def api_map_base():
+    """Which base map the Channel Map should use: the local .pmtiles extract
+    when present, otherwise online OpenStreetMap tiles."""
+    path = _offline_map_path()
+    if not path:
+        return jsonify({'offline': False})
+    stat = os.stat(path)
+    return jsonify({'offline': True, 'url': f'/maps/{config.OFFLINE_MAP_FILE}',
+                    'size_bytes': stat.st_size,
+                    'updated': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')})
+
+
+@app.route('/maps/<path:filename>')
+def offline_map_file(filename):
+    """Serve the offline map with HTTP range support (the PMTiles reader
+    fetches byte ranges, not the whole file)."""
+    if not filename.endswith('.pmtiles'):
+        abort(404)
+    return send_from_directory(os.path.abspath(config.OFFLINE_MAP_DIR), filename, conditional=True)
+
+
 @app.route('/api/channel-map')
 def api_channel_map():
     """Located radios, channel conflicts and RF links for the Channel Map tab."""
