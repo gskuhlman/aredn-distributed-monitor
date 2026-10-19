@@ -237,6 +237,9 @@ const ReportsModule = {
             this.data = data;
             this.render();
             this.setStatus(`Loaded ${new Date().toLocaleTimeString()}`);
+            if (typeof CollectorHealth !== 'undefined') {
+                CollectorHealth.load(document.getElementById('rpt-start').value, document.getElementById('rpt-end').value);
+            }
             if (this.detail) this.reloadDetail();
         } catch (error) {
             if (seq === this.requestSeq) this.setStatus('Failed to load');

@@ -605,6 +605,24 @@
                             <div id="rpt-detail-extra"></div>
                         </div>
 
+                        <!-- Starting-node health (collector_health.py) -->
+                        <div class="diag-section">
+                            <h3>Starting Node <small class="form-hint">this PC's path onto the mesh: separates problems here or at the starting node from problems out on the mesh</small></h3>
+                            <div class="ch-actions">
+                                <button id="ch-check" class="btn btn-secondary btn-small">Check now</button>
+                                <span id="ch-check-result" class="form-hint"></span>
+                            </div>
+                            <div id="ch-status"></div>
+                            <div id="ch-timeline" class="ch-timeline"></div>
+                            <div class="rf-charts-grid ch-charts">
+                                <div class="chart-card"><h4>Starting node response time</h4><canvas id="ch-latency-chart"></canvas></div>
+                                <div class="chart-card"><h4>Scanner polls and failed starting-node checks</h4><canvas id="ch-polls-chart"></canvas></div>
+                                <div class="chart-card"><h4>Outage minutes by hour of day</h4><canvas id="ch-hours-chart"></canvas></div>
+                            </div>
+                            <h4 class="rpt-subhead">Outages</h4>
+                            <div class="table-scroll-wrapper rpt-table-wrap" id="ch-outages"></div>
+                        </div>
+
                         <!-- Unreachable causes (unreachable.py) -->
                         <div class="diag-section">
                             <h3>Unreachable Nodes <small class="form-hint" id="rpt-unreach-hint">why polls failed; only "Down" and "Intermittent" count as unreachable</small></h3>
@@ -1084,6 +1102,7 @@
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reports.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/collector-health.js') }}"></script>
     <script src="{{ url_for('static', filename='js/changes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/channel-map.js') }}"></script>
 </body>

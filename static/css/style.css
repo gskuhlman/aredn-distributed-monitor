@@ -1924,6 +1924,11 @@ body {
     .rpt-search { min-width: 0; flex: 1 1 100%; }
     .rf-charts-grid { grid-template-columns: 1fr; }
 }
+/* Starting node health (collector-health.js) */
+.ch-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.ch-tiles { margin-top: 8px; }
+.ch-timeline { margin: 12px 0 4px; background: white; border-radius: 6px; padding: 8px 10px 2px; }
+.ch-charts { margin-top: 10px; }
 /* ============ End Reports View ============ */
 
 /* ============ RF link pair diagnosis ============ */
