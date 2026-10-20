@@ -1496,6 +1496,10 @@ EVENT_ONE_WAY_LINK_CLEARED = 'one_way_link_cleared'
 EVENT_MAINTENANCE_SCHEDULED = 'maintenance_scheduled'
 EVENT_MAINTENANCE_STARTED = 'maintenance_started'
 EVENT_MAINTENANCE_ENDED = 'maintenance_ended'
+# Route Watch (route_watch.py) transitions
+EVENT_ROUTE_CHANGED = 'route_changed'
+EVENT_ROUTE_DETOUR = 'route_detour'
+EVENT_ROUTE_RESTORED = 'route_restored'
 
 
 def trim_connectivity_log(days=None):

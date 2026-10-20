@@ -409,6 +409,23 @@
                         </div>
                         <!-- end Site Matrix -->
 
+                        <!-- Route Watch (#9, route-watch.js) -->
+                        <div class="diag-section">
+                            <h3>Route Watch <small class="form-hint">periodic traceroutes along key paths: route changes and detours off the backbone</small></h3>
+                            <div class="mh-controls">
+                                <button id="rw-refresh" class="btn btn-secondary">Refresh</button>
+                                <span id="rw-status" class="form-hint"></span>
+                            </div>
+                            <div id="rw-paths"><p class="log-empty">Not loaded yet.</p></div>
+                            <div class="mh-controls rw-add">
+                                <input type="text" id="rw-source" class="form-input" placeholder="source node (empty = starting node)">
+                                <input type="text" id="rw-target" class="form-input" placeholder="target node">
+                                <input type="text" id="rw-label" class="form-input" placeholder="label (optional)">
+                                <button id="rw-add" class="btn btn-secondary">Add path</button>
+                            </div>
+                        </div>
+                        <!-- end Route Watch -->
+
                         <div class="diag-section">
                             <h3>Infrastructure Review <small class="form-hint">radio settings of every infrastructure node: channel plans, beams, pointing, pairing, firmware</small></h3>
                             <div class="mh-controls">
@@ -1224,6 +1241,7 @@
     <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
     <script src="{{ url_for('static', filename='js/maintenance.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-watch.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/route-watch.js') }}"></script>
     <script src="{{ url_for('static', filename='js/site-matrix.js') }}"></script>
     <script src="{{ url_for('static', filename='js/cleanup.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>

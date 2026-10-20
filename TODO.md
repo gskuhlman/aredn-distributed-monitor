@@ -32,7 +32,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 - [x] 8. **One-way link alarm.** One end's LQ high and the other low, routing cost
       infinite, or one end knows the other only by MAC. Flag it continuously instead of
       only when someone runs a diagnosis.
-- [ ] 9. **Route-change log.** Periodic traceroute along key paths (starting node to
+- [x] 9. **Route-change log.** Periodic traceroute along key paths (starting node to
       each site, MMC↔COL↔EOC); record hop count and path; alert on detours.
 - [x] 10. **Starting-node health page.** Outages, latency, DNS resolution time and lost
       scans, to separate problems with this PC or its uplink from problems on the mesh.

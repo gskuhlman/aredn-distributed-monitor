@@ -44,6 +44,7 @@ import notes
 import channel_map
 import channel_planner
 import link_watch
+import route_watch
 import site_matrix
 import collector_health
 import link_health
@@ -1061,6 +1062,73 @@ def api_one_way_report():
 # --- end Link Watch routes ---
 
 
+# --- Route Watch routes (route_watch.py) ---
+def _hours_arg(default=24, limit=24 * 31):
+    try:
+        return max(1, min(limit, int(request.args.get('hours', default))))
+    except (TypeError, ValueError):
+        return default
+
+
+@app.route('/api/routes', methods=['GET'])
+def api_routes():
+    """Watched paths with status, last route, baseline and hop-count series."""
+    return jsonify(route_watch.list_report(hours=_hours_arg()))
+
+
+@app.route('/api/routes', methods=['POST'])
+def api_routes_add():
+    """Add a path {source? (empty = starting node), target, label?}."""
+    body = request.get_json(silent=True) or {}
+    try:
+        path_id = route_watch.add_path(body.get('source'), body.get('target'), body.get('label'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({'success': True, 'id': path_id})
+
+
+@app.route('/api/routes/<int:path_id>', methods=['DELETE'])
+def api_routes_delete(path_id):
+    """Delete a manual path (an automatic one is disabled instead)."""
+    if not route_watch.delete_path(path_id):
+        return jsonify({'error': 'Path not found'}), 404
+    return jsonify({'success': True})
+
+
+@app.route('/api/routes/<int:path_id>/history')
+def api_routes_history(path_id):
+    result = route_watch.path_history(path_id, hours=_hours_arg())
+    if result is None:
+        return jsonify({'error': 'Path not found'}), 404
+    return jsonify(result)
+
+
+@app.route('/api/routes/<int:path_id>/run', methods=['POST'])
+def api_routes_run(path_id):
+    """Traceroute one path now (gated by the starting node)."""
+    result = route_watch.run_one(path_id)
+    if result is None:
+        return jsonify({'error': 'Path not found'}), 404
+    for event in result['events']:
+        socketio.emit('new_event', event)
+    if result.get('aborted'):
+        return jsonify({'error': result['aborted'], 'gateway_unreachable': result['aborted'] != 'busy'}), 503
+    return jsonify(result)
+
+
+def run_route_watch_task():
+    """Scheduled Route Watch run; never blocks scans (own APScheduler job)."""
+    try:
+        result = route_watch.run_paths()
+        for event in result['events']:
+            socketio.emit('new_event', event)
+        if result.get('aborted'):
+            logger.info("Route watch skipped: %s", result['aborted'])
+    except Exception as exc:
+        logger.error("Route watch error: %s", exc)
+# --- end Route Watch routes ---
+
+
 @app.route('/api/reports/site-matrix', methods=['GET', 'POST'])
 def api_site_matrix():
     """Site neighbor matrix: ?site=COL or ?radios=a,b,c, &hours=24. POST
@@ -2019,6 +2087,16 @@ def start_scheduler():
         )
 
         logger.info(f"RF Stats enabled: ping every {config.PING_INTERVAL}s, iperf every {config.IPERF_INTERVAL}s")
+
+    if config.ROUTE_WATCH_ENABLED:
+        scheduler.add_job(
+            run_route_watch_task,
+            'interval',
+            minutes=config.ROUTE_WATCH_INTERVAL_MINUTES,
+            id='route_watch',
+            replace_existing=True,
+            next_run_time=datetime.now() + timedelta(minutes=2)
+        )
 
     scheduler.start()
     logger.info("Scheduler started")
