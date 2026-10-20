@@ -2321,3 +2321,5 @@ tr.pa-marginal td { background: #fef5e7; }
 .rw-spark-fail { fill: #c0392b; }
 .rw-add { margin-top: 8px; }
 .rw-history-row td { background: #f8f9f9; }
+/* ---- Weather (#13, weather.js) ---- */
+.wx-inline { font-size: 0.55em; font-weight: normal; margin-left: 12px; vertical-align: middle; }

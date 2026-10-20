@@ -625,6 +625,7 @@ const NodePage = {
         this.charts.throughput.data.datasets[1].data = throughputRx;
         this.charts.throughput.update('none');
         if (typeof Notes !== 'undefined') Notes.markCharts(Object.values(this.charts), this.nodeName);
+        if (typeof Weather !== 'undefined') Weather.markCharts([this.charts.quality, this.charts.snr]);
     },
 
     renderLog() {

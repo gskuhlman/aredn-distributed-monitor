@@ -73,7 +73,8 @@
             </section>
 
             <section class="node-page-section">
-                <h2>Recent Link Metrics</h2>
+                <h2>Recent Link Metrics <label class="header-checkbox wx-inline" title="Overlay NWS rain, temperature and wind on the quality and SNR charts">
+                    <input type="checkbox" id="np-weather-toggle"> Weather</label></h2>
                 <div class="node-page-charts">
                     <div class="chart-card">
                         <h4>Link Quality (%)</h4>
@@ -204,6 +205,7 @@
     <script src="{{ url_for('static', filename='js/power-advisor.js') }}"></script>
     <script src="{{ url_for('static', filename='js/changes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notes.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/weather.js') }}"></script>
     <script src="{{ url_for('static', filename='js/maintenance.js') }}"></script>
 </body>
 </html>

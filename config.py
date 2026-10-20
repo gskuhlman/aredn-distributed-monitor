@@ -187,6 +187,17 @@ ROUTE_CHANGE_RUNS = env_int("ROUTE_CHANGE_RUNS", 2)              # runs in a row
 ROUTE_DETOUR_HOPS = env_int("ROUTE_DETOUR_HOPS", 2)              # this many more hops = detour
 ROUTE_HISTORY_RETENTION_DAYS = env_int("ROUTE_HISTORY_RETENTION_DAYS", 31)
 # --- end Route Watch ---
+
+# --- Weather (weather.py): NWS observations to correlate with SNR/LQ ---
+# api.weather.gov needs no key but asks for a User-Agent with a contact, e.g.
+# "aredn-monitor (you@example.com)". Nothing personal is sent unless set here.
+WEATHER_ENABLED = env_bool("WEATHER_ENABLED", True)
+WEATHER_USER_AGENT = os.environ.get("WEATHER_USER_AGENT", "aredn-monitor (local)")
+WEATHER_STATION = os.environ.get("WEATHER_STATION", "").strip().upper()  # empty = nearest to the mesh
+WEATHER_POLL_MINUTES = env_int("WEATHER_POLL_MINUTES", 30)
+WEATHER_BACKFILL_DAYS = env_int("WEATHER_BACKFILL_DAYS", 7)
+WEATHER_TIMEOUT_SECONDS = env_int("WEATHER_TIMEOUT_SECONDS", 15)
+# --- end Weather ---
 # Total incident capture window and gap between probe rounds, in seconds.
 INCIDENT_DURATION = env_int("INCIDENT_DURATION_SECONDS", 90)
 INCIDENT_PROBE_INTERVAL = env_int("INCIDENT_PROBE_INTERVAL_SECONDS", 5)
