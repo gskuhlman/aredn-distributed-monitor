@@ -29,6 +29,18 @@ _degraded_nodes = set()
 # are logged only on transitions instead of every aborted scan.
 _gateway_lost = False
 
+# Whether scans are currently incomplete (starting node answering only bare
+# sysinfo, or a committed scan that reached far fewer nodes than were active),
+# for transition-only scan_incomplete / scan_complete_again events.
+_scan_incomplete = False
+_last_scan_partial = False
+
+# A committed scan that reaches fewer than this share of the nodes active before
+# it holds link/node aging for that scan; if the next scan is short too, the
+# loss is taken as real.
+PARTIAL_SCAN_FRACTION = 0.5
+PARTIAL_SCAN_MIN_ACTIVE = 10
+
 
 def build_sysinfo_url(ip_or_hostname, full=True):
     """Build the sysinfo.json URL for a node.
@@ -682,6 +694,7 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
     max_depth_reached = 0
     all_events = []
     starting_node_error = None  # Set when the scan is aborted (gateway lost)
+    abort_reason = None
     observed_at = observations.utc_now()
     observation_docs = []
     attempted_nodes = 0
@@ -916,7 +929,22 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
                 f"Starting node {gateway_host} unreachable -- scan aborted, results "
                 "discarded (this collector appears to be off the AREDN network)"
             )
+            abort_reason = 'gateway_lost'
             logger.error(starting_node_error)
+            break
+
+        # The starting node answered only its bare sysinfo (full sysinfo timed
+        # out): no LQM, so no neighbours to traverse. Committing would age every
+        # link in the mesh out as "dropped", so discard the scan instead.
+        if max_depth > 0 and any(
+                depth == 0 and url_host(url) == gateway_host and data is not None and degraded
+                for (url, depth, _), (data, degraded, _) in fetched):
+            starting_node_error = (
+                f"Starting node {gateway_host} answered only bare sysinfo (full sysinfo with "
+                "its neighbours timed out) -- scan aborted, results discarded"
+            )
+            abort_reason = 'seed_degraded'
+            logger.warning(starting_node_error)
             break
 
         for item, fetch_result in fetched:
@@ -926,6 +954,7 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
     if starting_node_error:
         return {
             'aborted': True,
+            'abort_reason': abort_reason,
             'nodes_found': 0,
             'links_found': 0,
             'nodes_visited': 0,
@@ -1179,6 +1208,10 @@ def run_scan():
 
     scan_started = monotonic()
 
+    # Nodes active before this scan, to spot a scan that saw only a sliver of
+    # the mesh (see PARTIAL_SCAN_FRACTION).
+    active_before = len(database.get_active_nodes())
+
     # Discover network
     result = discover_network()
 
@@ -1196,20 +1229,31 @@ def run_scan():
     # Collect all events
     all_events = gateway_events + result.get('events', [])
 
-    # Update link statuses
-    link_status = update_link_statuses()
-    result['dropped'] = link_status['dropped']
-    result['removed'] = link_status['removed']
-    result['dropped_links'] = link_status['dropped_links']
-    all_events.extend(link_status.get('events', []))
+    hold_aging, partial_events = partial_scan_check(result, active_before)
+    all_events.extend(partial_events)
+    result['aging_held'] = hold_aging
+    if hold_aging:
+        # Results are committed, but nothing is aged out on the strength of
+        # one scan that missed most of the mesh.
+        result['dropped'] = 0
+        result['removed'] = 0
+        result['dropped_links'] = []
+        result['inactive_nodes'] = []
+    else:
+        # Update link statuses
+        link_status = update_link_statuses()
+        result['dropped'] = link_status['dropped']
+        result['removed'] = link_status['removed']
+        result['dropped_links'] = link_status['dropped_links']
+        all_events.extend(link_status.get('events', []))
 
-    # Update node statuses
-    node_status = update_node_statuses(
-        seen_names=result.get('seen_names'),
-        boundaries_active=result.get('boundaries_active', False)
-    )
-    result['inactive_nodes'] = node_status['inactive_nodes']
-    all_events.extend(node_status.get('events', []))
+        # Update node statuses
+        node_status = update_node_statuses(
+            seen_names=result.get('seen_names'),
+            boundaries_active=result.get('boundaries_active', False)
+        )
+        result['inactive_nodes'] = node_status['inactive_nodes']
+        all_events.extend(node_status.get('events', []))
 
     # Save all events to database
     log_scan_events(all_events)
@@ -1225,9 +1269,62 @@ def run_scan():
     return result
 
 
+def partial_scan_check(result, active_before):
+    """(hold_aging, events) for a committed scan. A scan that reached fewer
+    than PARTIAL_SCAN_FRACTION of the nodes active before it holds aging once;
+    a second short scan in a row is aged normally (the loss is real)."""
+    global _last_scan_partial, _scan_incomplete
+    reachable = result.get('node_count_reachable') or 0
+    partial = (active_before >= PARTIAL_SCAN_MIN_ACTIVE
+               and reachable < active_before * PARTIAL_SCAN_FRACTION)
+    hold = partial and not _last_scan_partial
+    _last_scan_partial = partial
+    events = []
+    if hold and not _scan_incomplete:
+        _scan_incomplete = True
+        events.append({
+            'type': database.EVENT_SCAN_INCOMPLETE,
+            'node': None,
+            'details': f"Scan reached only {reachable} of {active_before} active nodes; link/node "
+                       "aging held for this scan (applied if the next scan is short too)",
+            'severity': 'warning'
+        })
+    elif not partial and _scan_incomplete:
+        _scan_incomplete = False
+        events.append({
+            'type': database.EVENT_SCAN_COMPLETE_AGAIN,
+            'node': None,
+            'details': f"Scans complete again ({reachable} nodes answered)",
+            'severity': 'info'
+        })
+    return hold, events
+
+
 def gateway_transition_events(result):
-    """Events for losing/regaining the starting node, on transitions only."""
-    global _gateway_lost
+    """Events for losing/regaining the starting node, on transitions only.
+    A seed_degraded abort (starting node answers, but only bare sysinfo) is a
+    scan_incomplete event, not a lost gateway."""
+    global _gateway_lost, _scan_incomplete
+    if result.get('aborted') and result.get('abort_reason') == 'seed_degraded':
+        events = []
+        if _gateway_lost:
+            _gateway_lost = False
+            events.append({
+                'type': database.EVENT_GATEWAY_RESTORED,
+                'node': None,
+                'details': "Starting node reachable again (bare sysinfo only so far)",
+                'severity': 'info'
+            })
+        if not _scan_incomplete:
+            _scan_incomplete = True
+            events.append({
+                'type': database.EVENT_SCAN_INCOMPLETE,
+                'node': None,
+                'details': f"{result.get('starting_node_error')}. No node or link state is changed "
+                           "until it answers full sysinfo again.",
+                'severity': 'warning'
+            })
+        return events
     if result.get('aborted'):
         if _gateway_lost:
             return []
@@ -1239,6 +1336,8 @@ def gateway_transition_events(result):
                        "it answers again; no node or link state is changed meanwhile.",
             'severity': 'warning'
         }]
+    # Recovery from scan_incomplete is logged by partial_scan_check (full
+    # scans only), so a targeted scan never clears it.
     if not _gateway_lost:
         return []
     _gateway_lost = False

@@ -1489,6 +1489,8 @@ EVENT_NODE_REBOOT = 'node_reboot'
 EVENT_GATEWAY_LOST = 'gateway_lost'
 EVENT_RADIO_CONFIG_CHANGE = 'radio_config_change'
 EVENT_GATEWAY_RESTORED = 'gateway_restored'
+EVENT_SCAN_INCOMPLETE = 'scan_incomplete'
+EVENT_SCAN_COMPLETE_AGAIN = 'scan_complete_again'
 EVENT_FIRMWARE_CHANGE = 'firmware_change'
 # Link Watch (link_watch.py) transitions
 EVENT_NOISE_JUMP = 'noise_jump'

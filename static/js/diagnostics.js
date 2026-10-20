@@ -149,6 +149,12 @@ const DiagnosticsModule = {
         container.innerHTML = findings.map(f => {
             const nodeLinks = (f.nodes || []).slice(0, 8).map(n =>
                 `<a href="/nodes/${encodeURIComponent(n)}">${this.esc(n)}</a>`).join(' ');
+            // Pairs to open in the RF Stats diagnosis: the finding's own (channel
+            // conflicts name the struggling link), else a two-node link finding.
+            const pairs = f.evidence?.diagnose
+                || ((f.nodes || []).length === 2 && !['channel', 'hidden_node'].includes(f.category) ? [f.nodes] : []);
+            const diagnose = pairs.map(([a, b]) => `<button class="btn btn-small btn-secondary mh-diagnose"
+                data-a="${this.esc(a)}" data-b="${this.esc(b)}">Diagnose ${this.esc(a)} ↔ ${this.esc(b)}</button>`).join(' ');
             return `<details class="mh-finding mh-${this.esc(f.severity)}">
                 <summary>
                     <span class="mh-sev mh-sev-${this.esc(f.severity)}">${this.esc(f.severity)}</span>
@@ -162,9 +168,14 @@ const DiagnosticsModule = {
                         target="_blank" rel="noopener">Open the power advisor for ${this.esc(f.evidence.power_advisor.node)}
                         (${this.esc(f.evidence.power_advisor.cut_db)} dB cut)</a></p>` : ''}
                     <p class="mh-nodes">${nodeLinks}</p>
+                    ${diagnose ? `<p>${diagnose}</p>` : ''}
                 </div>
             </details>`;
         }).join('');
+        container.querySelectorAll('button.mh-diagnose').forEach(btn => btn.addEventListener('click', () => {
+            document.querySelector('.tab-btn[data-tab="rf-stats"]')?.click();
+            setTimeout(() => { if (typeof RFStats !== 'undefined') RFStats.selectLink(btn.dataset.a, btn.dataset.b); }, 300);
+        }));
     },
 
     // ---- selected-node sets (same logic as the Nodes page) ----

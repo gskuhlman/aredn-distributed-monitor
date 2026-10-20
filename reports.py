@@ -39,7 +39,7 @@ EVENT_CATEGORIES = {
              'one_way_link', 'one_way_link_cleared',
              'route_changed', 'route_detour', 'route_restored'),
     'freq': ('frequency_change',),
-    'system': ('gateway_lost', 'gateway_restored',
+    'system': ('gateway_lost', 'gateway_restored', 'scan_incomplete', 'scan_complete_again',
                'maintenance_scheduled', 'maintenance_started', 'maintenance_ended'),
 }
 

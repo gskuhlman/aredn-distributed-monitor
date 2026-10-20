@@ -393,49 +393,94 @@ def _neighbors(cur, name, nodes_geo, stale_after, now):
     return sorted(out, key=lambda n: -(n['snr'] or -99))
 
 
-def _nearby_radios(name, nodes_geo, radios, neighbors, link_freq, width, exclude):
-    """Radios that can interfere with `name`'s receiver: those at its site, and
-    those in the direction its antenna points (toward its RF neighbors)."""
-    me = nodes_geo.get(name)
-    if not me:
-        return []
+def _span_text(r):
+    if r.get('low') is None:
+        return f"{r['frequency']:.0f} MHz" if r.get('frequency') else 'channel unknown'
+    return f"{r['low']:.0f}–{r['high']:.0f} MHz"
+
+
+def _nearby_radios(name, cm_radios, neighbors, link_freq, width, exclude, cabled=()):
+    """Radios that can interfere with `name`'s receiver, judged like the Channel
+    Map: radios at its site (within COLOCATED_METERS, or cabled to it by DtD
+    even without a location), radios its antenna faces (toward its RF
+    neighbours, or inside its stored beam) and radios whose antenna faces it,
+    within channel_map.CONFLICT_KM. Each radio's own channel width is used for
+    the relation; radios seen in the last 7 days count (`recent`)."""
+    import channel_map as cm  # channel_map imports this module
+    import infra_audit as ia
+    me = cm_radios.get(name) or {'name': name, 'lat': None, 'lon': None}
+    mine = {'frequency': me.get('frequency') or link_freq,
+            'chanbw': me.get('chanbw') or (width if not me.get('frequency') else None)}
+    my_lo, my_hi = ia._span(mine) or (None, None)
+    located = me.get('lat') is not None and me.get('lon') is not None
     beams = [n for n in neighbors if n.get('bearing') is not None
              and (n.get('distance_m') or 0) >= MIN_BEAM_LINK_M]
     out = []
-    for r in radios:
+    for r in cm_radios.values():
         if r['name'] in exclude or r['name'] == name:
             continue
-        dist = _haversine_m(me[0], me[1], r['lat'], r['lon'])
-        if dist is None or dist > NEARBY_KM * 1000:
+        is_cabled = r['name'] in cabled
+        r_located = r.get('lat') is not None and r.get('lon') is not None
+        dist = _haversine_m(me['lat'], me['lon'], r['lat'], r['lon']) if located and r_located else None
+        if dist is None and not is_cabled:
             continue
-        site = dist <= COLOCATED_METERS
+        if dist is not None and dist > cm.CONFLICT_KM * 1000 and not is_cabled:
+            continue
+        site = is_cabled or dist <= COLOCATED_METERS
         toward = None
-        if not site:
-            brg = _bearing(me[0], me[1], r['lat'], r['lon'])
+        if not site and dist is not None:
+            brg = _bearing(me['lat'], me['lon'], r['lat'], r['lon'])
             for n in beams:
                 if _angle_diff(brg, n['bearing']) <= BEAM_HALF_ANGLE and dist <= 1.5 * n['distance_m']:
                     toward = n
                     break
-            if not toward:
-                continue
-        delta = abs(r['frequency'] - link_freq) if r['frequency'] and link_freq else None
-        if delta is None and not site:
+        if dist is not None and not site:
+            faces = bool(toward) or (me.get('azimuth') is not None and cm._in_beam(me, r, dist))
+            aims = r.get('azimuth') is not None and cm._in_beam(r, me, dist)
+            omni_faces = me.get('azimuth') is None and cm._in_beam(me, r, dist)
+        else:
+            faces = aims = omni_faces = site
+        if not (site or faces or aims or omni_faces):
+            continue
+        theirs = {'frequency': r.get('frequency'), 'chanbw': r.get('chanbw')}
+        transmitting = r.get('frequency') is not None and r.get('rf_status') in (None, 'on')
+        rel = ia.pair_relation(mine, theirs) if transmitting and mine['frequency'] else 'unknown'
+        if rel == 'unknown' and not site:
             continue  # unknown channel and not at the site: nothing to say
+        if rel in ('clear', 'same') and not (site or toward):
+            continue  # only list far radios that matter
+        gap = ia.spectral_gap(mine, theirs) if rel != 'unknown' else None
+        geo_sev = None
+        if rel in ('overlap', 'adjacent', 'near'):
+            geo_sev = cm._severity(rel, site, (dist or 0) / 1000, faces or omni_faces, aims)
+            if geo_sev is None and not site and not toward:
+                continue
         level = None
         if toward:
             # Received level relative to the neighbor in that beam, assuming
             # similar transmit power toward us (free-space distance ratio).
             level = round(20 * math.log10(toward['distance_m'] / max(dist, 10.0)), 1)
+        lo, hi = ia._span(theirs) or (None, None)
         out.append({
-            'name': r['name'], 'model': r['model'], 'frequency': r['frequency'],
-            'channel': r['channel'], 'is_active': r['is_active'],
-            'distance_m': round(dist), 'delta_mhz': delta,
-            'relation': channel_relation(delta, width),
-            'site': site, 'in_beam_of': toward['node'] if toward else None,
-            'level_vs_neighbor_db': level,
+            'name': r['name'], 'model': r.get('model'), 'frequency': r.get('frequency'),
+            'chanbw': r.get('chanbw'), 'low': lo, 'high': hi,
+            'channel': r.get('channel'), 'is_active': bool(r.get('active')),
+            'recent': bool(r.get('recent', r.get('active'))),
+            'rf_off': r.get('frequency') is not None and not transmitting,
+            'distance_m': round(dist) if dist is not None else None,
+            'delta_mhz': abs(r['frequency'] - mine['frequency'])
+                         if r.get('frequency') and mine['frequency'] else None,
+            'gap_mhz': gap, 'relation': rel, 'site': site, 'cabled': is_cabled,
+            'in_beam_of': toward['node'] if toward else None,
+            'faces_end': bool(faces), 'aims_at_end': bool(aims and not site),
+            'omni': (r.get('beamwidth') or 360) >= 360 or r.get('azimuth') is None,
+            'geometry_severity': geo_sev, 'level_vs_neighbor_db': level,
         })
     order = {'overlap': 0, 'adjacent': 1, 'same': 2, 'near': 3, 'clear': 4, 'unknown': 5}
-    return sorted(out, key=lambda c: (order[c['relation']], c['distance_m']))
+    out.sort(key=lambda c: (order[c['relation']], c['distance_m'] if c['distance_m'] is not None else 0))
+    return {'radios': out, 'span': {'low': my_lo, 'high': my_hi, 'frequency': mine['frequency'],
+                                     'chanbw': mine['chanbw'], 'width_from_settings': bool(me.get('chanbw')),
+                                     'located': located, 'cabled': len(cabled)}}
 
 
 # ------------------------------------------------------------- checks -----
@@ -860,45 +905,147 @@ def _near_far_fix(ctx, receiver, loud, cut):
             f"frequency.")
 
 
+def _where(r, end):
+    if r['site']:
+        return (f"cabled (DtD) to {end}" if r['cabled'] and r['distance_m'] is None
+                else f"{r['distance_m']} m away at {end}'s site" + (' (DtD-cabled)' if r['cabled'] else ''))
+    text = f"{r['distance_m'] / 1000:.1f} km away"
+    if r['in_beam_of']:
+        text += (f" in {end}'s beam toward {r['in_beam_of']}, est. {r['level_vs_neighbor_db'] + 0.0:+.0f} dB "
+                 f"vs {r['in_beam_of']}")
+        if not r['omni'] and not r['aims_at_end']:
+            text += " (but aimed elsewhere, so weaker)"
+    elif r['omni']:
+        text += ", omni" + (f" in {end}'s beam" if r['faces_end'] else '')
+    elif r['faces_end'] and r['aims_at_end']:
+        text += f", it and {end} face each other"
+    elif r['aims_at_end']:
+        text += f", its antenna points at {end}"
+    else:
+        text += f", in {end}'s antenna pattern"
+    return text
+
+
+def _rel_text(r):
+    gap = r['gap_mhz']
+    if gap is None:
+        return r['relation']
+    return f"{r['relation']}, " + (f"{-gap:.0f} MHz overlap" if gap < 0 else f"{gap:.0f} MHz gap")
+
+
 def _check_interference(ctx, f):
-    width, freq = ctx['inferred_width_mhz'], ctx['link_freq']
-    if not freq:
-        return
-    guard = (width or 20) + 20
+    """Radios on overlapping / adjacent (and, at the site, near) channels at
+    each end's site, in its antenna's beam, or aimed at it."""
+    import infra_audit as ia
+    checked, closest = 0, None
+    any_bad = False
     for end in ctx['pair']:
-        radios = [r for r in ctx['nearby'][end] if r['is_active']]
+        info = ctx['nearby'][end]
+        if not info['span']['frequency']:
+            continue
+        radios = [r for r in info['radios'] if r['recent'] and not r['rf_off']]
+        checked += len(radios)
+        for r in radios:
+            if r['gap_mhz'] is not None and r['relation'] != 'same' and (
+                    closest is None or r['gap_mhz'] < closest[1]['gap_mhz']):
+                closest = (end, r)
         impaired = _receive_impaired(ctx, end)
-        bad = [r for r in radios if r['relation'] in ('overlap', 'adjacent')]
+        bad = [r for r in radios if r['relation'] in ('overlap', 'adjacent')
+               or (r['relation'] == 'near' and r['site'])]
         if bad:
+            any_bad = True
             loud = [r for r in bad if r['relation'] == 'overlap'
-                    and (r['site'] or (r['level_vs_neighbor_db'] or -99) >= -6)]
+                    and (r['site'] or r['geometry_severity'] == 'critical'
+                         or (r['level_vs_neighbor_db'] or -99) >= -6)]
+            geo_bad = any(r['geometry_severity'] in ('critical', 'warning') for r in bad)
             if impaired:
                 sev = 'critical' if loud else 'warning'
             else:
-                sev = 'info'
-            def where(r):
-                if r['site']:
-                    return f"{r['distance_m']} m away at {end}'s site"
-                return (f"{r['distance_m'] / 1000:.1f} km away in {end}'s beam toward {r['in_beam_of']}, "
-                        f"est. {r['level_vs_neighbor_db']:+.0f} dB vs {r['in_beam_of']}")
+                sev = 'warning' if loud or geo_bad else 'info'
+            span = info['span']
+            guard = ia.GUARD_MHZ
+            idle = [r['name'] for r in bad if not r['is_active']]
             _add(f, sev, 'interference',
                  f"{len(bad)} radio(s) on overlapping/adjacent channels near {end}",
-                 f"These transmit {'' if width else 'about '}within {guard} MHz of this link's "
-                 f"{freq:.0f} MHz ({width or '?'} MHz channels). Overlapping channels cannot be decoded and "
-                 f"just raise the noise; when they are strong at {end} they desensitize its receiver "
-                 f"and act as hidden nodes. "
+                 f"{end} receives on {_span_text(span)}"
+                 + ('' if span['width_from_settings'] else ' (width estimated)')
+                 + f". These radios transmit on spectrum that overlaps it or leaves less than "
+                 f"{guard} MHz clear ({ia.NEAR_GUARD_MHZ} MHz for radios on the same mast). Overlapping "
+                 f"channels can't be decoded and raise the noise floor; strong adjacent ones bleed in and "
+                 f"desensitize the receiver, and either can act as a hidden node. "
                  + (f"{end}'s reception is impaired, so these are likely contributors."
-                    if impaired else f"{end}'s reception looks fine, so no impact is visible now."),
-                 [f"{r['name']} {r['frequency']:.0f} MHz ({r['relation']}, {r['delta_mhz']:.0f} MHz off), "
-                  f"{where(r)}" for r in bad],
-                 (f"Move this link or the overlapping radios at least {guard} MHz apart, or narrow the "
-                  f"channel width. Estimates assume similar power toward {end}; sectors aimed away "
-                  f"will be weaker.") if impaired else None)
+                    if impaired else f"{end}'s reception looks fine now, so no impact is visible yet"
+                    + (" but the geometry makes it a risk." if loud or geo_bad else "."))
+                 + (f" Not answering now but seen in the last 7 days: {', '.join(idle)}." if idle else ''),
+                 [f"{r['name']} {_span_text(r)} ({_rel_text(r)}), {_where(r, end)}"
+                  + (f" [{r['geometry_severity']} on the Channel Map]" if r['geometry_severity'] else '')
+                  for r in bad],
+                 (f"Move this link or the listed radios apart so at least {guard} MHz stays clear "
+                  f"(more on a shared mast), or narrow a channel. Level estimates assume similar power "
+                  f"toward {end}; sectors aimed away will be weaker. The Channel Map planner can "
+                  f"suggest a plan.") if (impaired or loud or geo_bad) else None)
         shared = [r['name'] for r in radios if r['relation'] == 'same' and r['site']]
         if shared:
             _add(f, 'info', 'interference', f"{len(shared)} radio(s) at {end}'s site share this channel",
-                 f"{', '.join(shared)} use the same frequency as this link. Radios on one channel take "
+                 f"{', '.join(shared)} use the same channel as this link. Radios on one channel take "
                  f"turns, so they compete for airtime; that matters if the channel is busy.")
+    unlocated = [e for e in ctx['pair'] if not ctx['nearby'][e]['span']['located']]
+    if not any_bad and ctx['link_freq']:
+        unknown = sorted({r['name'] for e in ctx['pair'] for r in ctx['nearby'][e]['radios']
+                          if r['relation'] == 'unknown'})
+        detail = (f"Checked {checked} radio(s) at both ends' sites, in their antennas' beams, or aimed "
+                  f"at them (within 25 km, seen in the last 7 days): none overlap or sit adjacent to "
+                  f"this link's channel." if checked else
+                  "No other radios with a known channel at either end's site, in their antennas' beams, or "
+                  "aimed at them within 25 km.")
+        if closest:
+            end, r = closest
+            detail += f" Closest in frequency: {r['name']} {_span_text(r)} ({_rel_text(r)}), {_where(r, end)}."
+        if unlocated:
+            detail += (f" No location stored for {' or '.join(unlocated)}, so only radios cabled to it "
+                       f"(DtD) were checked there; set its location to check the area.")
+        if unknown:
+            detail += f" No channel stored for {', '.join(unknown)} at the site (2.4 GHz-only or radio off?)."
+        _add(f, 'ok', 'interference', 'No nearby radios on overlapping or adjacent channels', detail)
+
+
+def _check_noise_band(ctx, f):
+    """Is the link's channel in a part of the band with known outside users
+    (weather radar, busy Wi-Fi)? Uses the Channel planner's noise ranges."""
+    import channel_planner as cp
+    a = ctx['nearby'][ctx['pair'][0]]['span']
+    if not a['frequency'] or a['low'] is None:
+        return
+    impaired = any(_receive_impaired(ctx, e) for e in ctx['pair'])
+    hits = []
+    for rng in cp.NOISE_RANGES:
+        ov = min(a['high'], rng['high']) - max(a['low'], rng['low'])
+        if ov > 0:
+            hits.append((rng, ov))
+    if not hits:
+        return
+    tdwr = any(r['low'] == 5600 and r['high'] == 5650 for r, _ in hits)
+    heavy = any('heavy' in r['label'] for r, _ in hits)
+    if tdwr:
+        sev = 'critical' if impaired else 'warning'
+    elif heavy:
+        sev = 'warning' if impaired else 'info'
+    else:
+        sev = 'info'
+    noise = [d.get('noise') for d in ctx['directions'] if d.get('noise') is not None]
+    _add(f, sev, 'interference', f"Channel overlaps {hits[0][0]['label']}"
+         + (f" and {len(hits) - 1} more noise range(s)" if len(hits) > 1 else ''),
+         f"This link uses {_span_text(a)}. Outside users there are not mesh nodes, so they never show "
+         f"up as neighbours; they only raise the noise floor or hit in bursts. "
+         + ("Its reception is impaired, so check the noise floor over time (Link Watch) and consider "
+            "moving the link." if impaired else "Its reception looks fine now.")
+         + (f" Current noise estimate: {max(noise):.0f} dBm." if noise else ''),
+         [f"{r['label']}: {ov:.0f} MHz of the channel" for r, ov in hits],
+         (f"Keep the whole channel above 5650 MHz: TDWR airport weather radar (5600–5650) is strong and "
+          f"pulsed, and AREDN radios don't avoid it. At {a['chanbw'] or 20:.0f} MHz wide that means a "
+          f"centre of {5650 + (a['chanbw'] or 20) / 2 + 5:.0f} MHz or higher (or a narrower channel)."
+          if tdwr else ("Prefer channels away from UNII-3 Wi-Fi (5735–5835) if noise is high."
+                        if heavy and impaired else None)))
 
 
 RF_MODE_ROLES = {'ptp': 'access point', 'ptmp': 'access point', 'ap': 'access point',
@@ -1018,7 +1165,7 @@ def _check_watch(ctx, f):
 
 CHECKS = (_check_visibility, _check_delivery, _check_receivers, _check_rf, _check_near_far,
           _check_routing, _check_rates, _check_quality_breakdown, _check_flaps, _check_config,
-          _check_interference, _check_nodes, _check_ping, _check_watch)
+          _check_interference, _check_noise_band, _check_nodes, _check_ping, _check_watch)
 
 
 # ------------------------------------------------------------ verdict -----
@@ -1174,7 +1321,19 @@ def diagnose_pair(a, b, hours=24):
                 SELECT raw_tracker FROM links WHERE source_node IN (?, ?) AND UPPER(link_type) = 'RF'
                   AND status != 'removed'
             ''', (a, b))])
-        nearby = {n: _nearby_radios(n, nodes_geo, radios, neighbors.get(n, []), link_freq, width, {a, b})
+        import channel_map as cm  # channel_map imports this module
+        cm_radios, _ = cm._load(conn)
+        for r in cm_radios.values():
+            cm._apply_span(r)
+            r['recent'] = cm._recent(r)
+        cabled = {}
+        for n in (a, b):
+            cabled[n] = {r[0] for r in cur.execute('''
+                SELECT target_node FROM links WHERE source_node = ? AND UPPER(link_type) = 'DTD'
+                  AND status != 'removed' AND last_seen >= ?
+            ''', (n, (now - timedelta(days=cm.RECENT_DAYS)).strftime(TS_FMT)))}
+        nearby = {n: _nearby_radios(n, cm_radios, neighbors.get(n, []), link_freq, width, {a, b},
+                                    cabled[n])
                   for n in (a, b)}
         ga, gb = nodes_geo.get(a), nodes_geo.get(b)
         geo_distance = round(_haversine_m(ga[0], ga[1], gb[0], gb[1])) if ga and gb else None
@@ -1201,7 +1360,8 @@ def diagnose_pair(a, b, hours=24):
         'nodes': nodes,
         'neighbors': {n: neighbors[n] for n in (a, b)},
         'infrastructure': sorted(ctx['infra'] & ({a, b} | set(neighbors))),
-        'nearby': nearby,
+        'nearby': {n: nearby[n]['radios'] for n in (a, b)},
+        'nearby_span': {n: nearby[n]['span'] for n in (a, b)},
         'geo_distance_m': geo_distance,
         'link_frequency_mhz': link_freq,
         'inferred_width_mhz': ctx['inferred_width_mhz'],

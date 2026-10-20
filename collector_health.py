@@ -57,6 +57,7 @@ CAUSE_LABELS = {
     'connection_error': "Connection to the starting node failed",
     'lost_mid_scan': "Starting node stopped answering during the scan (answered the check after)",
     'scan_error': "Scan failed with an internal error",
+    'seed_degraded': "Starting node answered only bare sysinfo (no neighbour list); scan discarded",
     'no_answer': "Starting node didn't answer within the request timeout (older data: no detail recorded)",
     'unknown': "Starting node unreachable (cause not recorded)",
 }
@@ -251,7 +252,7 @@ def record(kind='scan', result=None, scan_ms=None, error=None):
             'timestamp': database.local_timestamp(), 'kind': kind, **m,
             'scan_aborted': (1 if error else int(aborted)) if aborted is not None else None,
             'abort_reason': ('scan_error: ' + str(error)[:180]) if error else
-                            ('gateway_lost' if aborted else None),
+                            ((result.get('abort_reason') or 'gateway_lost') if aborted else None),
             'scan_ms': scan_ms,
             'nodes_attempted': result.get('node_count_attempted', result.get('nodes_visited')),
             'nodes_reachable': result.get('node_count_reachable', result.get('nodes_found')),
@@ -292,7 +293,10 @@ def _row_cause(r):
     if r['lan_ok'] == 0:
         return 'lan_down'
     if r['ok'] and r['scan_aborted']:
-        return 'scan_error' if (r['abort_reason'] or '').startswith('scan_error') else 'lost_mid_scan'
+        reason = r['abort_reason'] or ''
+        if reason == 'seed_degraded':
+            return 'seed_degraded'
+        return 'scan_error' if reason.startswith('scan_error') else 'lost_mid_scan'
     return r['error_class'] or 'unknown'
 
 

@@ -1648,6 +1648,8 @@ const EVENT_ICONS = {
     'frequency_change': { icon: '&#128246;', label: 'Frequency Change', class: 'event-warning' },
     'gateway_lost': { icon: '&#9888;', label: 'Starting Node Lost', class: 'event-warning' },
     'gateway_restored': { icon: '&#10004;', label: 'Starting Node Restored', class: 'event-success' },
+    'scan_incomplete': { icon: '&#9888;', label: 'Scan Incomplete', class: 'event-warning' },
+    'scan_complete_again': { icon: '&#10004;', label: 'Scans Complete Again', class: 'event-success' },
     'radio_config_change': { icon: '&#128225;', label: 'Radio Settings Changed', class: 'event-warning' },
     'firmware_change': { icon: '&#128190;', label: 'Firmware Changed', class: 'event-info' },
     // Link Watch (link_watch.py)

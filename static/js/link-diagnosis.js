@@ -196,7 +196,7 @@ const LinkDiagnosis = {
     },
 
     nearbyCounts() {
-        const all = Object.values(this.data.nearby || {}).flat().filter(r => r.is_active);
+        const all = Object.values(this.data.nearby || {}).flat().filter(r => (r.recent ?? r.is_active) && !r.rf_off);
         const overlap = all.filter(r => r.relation === 'overlap').length;
         const adjacent = all.filter(r => r.relation === 'adjacent').length;
         return { overlap, adjacent, bad: overlap + adjacent };
@@ -218,28 +218,49 @@ const LinkDiagnosis = {
         return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`;
     },
 
+    nearbyWhere(c, end) {
+        if (c.site) return c.cabled ? 'same site (DtD)' : 'same site';
+        if (c.in_beam_of) return `in beam toward ${this.esc(c.in_beam_of)}${!c.omni && !c.aims_at_end ? ' <small>(aimed elsewhere)</small>' : ''}`;
+        if (c.omni) return c.faces_end ? `omni, in ${this.esc(end)}'s beam` : 'omni in range';
+        if (c.faces_end && c.aims_at_end) return 'facing each other';
+        if (c.aims_at_end) return `aimed at ${this.esc(end)}`;
+        return `in ${this.esc(end)}'s beam`;
+    },
+
+    fmtSpan(c) {
+        if (c.low == null) return this.esc(c.frequency ?? '-');
+        return `${Math.round(c.low)}–${Math.round(c.high)}`;
+    },
+
+    fmtGap(c) {
+        if (c.gap_mhz == null) return '-';
+        return c.gap_mhz < 0 ? `${-c.gap_mhz} overlap` : `${c.gap_mhz} gap`;
+    },
+
     renderNearby() {
-        const freq = this.data.link_frequency_mhz;
-        const width = this.data.inferred_width_mhz;
+        const spans = this.data.nearby_span || {};
         const legend = ['overlap', 'adjacent', 'same', 'near', 'clear'].map(r => this.relBadge(r)).join(' ');
-        const intro = `<p class="form-hint">This link: ${this.esc(freq ?? '?')} MHz` +
-            (width ? `, ${width} MHz wide (from PHY rates)` : '') +
-            `. Radios at each end's site, and those in the direction each end's antenna points ` +
-            `(toward its RF neighbors). "Est. level" compares a radio with the neighbor in that beam, ` +
-            `assuming similar power. Hover a tag for its meaning.</p><div class="rel-legend">${legend}</div>`;
+        const intro = `<p class="form-hint">Each end's channel against radios at its site (within 150 m or cabled by DtD),
+            radios its antenna faces and radios aimed at it, within 25 km, each with its own channel width.
+            Radios not answering now but seen in the last 7 days still count. "Est. level" compares a radio
+            with the neighbor in that beam, assuming similar power. Hover a tag for its meaning.</p>
+            <div class="rel-legend">${legend}</div>`;
         return intro + this.data.pair.map(name => {
             const list = this.data.nearby[name] || [];
-            if (!list.length) return `<p class="form-hint">No known radios near ${this.esc(name)}.</p>`;
-            return `<h4 class="diag-subhead">Near ${this.esc(name)}</h4>
+            const sp = spans[name] || {};
+            const head = `<h4 class="diag-subhead">Near ${this.esc(name)}${sp.low != null
+                ? ` <small>(receives ${Math.round(sp.low)}–${Math.round(sp.high)} MHz${sp.width_from_settings ? '' : ', width estimated'})</small>` : ''}</h4>`;
+            if (!list.length) return head + `<p class="form-hint">No known radios near ${this.esc(name)}${sp.located === false ? ' (no location stored for it)' : ''}.</p>`;
+            return `${head}
                 <div class="table-scroll-wrapper diag-scroll-table"><table class="info-table diag-table">
-                <thead><tr><th>Radio</th><th>Freq</th><th>Ch</th><th>&Delta; MHz</th><th>Channel</th>
+                <thead><tr><th>Radio</th><th>MHz</th><th>Ch</th><th>Gap MHz</th><th>Channel</th>
                 <th>Where</th><th>Distance</th><th>Est. level</th><th>Model</th></tr></thead>
                 <tbody>${list.map(c => `<tr class="rel-row rel-row-${this.esc(c.relation)}${c.is_active ? '' : ' rel-inactive'}">
-                    <td>${this.esc(c.name)}${c.is_active ? '' : ' <small>(inactive)</small>'}</td>
-                    <td>${this.esc(c.frequency ?? '-')}</td><td>${this.esc(c.channel || '-')}</td>
-                    <td>${this.esc(c.delta_mhz ?? '-')}</td>
-                    <td>${this.relBadge(c.relation)}</td>
-                    <td>${c.site ? 'same site' : `in beam toward ${this.esc(c.in_beam_of)}`}</td>
+                    <td>${this.esc(c.name)}${c.is_active ? '' : ` <small>(${c.recent ? 'not answering, seen this week' : 'inactive'})</small>`}${c.rf_off ? ' <small>(radio off)</small>' : ''}</td>
+                    <td>${this.fmtSpan(c)}</td><td>${this.esc(c.channel || '-')}</td>
+                    <td>${this.fmtGap(c)}</td>
+                    <td>${this.relBadge(c.relation)}${c.geometry_severity ? ` <small title="Severity on the Channel Map">${this.esc(c.geometry_severity)}</small>` : ''}</td>
+                    <td>${this.nearbyWhere(c, name)}</td>
                     <td>${this.fmtDistance(c.distance_m)}</td>
                     <td>${c.level_vs_neighbor_db != null ? `${c.level_vs_neighbor_db > 0 ? '+' : ''}${c.level_vs_neighbor_db} dB` : '-'}</td>
                     <td>${this.esc(c.model || '-')}</td></tr>`).join('')}

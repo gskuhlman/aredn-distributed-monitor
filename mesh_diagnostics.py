@@ -15,6 +15,9 @@ in-scope mesh for the problems that actually break RF meshes:
 - Flapping and LQM-blocked links, weak/unstable signal
 - Noise floor, channel congestion, node reboots/overload/unreliable polling
 - Hidden-node pairs, single points of failure, RF-isolated nodes
+- Radios on overlapping/adjacent channels near each other (Channel Map
+  conflicts) and channels in noisy parts of the band (TDWR radar, busy WiFi),
+  raised when a radio involved has struggling RF links
 
 The scope honours operator scan boundaries: only nodes reachable from the scan
 seed without crossing a boundary are diagnosed, so remote meshes don't clutter
@@ -95,6 +98,7 @@ CATEGORY_LABELS = {
     'congestion': 'Channel congestion',
     'node_health': 'Node health',
     'hidden_node': 'Hidden node',
+    'channel': 'Overlapping / adjacent channel',
     'topology': 'Topology / single point of failure',
 }
 
@@ -704,6 +708,122 @@ def _check_hidden_nodes(f, rf_neighbors, scope, polled_scope, degraded_nodes):
         )
 
 
+def _check_channels(f, scope, weak_peer):
+    """Channel Map conflicts (overlapping / adjacent / near channels between
+    radios on one mast, or within 25 km with one aimed at the other) touching
+    the scope, and radios on TDWR or busy WiFi spectrum. A conflict where a
+    radio has a struggling RF link (weak_peer: radio -> its weak peer) is
+    raised and carries a pair to diagnose."""
+    import channel_map as cm  # imports modules that import this one
+    import channel_planner as cp
+    import infra_audit as ia
+    with database.get_connection() as conn:
+        radios, infra = cm._load(conn)
+    for r in radios.values():
+        cm._apply_span(r)
+        r['recent'] = cm._recent(r)
+    conflicts = [c for c in cm._conflicts(radios) if c['a'] in scope or c['b'] in scope]
+    sev_rank = {'critical': 0, 'warning': 1, 'info': 2}
+    infra_note = " Never lower an infrastructure radio's power to fix this."
+    used = set()
+
+    def idle_note(names):
+        idle = sorted(n for n in names if not radios[n]['active'])
+        return (f" Not answering now but seen in the last {cm.RECENT_DAYS} days: {', '.join(idle)}."
+                if idle else '')
+
+    # 1. Each radio with a struggling RF link: every conflict it is in.
+    for n in sorted(weak_peer):
+        mine = [c for c in conflicts if n in (c['a'], c['b']) and c['relation'] in ('overlap', 'adjacent')]
+        if not mine:
+            continue
+        used.update(c['key'] for c in mine)
+        worst = min(sev_rank[c['severity']] for c in mine)
+        sev = 'critical' if worst <= 1 else 'warning'
+        others = sorted({c['b'] if c['a'] == n else c['a'] for c in mine})
+        f.add(sev, 'channel',
+              f"{n} struggles and {len(mine)} radio(s) near it are on overlapping/adjacent channels",
+              [n] + others,
+              f"{n} has a struggling RF link (to {weak_peer[n]}). Overlapping channels cannot be decoded "
+              f"and raise its noise floor; strong adjacent ones desensitize its receiver. "
+              + '; '.join(c['summary'] for c in mine) + '.' + idle_note({n, *others}),
+              f"Move {n}'s link or the listed radios so at least {ia.GUARD_MHZ} MHz stays clear "
+              f"({ia.NEAR_GUARD_MHZ} MHz on a shared mast), or narrow a channel; the Channel Map planner "
+              f"can suggest a plan." + (infra_note if any(x in infra for x in [n] + others) else ''),
+              {'conflicts': [c['summary'] for c in mine], 'diagnose': [[n, weak_peer[n]]]})
+
+    # 2. Same-mast conflicts, one finding per mast (connected radios).
+    mast = [c for c in conflicts if c['colocated'] and c['key'] not in used]
+    groups = []
+    for c in mast:
+        hit = [g for g in groups if c['a'] in g['names'] or c['b'] in g['names']]
+        g = {'names': {c['a'], c['b']}, 'items': [c]}
+        for h in hit:
+            g['names'] |= h['names']
+            g['items'] += h['items']
+            groups.remove(h)
+        groups.append(g)
+    for g in groups:
+        used.update(c['key'] for c in g['items'])
+        names = sorted(g['names'])
+        site = next((radios[x]['site_code'] for x in names if radios[x].get('site_code')), None)
+        worst = min(sev_rank[c['severity']] for c in g['items'])
+        f.add(['critical', 'warning', 'info'][worst], 'channel',
+              f"{site + ' mast' if site else 'Same mast'}: {len(g['items'])} radio pair(s) on "
+              f"overlapping or too-close channels", names,
+              'Radios on one mast are tens of dB louder to each other than any remote station, so even '
+              'adjacent channels desensitize the receivers. '
+              + '; '.join(c['summary'] for c in g['items']) + '.' + idle_note(g['names']),
+              f"Give each radio on the mast its own channel with at least {ia.NEAR_GUARD_MHZ} MHz clear "
+              f"between them (AREDN's channel-planning guide: a channel per sector); the Channel Map "
+              f"planner can suggest one." + (infra_note if any(x in infra for x in names) else ''),
+              {'conflicts': [c['summary'] for c in g['items']]})
+
+    # 3. Everything else (radios aimed at each other, nothing visibly hurt).
+    rest = [c for c in conflicts if c['key'] not in used and c['severity'] in ('critical', 'warning')]
+    if rest:
+        worst = min(sev_rank[c['severity']] for c in rest)
+        shown = rest[:12]
+        names = sorted({x for c in rest for x in (c['a'], c['b'])})
+        f.add('warning' if worst == 0 else 'info', 'channel',
+              f"{len(rest)} other radio pair(s) aimed at each other on overlapping/adjacent channels",
+              names,
+              'No struggling link involved yet, but these raise each other\'s noise floor. '
+              + '; '.join(c['summary'] for c in shown) + '.'
+              + (f" ... and {len(rest) - len(shown)} more on the Channel Map." if len(rest) > len(shown) else ''),
+              'Review them on the Channel Map (conflict lines) when planning channel changes.',
+              {'conflicts': [c['summary'] for c in rest]})
+
+
+    tdwr = next(r for r in cp.NOISE_RANGES if r['low'] == 5600)
+    heavy = next(r for r in cp.NOISE_RANGES if 'heavy' in r['label'])
+    in_tdwr, in_heavy = [], []
+    for r in radios.values():
+        if r['name'] not in scope or r.get('low') is None or not r['recent'] \
+                or r.get('rf_status') not in (None, 'on'):
+            continue
+        if min(r['high'], tdwr['high']) > max(r['low'], tdwr['low']):
+            in_tdwr.append(r)
+        elif r['name'] in weak_peer and min(r['high'], heavy['high']) > max(r['low'], heavy['low']):
+            in_heavy.append(r)
+    for rng, group, base in ((tdwr, in_tdwr, 'warning'), (heavy, in_heavy, 'info')):
+        if not group:
+            continue
+        hurt = [r['name'] for r in group if r['name'] in weak_peer]
+        sev = 'critical' if hurt and base == 'warning' else ('warning' if hurt else base)
+        f.add(sev, 'interference', f"{len(group)} radio(s) on {rng['label']}",
+              [r['name'] for r in group],
+              ', '.join(f"{r['name']} {r['low']:.0f}–{r['high']:.0f} MHz" for r in group)
+              + '. Outside users there never show up as mesh neighbours; they only raise the noise floor '
+                'or hit in bursts.'
+              + (f" Struggling: {', '.join(hurt)}." if hurt else ''),
+              ('Keep the whole channel above 5650 MHz (TDWR airport weather radar is strong and pulsed, '
+               'and AREDN radios do not avoid it).' if rng is tdwr else
+               'Prefer channels away from UNII-3 WiFi (5735–5835 MHz) where noise is high.'),
+              {'radios': [r['name'] for r in group],
+               'diagnose': [[n, weak_peer[n]] for n in hurt]})
+
+
 def _articulation_impact(seed, adjacency, scope, polled):
     """For each node, how many in-scope nodes become unreachable from the seed
     if it fails. Brute force BFS is fine at mesh sizes."""
@@ -810,6 +930,13 @@ def run_health_check(hours=24):
         if l.get('status') == 'good' and _low_quality(l, 70):
             degraded_nodes.add(l['source_node'])
 
+    # Radio -> a peer it has a struggling RF link to (low quality), for the
+    # channel check.
+    weak_peer = {}
+    for l in rf_links:
+        if l.get('status') == 'good' and _low_quality(l, 70):
+            weak_peer.setdefault(l['source_node'], l['target_node'])
+
     f = _Findings()
     _check_near_far(f, rf_by_source, key_nodes, scope)
     _check_link_pairs(f, rf_index, node_noise, scope, polled_scope)
@@ -823,6 +950,10 @@ def run_health_check(hours=24):
                  database.get_event_counts(database.EVENT_NODE_REBOOT, hours), hours)
     _check_hidden_nodes(f, rf_neighbors, scope, polled_scope, degraded_nodes)
     _check_topology(f, impact, nodes_by_name, scope, rf_neighbors)
+    try:
+        _check_channels(f, scope, weak_peer)
+    except Exception as exc:  # never lose the whole report to this check
+        logger.warning("Mesh health channel check failed: %s", exc)
 
     findings = sorted(f.items, key=lambda x: (SEVERITY_ORDER.get(x['severity'], 9), x['category'], x['subject']))
     by_severity = defaultdict(int)
