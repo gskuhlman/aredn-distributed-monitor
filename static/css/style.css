@@ -2226,3 +2226,15 @@ tr.notify-log-suppressed td { color: #95a5a6; }
 .maint-node-action { display: inline-flex; align-items: center; gap: 6px; }
 .maint-node-form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .maint-node-form .form-input { width: auto; }
+
+/* Sector airtime (#6) */
+.air-overrides { width: 100%; font-family: monospace; font-size: 12px; margin: 6px 0; }
+.diag-table td.air-fail-poor { background: #fadbd8; font-weight: 600; }
+.diag-table td.air-fail-marginal { background: #fdebd0; }
+.air-matrix th, .air-matrix td { text-align: center; font-size: 12px; white-space: nowrap; }
+.air-matrix tbody th { text-align: left; }
+.air-matrix td.air-hears { background: #d5f5e3; }
+.air-matrix td.air-deaf { background: #f2f3f4; color: #7f8c8d; }
+.air-matrix td.air-unknown { color: #95a5a6; }
+.air-matrix td.air-hidden { background: #fadbd8; color: #c0392b; font-weight: 700; }
+.air-matrix td.air-self { color: #bdc3c7; }

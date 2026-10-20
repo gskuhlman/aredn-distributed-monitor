@@ -37,6 +37,7 @@ import cleanup
 import link_diagnostics
 import infra_audit
 import drift
+import airtime
 import change_log
 import channel_map
 import channel_planner
@@ -892,6 +893,25 @@ def api_settings_drift():
     except Exception as e:
         logger.exception("Settings drift report failed")
         return jsonify({'error': str(e)}), 500
+
+
+# ---- Sector Airtime (TODO #6) ----
+@app.route('/api/reports/airtime', methods=['GET', 'POST'])
+def api_sector_airtime():
+    """Per-sector clients, hearing matrix, hidden pairs and contention.
+    POST {overrides, scope?, hours?} previews a Channel Map what-if plan."""
+    body = (request.get_json(silent=True) or {}) if request.method == 'POST' else {}
+    scope = body.get('scope') or request.args.get('scope', 'all')
+    try:
+        hours = int(body.get('hours') or request.args.get('hours') or 24)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'hours must be a number'}), 400
+    try:
+        return jsonify(airtime.run_report(scope=scope, hours=hours, overrides=body.get('overrides') or None))
+    except Exception as e:
+        logger.exception("Sector airtime report failed")
+        return jsonify({'error': str(e)}), 500
+# ---- end Sector Airtime ----
 
 
 # ---- Channel Map (TODO #3) ----
