@@ -49,6 +49,8 @@ EVENT_NOISE_JUMP = 'noise_jump'
 EVENT_NOISE_CLEARED = 'noise_cleared'
 EVENT_ONE_WAY_LINK = 'one_way_link'
 EVENT_ONE_WAY_LINK_CLEARED = 'one_way_link_cleared'
+EVENT_ROUTE_DETOUR = 'route_detour'
+EVENT_ROUTE_RESTORED = 'route_restored'
 
 EVENT_TYPES = [
     'gateway_lost', 'gateway_restored',
@@ -58,6 +60,7 @@ EVENT_TYPES = [
     'frequency_change', 'radio_config_change',
     EVENT_ONE_WAY_LINK, EVENT_ONE_WAY_LINK_CLEARED,
     EVENT_NOISE_JUMP, EVENT_NOISE_CLEARED,
+    'route_changed', EVENT_ROUTE_DETOUR, EVENT_ROUTE_RESTORED,
 ]
 
 # problem event -> its recovery event (flap pairing and "recovery only if alerted")
@@ -68,6 +71,7 @@ RECOVERY_OF = {
     'link_blocked': 'link_unblocked',
     EVENT_ONE_WAY_LINK: EVENT_ONE_WAY_LINK_CLEARED,
     EVENT_NOISE_JUMP: EVENT_NOISE_CLEARED,
+    EVENT_ROUTE_DETOUR: EVENT_ROUTE_RESTORED,
 }
 PROBLEM_OF = {v: k for k, v in RECOVERY_OF.items()}
 
@@ -111,6 +115,8 @@ DEFAULT_RULES = [
     {'name': 'One-way link', 'event_types': [EVENT_ONE_WAY_LINK, EVENT_ONE_WAY_LINK_CLEARED],
      'min_severity': 'info', 'scope': 'any'},
     {'name': 'Noise floor jump', 'event_types': [EVENT_NOISE_JUMP, EVENT_NOISE_CLEARED],
+     'min_severity': 'info', 'scope': 'any'},
+    {'name': 'Route detour', 'event_types': [EVENT_ROUTE_DETOUR, EVENT_ROUTE_RESTORED],
      'min_severity': 'info', 'scope': 'any'},
 ]
 

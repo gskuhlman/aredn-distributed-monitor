@@ -177,6 +177,15 @@ MAINTENANCE_GRACE_MINUTES = env_int("MAINTENANCE_GRACE_MINUTES", 10)
 # level >= MIN_SNR). 15 dB is AREDN LQM's default minimum SNR.
 POWER_ADVISOR_MIN_SNR = env_int("POWER_ADVISOR_MIN_SNR", 15)
 POWER_ADVISOR_MARGIN_DB = env_int("POWER_ADVISOR_MARGIN_DB", 6)
+# --- Route Watch (route_watch.py): periodic traceroutes along key paths ---
+ROUTE_WATCH_ENABLED = env_bool("ROUTE_WATCH_ENABLED", True)
+ROUTE_WATCH_INTERVAL_MINUTES = env_int("ROUTE_WATCH_INTERVAL_MINUTES", 15)
+ROUTE_BASELINE_HOURS = env_int("ROUTE_BASELINE_HOURS", 24)       # baseline = most common route in this window
+ROUTE_BASELINE_MIN_RUNS = env_int("ROUTE_BASELINE_MIN_RUNS", 3)  # runs before a baseline exists
+ROUTE_CHANGE_RUNS = env_int("ROUTE_CHANGE_RUNS", 2)              # runs in a row to raise / clear
+ROUTE_DETOUR_HOPS = env_int("ROUTE_DETOUR_HOPS", 2)              # this many more hops = detour
+ROUTE_HISTORY_RETENTION_DAYS = env_int("ROUTE_HISTORY_RETENTION_DAYS", 31)
+# --- end Route Watch ---
 # Total incident capture window and gap between probe rounds, in seconds.
 INCIDENT_DURATION = env_int("INCIDENT_DURATION_SECONDS", 90)
 INCIDENT_PROBE_INTERVAL = env_int("INCIDENT_PROBE_INTERVAL_SECONDS", 5)

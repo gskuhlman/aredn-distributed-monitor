@@ -1658,7 +1658,11 @@ const EVENT_ICONS = {
     // Maintenance windows (maintenance.py)
     'maintenance_scheduled': { icon: '&#128197;', label: 'Maintenance Scheduled', class: 'event-info' },
     'maintenance_started': { icon: '&#128679;', label: 'Maintenance Started', class: 'event-info' },
-    'maintenance_ended': { icon: '&#9989;', label: 'Maintenance Ended', class: 'event-info' }
+    'maintenance_ended': { icon: '&#9989;', label: 'Maintenance Ended', class: 'event-info' },
+    // Route Watch (route_watch.py)
+    'route_changed': { icon: '&#128256;', label: 'Route Changed', class: 'event-info' },
+    'route_detour': { icon: '&#8618;', label: 'Route Detour', class: 'event-warning' },
+    'route_restored': { icon: '&#128257;', label: 'Route Restored', class: 'event-success' }
 };
 
 /**

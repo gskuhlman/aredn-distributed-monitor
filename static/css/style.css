@@ -2303,3 +2303,21 @@ tr.notify-log-suppressed td { color: #95a5a6; }
 .pa-badge-lost { background: #c0392b; }
 tr.pa-lost td { background: #fdedec; }
 tr.pa-marginal td { background: #fef5e7; }
+/* ---- Route Watch (#9, Diagnostics tab) ---- */
+.rw-table td { vertical-align: top; }
+.rw-route { white-space: normal !important; min-width: 280px; }
+.rw-hops { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 3px; font-size: 0.85em; }
+.rw-hop { padding: 1px 6px; border-radius: 8px; background: #eaecee; color: #2c3e50; white-space: nowrap; }
+.rw-hop-infra { background: #d6eaf8; }
+.rw-hop-new { background: #fdebd0; outline: 1px solid #e67e22; }
+.rw-hop-tunnel { background: #f5b7b1; }
+.rw-hop-timeout { background: transparent; color: #7f8c8d; }
+.rw-via { font-size: 0.75em; color: #7f8c8d; }
+.rw-off { font-size: 0.8em; color: #b9770e; margin-top: 3px; }
+.rw-row-detour td { background: rgba(230, 126, 34, 0.08); }
+.rw-actions { white-space: nowrap; }
+.rw-actions .btn-small + .btn-small { margin-left: 4px; }
+.rw-spark-line { fill: none; stroke: #2e86c1; stroke-width: 1.5; }
+.rw-spark-fail { fill: #c0392b; }
+.rw-add { margin-top: 8px; }
+.rw-history-row td { background: #f8f9f9; }
