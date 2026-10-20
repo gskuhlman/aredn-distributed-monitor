@@ -772,6 +772,10 @@ def process_iperf_queue(socketio=None):
             target_node_name=target_node
         )
 
+        if result or not gateway.failure_is_ours():
+            import capacity  # local import: capacity imports rf_stats lazily too
+            capacity.record(source_node, target_node, result, kind='queue')
+
         if result:
             # Record to database
             database.update_link_history_throughput(

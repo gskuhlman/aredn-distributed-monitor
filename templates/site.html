@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ site_code }} - AREDN Site Dashboard</title>
+    <script src="{{ url_for('static', filename='vendor/chart-4.5.1.umd.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container node-page site-page">
+        <header class="header">
+            <div class="header-left">
+                <h1 id="site-title">{{ site_code }}</h1>
+                <nav class="header-tabs">
+                    <a class="tab-btn" href="/">Network</a>
+                    <span id="site-nav" class="site-nav"></span>
+                </nav>
+            </div>
+            <div class="header-controls">
+                <select id="site-hours" class="form-input" title="History window">
+                    <option value="6">6 h</option>
+                    <option value="24" selected>24 h</option>
+                    <option value="72">3 days</option>
+                    <option value="168">7 days</option>
+                </select>
+                <span id="site-status">Loading...</span>
+                <button id="site-refresh" class="btn btn-primary">Refresh</button>
+            </div>
+        </header>
+        <div id="maint-banner" class="maint-banner" hidden></div>
+
+        <main class="node-page-content">
+            <section class="node-page-section">
+                <h2>Summary</h2>
+                <div id="site-summary"><p class="loading">Loading...</p></div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Radios</h2>
+                <div id="site-spectrum"></div>
+                <div id="site-radios"></div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Clients per Sector</h2>
+                <div id="site-sectors"></div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Uplink Paths</h2>
+                <div id="site-paths"></div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Node Health</h2>
+                <div id="site-health"></div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Events</h2>
+                <div id="site-events"></div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Site Notes</h2>
+                <div id="site-notes"></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+    <script>
+        window.SITE_CODE = {{ site_code|tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='js/infra-review.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/notes.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/maintenance.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/site-page.js') }}"></script>
+</body>
+</html>

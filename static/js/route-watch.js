@@ -30,6 +30,10 @@ const RouteWatch = {
                 if (btn.dataset.rwAction === 'run') this.runPath(id, btn);
                 if (btn.dataset.rwAction === 'delete') this.deletePath(id, btn);
                 if (btn.dataset.rwAction === 'history') this.toggleHistory(id);
+                if (btn.dataset.rwAction === 'path' && typeof PathView !== 'undefined') {
+                    const p = this.data.paths.find(x => x.id === id);
+                    if (p) PathView.open(p.source || '', p.target);
+                }
             }
         });
         this.load();
@@ -89,6 +93,7 @@ const RouteWatch = {
             <td><small>${this.esc(p.last_change || '-')}</small></td>
             <td class="rw-actions">
                 <button class="btn btn-small btn-secondary" data-rw-action="history" data-id="${p.id}">${this.open.has(p.id) ? 'Hide' : 'Routes'}</button>
+                <button class="btn btn-small btn-secondary" data-rw-action="path" data-id="${p.id}" title="Each hop coloured by link quality (Path View)">Path</button>
                 <button class="btn btn-small btn-secondary" data-rw-action="run" data-id="${p.id}">Trace now</button>
                 <button class="btn btn-small btn-secondary" data-rw-action="delete" data-id="${p.id}"
                     title="${p.kind === 'auto' ? 'Stop watching this automatic path' : 'Delete this path and its history'}">Remove</button>

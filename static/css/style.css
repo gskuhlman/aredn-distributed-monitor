@@ -2323,3 +2323,64 @@ tr.pa-marginal td { background: #fef5e7; }
 .rw-history-row td { background: #f8f9f9; }
 /* ---- Weather (#13, weather.js) ---- */
 .wx-inline { font-size: 0.55em; font-weight: normal; margin-left: 12px; vertical-align: middle; }
+/* ---- Health score (#5, health-score.js, Reports tab) ---- */
+.hs-table td { vertical-align: middle; }
+.hs-spark { display: block; cursor: pointer; }
+.hs-spark rect[data-hs-bucket]:hover { opacity: 0.6; }
+.hs-maint { fill: rgba(52, 152, 219, 0.15); }
+.hs-score { display: inline-block; min-width: 30px; padding: 1px 6px; border-radius: 8px; color: #fff; text-align: center; font-weight: 600; text-shadow: 0 0 2px rgba(0,0,0,0.4); }
+.hs-drop { white-space: normal !important; min-width: 220px; }
+.hs-drop .btn-small { margin-left: 6px; }
+.hs-infra { color: #2874a6; }
+.hs-changes { margin-top: 12px; padding: 10px; border: 1px solid #d6dbdf; border-radius: 6px; background: #fbfcfc; }
+.hs-changes h4 { display: flex; justify-content: space-between; align-items: center; }
+/* ---- Heatmap (#15, heatmap.js, Reports tab) ---- */
+.hm-wrap { position: relative; overflow-x: auto; max-height: 640px; overflow-y: auto; }
+#hm-canvas { display: block; cursor: pointer; }
+.hm-tip { position: absolute; z-index: 5; pointer-events: none; padding: 3px 8px; border-radius: 4px; background: rgba(44, 62, 80, 0.92); color: #fff; font-size: 12px; white-space: nowrap; }
+/* ---- Link swimlanes (#17, swimlanes.js, Reports tab) ---- */
+.sl-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin: 4px 0 8px; }
+.sl-key i { display: inline-block; width: 12px; height: 10px; margin-right: 4px; vertical-align: middle; border-radius: 2px; }
+.sl-maint-key { background: rgba(52, 152, 219, 0.7); height: 3px !important; }
+.sl-lanes { max-height: 640px; overflow-y: auto; }
+.sl-axis { display: flex; justify-content: space-between; margin-left: 290px; font-size: 11px; color: #566573; }
+.sl-lane { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 1px 0; }
+.sl-lane:hover { background: #f4f6f7; }
+.sl-label { flex: 0 0 284px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-type { display: inline-block; min-width: 34px; font-size: 10px; color: #566573; }
+.sl-bar { flex: 1 1 auto; height: 16px; width: 100%; }
+.sl-maint { fill: rgba(52, 152, 219, 0.7); }
+/* ---- Path View (#18, path-view.js, Diagnostics tab) ---- */
+.pv-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2px; margin: 4px 0; font-size: 0.85em; }
+.pv-seg { display: inline-block; padding: 1px 8px; border-radius: 3px; color: #fff; font-size: 0.85em; white-space: nowrap; position: relative; }
+.pv-seg::after { content: '›'; margin-left: 4px; }
+.pv-seg[data-pv-a] { cursor: pointer; }
+.pv-good { background: #27ae60; }
+.pv-fair { background: #d4ac0d; }
+.pv-poor { background: #c0392b; }
+.pv-tunnel { background: #8e44ad; }
+.pv-unknown { background: #95a5a6; }
+.pv-history { margin: 6px 0 10px; padding-left: 8px; border-left: 3px solid #d6dbdf; }
+.pv-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.pv-legend .pv-seg::after { content: ''; margin: 0; }
+/* ---- Single points of failure (#20, spof.js) ---- */
+.spof-behind { white-space: normal !important; max-width: 420px; font-size: 0.85em; }
+.spof-clear a { width: auto !important; padding: 0 8px; font-size: 12px; white-space: nowrap; }
+/* ---- Site dashboard (#19, site-page.js, /sites/<code>) ---- */
+.site-nav { display: inline-flex; gap: 4px; margin-left: 6px; }
+.site-tiles { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.site-tile { flex: 0 1 180px; padding: 10px 12px; border-radius: 6px; background: #eaf2f8; display: flex; flex-direction: column; }
+.site-tile strong { font-size: 1.6em; color: #1b4f72; }
+.site-tile span { font-size: 0.85em; color: #566573; }
+.site-tile-bad { background: #fdedec; }
+.site-tile-bad strong { color: #922b21; }
+.site-sector { margin-bottom: 14px; }
+tr.site-down td { opacity: 0.65; }
+.site-link { margin-left: 4px; font-size: 0.9em; color: #aed6f1; }
+/* ---- Capacity (#27/#28, capacity.js) and weekly report (#25, weekly-report.js) ---- */
+.cap-table tbody tr { cursor: pointer; }
+.cap-chart-wrap { position: relative; height: 260px; }
+.wr-text { white-space: pre-wrap; font-size: 12px; background: #f8f9f9; border: 1px solid #d6dbdf; border-radius: 6px; padding: 10px; max-height: 520px; overflow-y: auto; }
+/* ---- Link budget (#26, link-budget.js) ---- */
+.lb-chart-wrap { position: relative; height: 240px; margin: 8px 0; }
+.lb-bad { color: #c0392b; font-weight: 600; }
