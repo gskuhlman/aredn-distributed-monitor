@@ -2226,3 +2226,26 @@ tr.notify-log-suppressed td { color: #95a5a6; }
 .maint-node-action { display: inline-flex; align-items: center; gap: 6px; }
 .maint-node-form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .maint-node-form .form-input { width: auto; }
+
+/* ---- Site Matrix (#16, Diagnostics tab) ---- */
+.sm-table { border-collapse: collapse; font-size: 12px; }
+.sm-table th, .sm-table td { border: 1px solid #ddd; padding: 3px 5px; text-align: center; white-space: nowrap; }
+.sm-table th.sm-row { text-align: left; position: sticky; left: 0; background: #f7f9fb; z-index: 1; }
+.sm-table th.sm-row small, .sm-table th.sm-col small { display: block; font-weight: normal; color: #666; }
+.sm-table th.sm-col { vertical-align: bottom; max-width: 90px; }
+.sm-table th.sm-col span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.sm-table th.sm-col-site { background: #eaf2f8; }
+.sm-cell { cursor: pointer; font-variant-numeric: tabular-nums; }
+.sm-self { background: repeating-linear-gradient(45deg, #eee, #eee 4px, #f8f8f8 4px, #f8f8f8 8px); }
+.sm-empty { background: #fff; }
+.sm-snr-0 { background: #f5b7b1; }
+.sm-snr-1 { background: #fad7a0; }
+.sm-snr-2 { background: #f9e79f; }
+.sm-snr-3 { background: #abebc6; }
+.sm-snr-none { background: #e5e8e8; }
+.sm-stale { opacity: 0.55; }
+.sm-oneway { outline: 2px solid #c0392b; outline-offset: -2px; }
+.sm-lopsided { box-shadow: inset 0 -3px 0 #e67e22; }
+.sm-blocked { text-decoration: line-through; }
+.sm-marks { margin-left: 3px; font-weight: bold; color: #7b241c; }
+.sm-open { margin-left: 8px; }

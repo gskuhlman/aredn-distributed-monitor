@@ -388,6 +388,27 @@
                         </div>
                         <!-- end Link Watch -->
 
+                        <!-- Site Matrix (#16, site-matrix.js) -->
+                        <div class="diag-section">
+                            <h3>Site Matrix <small class="form-hint">every radio at a site against every radio it hears, both directions per cell</small></h3>
+                            <div class="mh-controls">
+                                <select id="sm-site" class="form-input" title="Site"></select>
+                                <input type="text" id="sm-radios" class="form-input" placeholder="or radio names, comma separated">
+                                <select id="sm-hours" class="form-input" title="History window">
+                                    <option value="6">6 h</option>
+                                    <option value="24" selected>24 h</option>
+                                    <option value="72">3 days</option>
+                                    <option value="168">7 days</option>
+                                </select>
+                                <label class="checkbox-label" title="Also show each pair's channel relation under the plan in the Channel Map what-if box">
+                                    <input type="checkbox" id="sm-whatif"> Use Channel Map what-if</label>
+                                <button id="sm-run" class="btn btn-primary">Show Matrix</button>
+                                <span id="sm-status" class="form-hint"></span>
+                            </div>
+                            <div id="sm-report"><p class="log-empty">Not run yet.</p></div>
+                        </div>
+                        <!-- end Site Matrix -->
+
                         <div class="diag-section">
                             <h3>Infrastructure Review <small class="form-hint">radio settings of every infrastructure node: channel plans, beams, pointing, pairing, firmware</small></h3>
                             <div class="mh-controls">
@@ -1150,6 +1171,7 @@
     <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
     <script src="{{ url_for('static', filename='js/maintenance.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-watch.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/site-matrix.js') }}"></script>
     <script src="{{ url_for('static', filename='js/cleanup.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
