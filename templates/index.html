@@ -90,6 +90,8 @@
                                     <button class="time-btn" data-hours="168">7D</button>
                                 </div>
                                 <button id="rf-ping-all" class="btn btn-secondary">Ping All</button>
+                                <label class="header-checkbox" title="Overlay NWS rain, temperature and wind on the quality and SNR charts">
+                                    <input type="checkbox" id="rf-weather-toggle"> Weather</label>
                             </div>
                             <div class="rf-stats-status">
                                 <span id="rf-ping-status"></span>
@@ -703,6 +705,17 @@
                             <div class="table-scroll-wrapper rpt-table-wrap" id="ch-outages"></div>
                         </div>
 
+                        <!-- Weather correlation (weather.py, weather.js) -->
+                        <div class="diag-section">
+                            <h3>Weather <small class="form-hint">NWS observations vs. RF links: rain fade, wind-moved antennas, ice and thermal drift</small></h3>
+                            <div class="ch-actions">
+                                <button id="wx-refresh" class="btn btn-secondary btn-small">Fetch now</button>
+                                <span id="wx-refresh-result" class="form-hint"></span>
+                            </div>
+                            <div id="wx-panel"><p class="log-empty">Loading...</p></div>
+                        </div>
+                        <!-- end Weather -->
+
                         <!-- Unreachable causes (unreachable.py) -->
                         <div class="diag-section">
                             <h3>Unreachable Nodes <small class="form-hint" id="rpt-unreach-hint">why polls failed; only "Down" and "Intermittent" count as unreachable</small></h3>
@@ -1230,6 +1243,7 @@
     <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reports.js') }}"></script>
     <script src="{{ url_for('static', filename='js/collector-health.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/weather.js') }}"></script>
     <script src="{{ url_for('static', filename='js/changes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/channel-map.js') }}"></script>

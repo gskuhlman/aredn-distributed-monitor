@@ -583,6 +583,7 @@ const RFStats = {
                 ChangesModule.markCharts(Object.values(this.charts), source, target);
             }
             if (typeof Notes !== 'undefined') Notes.markCharts(Object.values(this.charts), source, target);
+            if (typeof Weather !== 'undefined') Weather.markCharts([this.charts.quality, this.charts.snr]);
 
         } catch (error) {
             console.error('Error loading link history:', error);

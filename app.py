@@ -46,6 +46,7 @@ import channel_planner
 import link_watch
 import site_matrix
 import collector_health
+import weather
 import link_health
 import mesh_diagnostics
 import incident_report
@@ -1337,6 +1338,72 @@ def api_collector_health_check():
     return jsonify({'success': True, 'check': row})
 
 
+# --- Weather (weather.py) ---
+def _weather_window():
+    """(start, end) local timestamps from ?start&end (YYYY-MM-DDTHH:MM) or ?hours."""
+    start, end = request.args.get('start'), request.args.get('end')
+    if start and end:
+        try:
+            s = datetime.strptime(start.replace(' ', 'T')[:16], '%Y-%m-%dT%H:%M')
+            e = datetime.strptime(end.replace(' ', 'T')[:16], '%Y-%m-%dT%H:%M')
+        except ValueError:
+            raise ValueError('start and end must be YYYY-MM-DDTHH:MM')
+        if e <= s or (e - s).days > 32:
+            raise ValueError('end must be after start, at most 32 days')
+        return s.strftime('%Y-%m-%d %H:%M:%S'), e.strftime('%Y-%m-%d %H:%M:%S')
+    hours = min(max(1, request.args.get('hours', 72, type=int)), 24 * 32)
+    e = datetime.now()
+    return (e - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S'), e.strftime('%Y-%m-%d %H:%M:%S')
+
+
+@app.route('/api/weather')
+def api_weather():
+    """Stored weather observations in a window plus station/poller status."""
+    try:
+        start, end = _weather_window()
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({'status': weather.status(), 'start': start, 'end': end,
+                    'observations': weather.observations(start, end)})
+
+
+@app.route('/api/weather/correlation')
+def api_weather_correlation():
+    """Weather vs SNR for one link (?source&target) or one radio (?source)."""
+    source = (request.args.get('source') or '').strip()
+    if not source:
+        return jsonify({'error': 'source is required'}), 400
+    try:
+        start, end = _weather_window() if request.args.get('start') else (None, None)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    hours = min(max(1, request.args.get('hours', 168, type=int)), 24 * 32)
+    return jsonify(weather.correlation(source, request.args.get('target'), hours=hours, start=start, end=end))
+
+
+@app.route('/api/weather/summary')
+def api_weather_summary():
+    """RF link directions ranked by rain fade, wind sensitivity and temperature."""
+    try:
+        start, end = _weather_window() if request.args.get('start') else (None, None)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    hours = min(max(1, request.args.get('hours', 168, type=int)), 24 * 32)
+    return jsonify(weather.summary(hours=hours, start=start, end=end))
+
+
+@app.route('/api/weather/refresh', methods=['POST'])
+def api_weather_refresh():
+    """Fetch observations from NWS now (backfills when nothing is stored)."""
+    if not config.WEATHER_ENABLED:
+        return jsonify({'error': 'Weather is disabled (WEATHER_ENABLED=0)'}), 409
+    result = weather.fetch()
+    if result.get('error'):
+        return jsonify(result), 502
+    return jsonify({'success': True, **result})
+# --- end Weather ---
+
+
 @app.route('/api/reports/window/link/<source>/<target>')
 def api_report_window_link(source, target):
     try:
@@ -2019,6 +2086,9 @@ def start_scheduler():
         )
 
         logger.info(f"RF Stats enabled: ping every {config.PING_INTERVAL}s, iperf every {config.IPERF_INTERVAL}s")
+
+    # NWS weather observations (background; failures never touch scans)
+    weather.install(scheduler)
 
     scheduler.start()
     logger.info("Scheduler started")

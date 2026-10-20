@@ -2292,3 +2292,6 @@ tr.notify-log-suppressed td { color: #95a5a6; }
 .air-matrix td.air-unknown { color: #95a5a6; }
 .air-matrix td.air-hidden { background: #fadbd8; color: #c0392b; font-weight: 700; }
 .air-matrix td.air-self { color: #bdc3c7; }
+
+/* ---- Weather (#13, weather.js) ---- */
+.wx-inline { font-size: 0.55em; font-weight: normal; margin-left: 12px; vertical-align: middle; }
