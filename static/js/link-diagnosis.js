@@ -96,11 +96,14 @@ const LinkDiagnosis = {
             ? `<ul class="diag-evidence">${f.evidence.map(e => `<li>${this.esc(e)}</li>`).join('')}</ul>` : '';
         const rec = f.recommendation
             ? `<div class="diag-rec"><strong>Try:</strong> ${this.esc(f.recommendation)}</div>` : '';
+        const pa = f.power_advisor;
+        const advisor = pa ? `<div class="diag-rec"><a href="/nodes/${encodeURIComponent(pa.node)}?power_cut=${encodeURIComponent(pa.cut_db)}#power-advisor"
+            target="_blank" rel="noopener">Open the power advisor for ${this.esc(pa.node)} (${this.esc(pa.cut_db)} dB cut)</a></div>` : '';
         return `<div class="diag-finding diag-${f.severity}">
             <div class="diag-finding-head"><span class="diag-badge">${this.esc(f.severity)}</span>
                 <span class="diag-cat">${this.esc(f.category)}</span>
                 <strong>${this.esc(f.title)}</strong></div>
-            <div class="diag-finding-body">${this.esc(f.detail)}${evidence}${rec}</div>
+            <div class="diag-finding-body">${this.esc(f.detail)}${evidence}${rec}${advisor}</div>
         </div>`;
     },
 

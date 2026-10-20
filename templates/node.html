@@ -128,6 +128,14 @@
                 <div id="node-changes"><p class="loading">Loading...</p></div>
             </section>
 
+            <!-- Power advisor (TODO #11, power-advisor.js) -->
+            <section class="node-page-section" id="power-advisor">
+                <h2>Power Advisor</h2>
+                <p class="health-footnote">Predicts what every RF neighbour would hear from this radio after a TX power cut
+                    (its SNR drops by the cut; noise doesn't change). Nothing is sent to the radio. Infrastructure radios are never cut.</p>
+                <div id="pa-panel"><p class="loading">Loading...</p></div>
+            </section>
+
             <!-- Notes (TODO #23, notes.js) -->
             <section class="node-page-section">
                 <h2>Notes</h2>
@@ -193,6 +201,7 @@
     <script src="{{ url_for('static', filename='js/aim-check.js') }}"></script>
     <script src="{{ url_for('static', filename='js/node-page.js') }}"></script>
     <script src="{{ url_for('static', filename='js/node-changes.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/power-advisor.js') }}"></script>
     <script src="{{ url_for('static', filename='js/changes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/maintenance.js') }}"></script>

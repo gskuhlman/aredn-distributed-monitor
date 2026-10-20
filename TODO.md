@@ -36,7 +36,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
       each site, MMC↔COL↔EOC); record hop count and path; alert on detours.
 - [x] 10. **Starting-node health page.** Outages, latency, DNS resolution time and lost
       scans, to separate problems with this PC or its uplink from problems on the mesh.
-- [ ] 11. **Power-cut advisor.** Predict receive levels at every neighbor after a
+- [x] 11. **Power-cut advisor.** Predict receive levels at every neighbor after a
       proposed TX power cut, so nobody drops below the SNR they need. Never cut
       infrastructure power.
 - [x] 12. **Firmware/settings drift report.** Mismatches in firmware, mode, SSID, width,

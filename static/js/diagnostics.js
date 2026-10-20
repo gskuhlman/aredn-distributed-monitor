@@ -158,6 +158,9 @@ const DiagnosticsModule = {
                 <div class="mh-body">
                     <p>${this.esc(f.detail)}</p>
                     <p><strong>Suggested fix:</strong> ${this.esc(f.recommendation)}</p>
+                    ${f.evidence?.power_advisor ? `<p><a href="/nodes/${encodeURIComponent(f.evidence.power_advisor.node)}?power_cut=${encodeURIComponent(f.evidence.power_advisor.cut_db)}#power-advisor"
+                        target="_blank" rel="noopener">Open the power advisor for ${this.esc(f.evidence.power_advisor.node)}
+                        (${this.esc(f.evidence.power_advisor.cut_db)} dB cut)</a></p>` : ''}
                     <p class="mh-nodes">${nodeLinks}</p>
                 </div>
             </details>`;

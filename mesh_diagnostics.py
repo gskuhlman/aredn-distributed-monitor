@@ -41,6 +41,7 @@ OVERLOAD_SNR = 55.0       # dB - receiver overload risk on its own
 OVERLOAD_SIGNAL_DBM = -35.0
 WEAK_SNR = 15.0           # dB - AREDN LQM's default minimum SNR
 NEAR_FAR_SPREAD = 25.0    # dB between hottest and weakest neighbor
+TARGET_SNR = 30.0         # dB - comfortable level to turn a loud transmitter down to (power advisor link)
 
 SNR_GAP_INFO = 3.0
 SNR_GAP_WARNING = 6.0
@@ -257,7 +258,9 @@ def _check_near_far(f, rf_by_source, key_nodes, scope):
                 f'Both are infrastructure: increase their separation (vertical spacing, aim away, '
                 f'shielding) or move them further apart in frequency.')),
             {'receiver': receiver, 'hot': loud_name, 'hot_snr': loudest[1], 'hot_signal': loudest[2],
-             'weak': [{'node': m[0]['target_node'], 'snr': m[1], 'blocked': bool(m[0].get('blocked'))} for m in weak]}
+             'weak': [{'node': m[0]['target_node'], 'snr': m[1], 'blocked': bool(m[0].get('blocked'))} for m in weak],
+             'power_advisor': ({'node': loud_name, 'cut_db': max(0, round(loudest[1] - TARGET_SNR))}
+                               if loud_name not in infra else None)}
         )
 
     # A transmitter that is "hot" at several receivers is likely running too
@@ -281,7 +284,9 @@ def _check_near_far(f, rf_by_source, key_nodes, scope):
                  if tx not in infra else
                  f'{tx} is infrastructure, so keep its power; the receivers listed should re-aim, '
                  'use lower-gain antennas, or add separation.'),
-                {'transmitter': tx, 'receivers': [{'node': r, 'snr': s, 'signal': g} for r, s, g in hits]}
+                {'transmitter': tx, 'receivers': [{'node': r, 'snr': s, 'signal': g} for r, s, g in hits],
+                 'power_advisor': ({'node': tx, 'cut_db': max(0, round(max(h[1] for h in hits) - TARGET_SNR))}
+                                   if tx not in infra else None)}
             )
 
 

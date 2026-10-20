@@ -38,6 +38,7 @@ import link_diagnostics
 import infra_audit
 import drift
 import aim_check
+import power_advisor
 import airtime
 import change_log
 import notes
@@ -900,6 +901,23 @@ def api_antenna_aim():
     except Exception as e:
         logger.exception("Antenna aim report failed")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/power-advisor/<node>')
+def api_power_advisor(node):
+    """Predicted neighbour SNR after a TX power cut (?cut_db=, ?hours=24).
+    Without cut_db: the 0..20 dB curve and the largest safe cut. Refuses
+    infrastructure radios (their power is never cut)."""
+    try:
+        hours = max(1, min(24 * 31, int(request.args.get('hours', 24))))
+        cut = request.args.get('cut_db')
+        cut = float(cut) if cut not in (None, '') else None
+    except (TypeError, ValueError):
+        return jsonify({'error': 'hours and cut_db must be numbers'}), 400
+    result = power_advisor.advise(node, cut_db=cut, hours=hours)
+    if result.get('error'):
+        return jsonify(result), 404
+    return jsonify(result)
 
 
 def _node_aim(node_name):

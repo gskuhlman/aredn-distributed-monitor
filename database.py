@@ -1277,7 +1277,8 @@ RADIO_CONFIG_COLUMNS = (
     ('rf_status', 'TEXT'), ('rf_mode', 'TEXT'), ('rf_ssid', 'TEXT'), ('rf_chanbw', 'REAL'),
     ('antenna_azimuth', 'REAL'), ('antenna_elevation', 'REAL'), ('antenna_height', 'REAL'),
     ('antenna_gain', 'REAL'), ('antenna_beamwidth', 'REAL'), ('antenna_desc', 'TEXT'),
-    ('lqm_user_blocks', 'TEXT'), ('lqm_hidden_nodes', 'TEXT'), ('radio_config_at', 'TEXT'),
+    ('lqm_user_blocks', 'TEXT'), ('lqm_hidden_nodes', 'TEXT'), ('rf_txpower', 'REAL'),
+    ('radio_config_at', 'TEXT'),
 )
 
 
@@ -1310,6 +1311,8 @@ def radio_config_from_sysinfo(data):
         'antenna_beamwidth': _num_or_none(antenna.get('beamwidth')),
         'antenna_desc': desc.replace('&deg;', '°') if isinstance(desc, str) else desc,
         'lqm_user_blocks': lqm_cfg.get('user_blocks') if 'user_blocks' in lqm_cfg else None,
+        # Not in current AREDN sysinfo; stored if a firmware ever reports it.
+        'rf_txpower': _num_or_none(meshrf.get('txpower')),
         'lqm_hidden_nodes': json.dumps([
             {'hostname': (h.get('hostname') or '').lower() or None, 'ip': h.get('ip'), 'distance': h.get('distance')}
             for h in hidden if isinstance(h, dict)]) if hidden is not None else None,

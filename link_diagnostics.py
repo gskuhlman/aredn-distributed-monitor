@@ -813,10 +813,13 @@ def _check_near_far(ctx, f):
             cut = max(0, round(hot['snr'] - TARGET_SNR))
             level = f"{hot['snr']:.0f} dB SNR" + (f", {hot['signal']:.0f} dBm" if hot.get('signal') is not None else '')
             fix = _near_far_fix(ctx, receiver, hot['node'], cut)
+            # Link to the power-cut advisor, prefilled, when the loud end may be cut.
+            advisor = {'node': hot['node'], 'cut_db': cut} if hot['node'] not in ctx['infra'] else None
             if not victims and not self_poor:
                 _add(f, 'info', 'near_far', f"{hot['node']} is louder than needed at {receiver} ({level})",
                      f"Nothing at {receiver} is suffering from it yet, but a signal this strong leaves "
                      f"little room for weaker neighbors.", [], fix)
+                f[-1]['power_advisor'] = advisor
                 continue
             gap = max([hot['snr'] - v['snr'] for v in victims] or [0])
             sev = 'critical' if (gap >= NEAR_FAR_GAP_STRONG or any(v['blocked'] for v in victims)) else 'warning'
@@ -836,6 +839,7 @@ def _check_near_far(ctx, f):
                   f"LQ {n['lq'] if n['lq'] is not None else '?'}%" + (' (loud)' if n['hot'] else '')
                   + (' (struggling)' if n['poor'] else '') for n in measured[:8]],
                  fix)
+            f[-1]['power_advisor'] = advisor
 
 
 def _near_far_fix(ctx, receiver, loud, cut):

@@ -2292,3 +2292,14 @@ tr.notify-log-suppressed td { color: #95a5a6; }
 .air-matrix td.air-unknown { color: #95a5a6; }
 .air-matrix td.air-hidden { background: #fadbd8; color: #c0392b; font-weight: 700; }
 .air-matrix td.air-self { color: #bdc3c7; }
+
+/* ---- Power advisor (#11, power-advisor.js, node page) ---- */
+.pa-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 6px 0 10px; }
+.pa-controls input[type="range"] { width: 220px; vertical-align: middle; }
+.pa-chart-wrap { position: relative; height: 240px; margin: 10px 0; }
+.pa-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; color: #fff; background: #95a5a6; }
+.pa-badge-ok { background: #27ae60; }
+.pa-badge-marginal { background: #e67e22; }
+.pa-badge-lost { background: #c0392b; }
+tr.pa-lost td { background: #fdedec; }
+tr.pa-marginal td { background: #fef5e7; }

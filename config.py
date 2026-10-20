@@ -172,6 +172,11 @@ ONE_WAY_FORGET_MINUTES = env_int("ONE_WAY_FORGET_MINUTES", 60)
 # Maintenance windows (maintenance.py): alarms stay quiet this many minutes
 # after a window ends while radios rejoin.
 MAINTENANCE_GRACE_MINUTES = env_int("MAINTENANCE_GRACE_MINUTES", 10)
+# Power-cut advisor (power_advisor.py): a neighbour stays "ok" while its
+# median SNR of the radio after the cut is >= MIN_SNR + MARGIN (and its fade
+# level >= MIN_SNR). 15 dB is AREDN LQM's default minimum SNR.
+POWER_ADVISOR_MIN_SNR = env_int("POWER_ADVISOR_MIN_SNR", 15)
+POWER_ADVISOR_MARGIN_DB = env_int("POWER_ADVISOR_MARGIN_DB", 6)
 # Total incident capture window and gap between probe rounds, in seconds.
 INCIDENT_DURATION = env_int("INCIDENT_DURATION_SECONDS", 90)
 INCIDENT_PROBE_INTERVAL = env_int("INCIDENT_PROBE_INTERVAL_SECONDS", 5)
