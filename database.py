@@ -1277,7 +1277,7 @@ RADIO_CONFIG_COLUMNS = (
     ('rf_status', 'TEXT'), ('rf_mode', 'TEXT'), ('rf_ssid', 'TEXT'), ('rf_chanbw', 'REAL'),
     ('antenna_azimuth', 'REAL'), ('antenna_elevation', 'REAL'), ('antenna_height', 'REAL'),
     ('antenna_gain', 'REAL'), ('antenna_beamwidth', 'REAL'), ('antenna_desc', 'TEXT'),
-    ('lqm_user_blocks', 'TEXT'), ('radio_config_at', 'TEXT'),
+    ('lqm_user_blocks', 'TEXT'), ('lqm_hidden_nodes', 'TEXT'), ('radio_config_at', 'TEXT'),
 )
 
 
@@ -1293,7 +1293,11 @@ def radio_config_from_sysinfo(data):
     meshrf = data.get('meshrf') or {}
     antenna = meshrf.get('antenna') or {}
     lqm_cfg = (data.get('lqm') or {}).get('config') or {}
+    lqm_info = (data.get('lqm') or {}).get('info') or {}
     desc = antenna.get('description')
+    # LQM's own hidden-node list: stations its RF neighbours hear but this
+    # radio doesn't (JSON list of {hostname, ip, distance}).
+    hidden = lqm_info.get('hidden_nodes') if isinstance(lqm_info.get('hidden_nodes'), list) else None
     return {
         'rf_status': meshrf.get('status'),
         'rf_mode': meshrf.get('mode'),
@@ -1306,6 +1310,9 @@ def radio_config_from_sysinfo(data):
         'antenna_beamwidth': _num_or_none(antenna.get('beamwidth')),
         'antenna_desc': desc.replace('&deg;', '°') if isinstance(desc, str) else desc,
         'lqm_user_blocks': lqm_cfg.get('user_blocks') if 'user_blocks' in lqm_cfg else None,
+        'lqm_hidden_nodes': json.dumps([
+            {'hostname': (h.get('hostname') or '').lower() or None, 'ip': h.get('ip'), 'distance': h.get('distance')}
+            for h in hidden if isinstance(h, dict)]) if hidden is not None else None,
     }
 
 

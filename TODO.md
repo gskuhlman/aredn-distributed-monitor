@@ -25,7 +25,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 
 ## Troubleshooting checks
 
-- [ ] 6. **Hidden-node / airtime check per sector.** Clients that can't hear each other,
+- [x] 6. **Hidden-node / airtime check per sector.** Clients that can't hear each other,
       combined with channel busy and retries; suggest RTS/CTS or fewer clients.
 - [x] 7. **Noise-floor watch.** Noise (signal − SNR) per radio over time; alert on jumps
       of 5 dB or more; show the time-of-day pattern (WiFi follows when people are home).

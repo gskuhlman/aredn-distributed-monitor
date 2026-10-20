@@ -2281,3 +2281,14 @@ tr.notify-log-suppressed td { color: #95a5a6; }
 .sm-blocked { text-decoration: line-through; }
 .sm-marks { margin-left: 3px; font-weight: bold; color: #7b241c; }
 .sm-open { margin-left: 8px; }
+/* Sector airtime (#6) */
+.air-overrides { width: 100%; font-family: monospace; font-size: 12px; margin: 6px 0; }
+.diag-table td.air-fail-poor { background: #fadbd8; font-weight: 600; }
+.diag-table td.air-fail-marginal { background: #fdebd0; }
+.air-matrix th, .air-matrix td { text-align: center; font-size: 12px; white-space: nowrap; }
+.air-matrix tbody th { text-align: left; }
+.air-matrix td.air-hears { background: #d5f5e3; }
+.air-matrix td.air-deaf { background: #f2f3f4; color: #7f8c8d; }
+.air-matrix td.air-unknown { color: #95a5a6; }
+.air-matrix td.air-hidden { background: #fadbd8; color: #c0392b; font-weight: 700; }
+.air-matrix td.air-self { color: #bdc3c7; }

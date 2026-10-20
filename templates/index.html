@@ -455,6 +455,38 @@
                             <div id="aim-report"><p class="log-empty">Not run yet.</p></div>
                         </div>
                         <!-- end Antenna Aim -->
+                        <!-- Sector Airtime (#6, airtime.js) -->
+                        <div class="diag-section">
+                            <h3>Sector Airtime <small class="form-hint">who hears whom around each sector, hidden pairs, shared channels on a mast and contention</small></h3>
+                            <div class="mh-controls">
+                                <select id="air-scope" class="form-input" title="Which radios to check">
+                                    <option value="all">All nodes in scope</option>
+                                    <option value="infrastructure">Infrastructure</option>
+                                    <option value="infrastructure-connected">Infrastructure + Connected</option>
+                                    <option value="selected">Selected Nodes</option>
+                                    <option value="selected-connected">Selected Nodes + Connected</option>
+                                </select>
+                                <select id="air-hours" class="form-input" title="Window for tx fail rates and packet counts">
+                                    <option value="6">Last 6 h</option>
+                                    <option value="24" selected>Last 24 h</option>
+                                    <option value="72">Last 3 days</option>
+                                    <option value="168">Last 7 days</option>
+                                </select>
+                                <button id="air-run" class="btn btn-primary">Check Sectors</button>
+                                <span id="air-status" class="form-hint"></span>
+                            </div>
+                            <details class="diag-details">
+                                <summary>Preview a channel plan</summary>
+                                <textarea id="air-overrides" class="form-input air-overrides" rows="5"
+                                    placeholder="one per line: name freq width, or name off (Channel Map what-if syntax)"></textarea>
+                                <div class="mh-controls">
+                                    <button id="air-use-map" class="btn btn-secondary btn-small">Use Channel Map what-if</button>
+                                    <button id="air-preview" class="btn btn-primary btn-small">Preview Plan</button>
+                                </div>
+                            </details>
+                            <div id="air-report"><p class="log-empty">Not run yet.</p></div>
+                        </div>
+                        <!-- end Sector Airtime -->
                         <!-- Cleanup (#24, cleanup.js) -->
                         <div class="diag-section">
                             <h3>Cleanup <small class="form-hint">fake, placeholder, stale and known-unreachable nodes; exclude them from scanning or delete their records</small></h3>
@@ -1184,6 +1216,7 @@
     <script src="{{ url_for('static', filename='js/rf-channel.js') }}"></script>
     <script src="{{ url_for('static', filename='js/unreachable-cause.js') }}"></script>
     <script src="{{ url_for('static', filename='js/aim-check.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/airtime.js') }}"></script>
     <script src="{{ url_for('static', filename='js/nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/diagnostics.js') }}"></script>
     <script src="{{ url_for('static', filename='js/infra-review.js') }}"></script>
