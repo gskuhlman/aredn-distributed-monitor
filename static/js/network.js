@@ -462,6 +462,7 @@ function renderLinkOnlyNodeDetails(node) {
     bindPanelSelectedToggle(node.id);
     bindPanelInfrastructureToggle(node.id);
     bindPanelBoundarySelect(node.id);
+    mountPanelNotes(node.id);
 }
 
 /**
@@ -609,6 +610,13 @@ function renderNodeDetails(data) {
     bindPanelSelectedToggle(node.name);
     bindPanelInfrastructureToggle(node.name);
     bindPanelBoundarySelect(node.name);
+    mountPanelNotes(node.name);
+}
+
+/** Operator notes (pinned first) at the bottom of the node side panel. */
+function mountPanelNotes(nodeName) {
+    if (typeof Notes === 'undefined' || !nodeName) return;
+    Notes.appendSection(panelContent, { node: nodeName, compact: true }, 'node-info');
 }
 
 function renderBoundaryControl(mode) {

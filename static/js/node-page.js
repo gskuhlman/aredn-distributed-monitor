@@ -622,6 +622,7 @@ const NodePage = {
         this.charts.throughput.data.datasets[0].data = throughputTx;
         this.charts.throughput.data.datasets[1].data = throughputRx;
         this.charts.throughput.update('none');
+        if (typeof Notes !== 'undefined') Notes.markCharts(Object.values(this.charts), this.nodeName);
     },
 
     renderLog() {

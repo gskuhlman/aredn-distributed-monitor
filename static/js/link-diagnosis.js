@@ -58,6 +58,7 @@ const LinkDiagnosis = {
                 <div class="diag-verdict-text">${this.esc(d.verdict.text)}</div>
             </div>
             <div id="diag-live" class="diag-live hidden"></div>
+            <div id="diag-notes" class="diag-notes"></div>
             <div class="diag-findings">${d.findings.map(f => this.renderFinding(f)).join('')}</div>
             <details class="diag-details" open>
                 <summary>Both directions</summary>
@@ -79,6 +80,11 @@ const LinkDiagnosis = {
                 <summary>Link state changes (${d.state_log.length})</summary>
                 ${this.renderStateLog()}
             </details>`;
+        // Operator notes, kept apart from the computed findings above.
+        if (typeof Notes !== 'undefined' && this.pair) {
+            Notes.mount(document.getElementById('diag-notes'),
+                { node: this.pair[0], peer: this.pair[1], compact: true, title: 'Notes on this link and its nodes' });
+        }
     },
 
     severityLabel(sev) {

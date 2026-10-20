@@ -582,6 +582,7 @@ const RFStats = {
             if (typeof ChangesModule !== 'undefined') {
                 ChangesModule.markCharts(Object.values(this.charts), source, target);
             }
+            if (typeof Notes !== 'undefined') Notes.markCharts(Object.values(this.charts), source, target);
 
         } catch (error) {
             console.error('Error loading link history:', error);
