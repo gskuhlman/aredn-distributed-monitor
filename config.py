@@ -177,6 +177,7 @@ MAINTENANCE_GRACE_MINUTES = env_int("MAINTENANCE_GRACE_MINUTES", 10)
 # level >= MIN_SNR). 15 dB is AREDN LQM's default minimum SNR.
 POWER_ADVISOR_MIN_SNR = env_int("POWER_ADVISOR_MIN_SNR", 15)
 POWER_ADVISOR_MARGIN_DB = env_int("POWER_ADVISOR_MARGIN_DB", 6)
+
 # --- Route Watch (route_watch.py): periodic traceroutes along key paths ---
 ROUTE_WATCH_ENABLED = env_bool("ROUTE_WATCH_ENABLED", True)
 ROUTE_WATCH_INTERVAL_MINUTES = env_int("ROUTE_WATCH_INTERVAL_MINUTES", 15)
