@@ -43,7 +43,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
       distance setting and LQM settings, within a site and across each link.
 - [ ] 13. **Weather correlation.** Overlay NWS rain, temperature and wind on SNR/LQ
       (rain fade, ice, wind-shifted antennas).
-- [ ] 14. **Antenna aim check.** Compare each antenna's set azimuth with the bearings of
+- [x] 14. **Antenna aim check.** Compare each antenna's set azimuth with the bearings of
       the neighbors it hears best; flag misaims or unset azimuths.
 
 ## New ways to view the data

@@ -253,6 +253,8 @@ const NodePage = {
         `;
         const cause = UnreachableCause.render(this.data.unreachable_cause, this.escapeHtml.bind(this));
         if (cause) document.getElementById('node-summary').insertAdjacentHTML('afterbegin', cause);
+        const aim = typeof AimCheck !== 'undefined' ? AimCheck.nodeBlock(this.data.aim, this.escapeHtml.bind(this)) : '';
+        if (aim) document.getElementById('node-summary').insertAdjacentHTML('beforeend', aim);
     },
 
     renderNodeHealth() {

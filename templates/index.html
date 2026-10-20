@@ -417,6 +417,23 @@
                             <div id="drift-report"><p class="log-empty">Not run yet.</p></div>
                         </div>
                         <!-- end Settings Drift -->
+                        <!-- Antenna Aim (#14, aim-check.js) -->
+                        <div class="diag-section">
+                            <h3>Antenna Aim <small class="form-hint">set azimuth vs. where each directional antenna's RF peers really are, plus location checks</small></h3>
+                            <div class="mh-controls">
+                                <select id="aim-scope" class="form-input" title="Which radios to check">
+                                    <option value="all">All nodes in scope</option>
+                                    <option value="infrastructure">Infrastructure</option>
+                                    <option value="infrastructure-connected">Infrastructure + Connected</option>
+                                    <option value="selected">Selected Nodes</option>
+                                    <option value="selected-connected">Selected Nodes + Connected</option>
+                                </select>
+                                <button id="aim-run" class="btn btn-primary">Check Aim</button>
+                                <span id="aim-status" class="form-hint"></span>
+                            </div>
+                            <div id="aim-report"><p class="log-empty">Not run yet.</p></div>
+                        </div>
+                        <!-- end Antenna Aim -->
                         <!-- Cleanup (#24, cleanup.js) -->
                         <div class="diag-section">
                             <h3>Cleanup <small class="form-hint">fake, placeholder, stale and known-unreachable nodes; exclude them from scanning or delete their records</small></h3>
@@ -1145,6 +1162,7 @@
     <script src="{{ url_for('static', filename='js/link-diagnosis.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rf-channel.js') }}"></script>
     <script src="{{ url_for('static', filename='js/unreachable-cause.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/aim-check.js') }}"></script>
     <script src="{{ url_for('static', filename='js/nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/diagnostics.js') }}"></script>
     <script src="{{ url_for('static', filename='js/infra-review.js') }}"></script>
