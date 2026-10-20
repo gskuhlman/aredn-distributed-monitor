@@ -99,7 +99,13 @@ It brings Collins's own conflicts from 8 critical / 24 warning to 0 critical / 2
 - [ ] Turn off w0gq-col-sq-2bldg112 and w0gq-col-sq-2hiwt until their far ends exist.
 - [ ] Move each client before (or with) its sector, so no link is stranded.
 - [ ] Lower kf9mt-home-litebeam's TX power (near-far at Collins). Never Collins's.
-- [ ] Fix ka0ies-square-one's azimuth setting: set to 135°, but Collins is at 43° from it.
+- [ ] Fix ka0ies-square-one's azimuth setting: set to 135°, but Collins is at 43° from it (link is
+      good, so it's the setting, not the aim). Set it to 43°.
+- [ ] Re-save kf9mt-home-litebeam's location: its LQM places it at Collins (reports 16 m to rkt-s,
+      really 2.29 km).
+- [ ] Set kj0dx-qth-ub's azimuth (15° dish, unset): 257°, toward w0gq-col-rkt-e.
+- [ ] Fix n9pno-dstar's longitude: 90.62 should be -90.62.
+- [ ] Check w0gq-mmc-rkt-o13 and w0gq-eoc-rkt-o13 (omnis hearing nothing): channel and SSID.
 - [ ] Afterwards: check RF Stats for an rkt-n ↔ rkt-s link or clients linked to the opposite
       sector, and compare before/after on the Changes tab.
 - [ ] Note: sharing a channel between opposite sectors is shared airtime. AREDN's channel-planning
