@@ -37,6 +37,7 @@ import cleanup
 import link_diagnostics
 import infra_audit
 import drift
+import aim_check
 import change_log
 import channel_map
 import channel_planner
@@ -437,7 +438,8 @@ def api_get_node_detail(name):
         'services': services,
         'links': links,
         'connectivity_log': connectivity_log,
-        'unreachable_cause': unreachable.node_cause(node_name)
+        'unreachable_cause': unreachable.node_cause(node_name),
+        'aim': _node_aim(node_name)
     })
 
 
@@ -475,6 +477,7 @@ def api_get_node_full(name):
         'flap_report': database.get_link_flap_report(hours=hours, node=node_name),
         'reach': reach_map.get(node_name),
         'unreachable_cause': unreachable.node_cause(node_name, hours=hours),
+        'aim': _node_aim(node_name),
         'maintenance': _node_maintenance(node_name),
         'peer_reach': reach_map
     })
@@ -881,6 +884,28 @@ def api_infrastructure_review():
     if result.get('gateway_unreachable'):
         return jsonify(result), 503
     return jsonify(result)
+
+
+@app.route('/api/reports/aim')
+def api_antenna_aim():
+    """Antenna aim check: set azimuth/elevation vs. the bearings of the RF
+    peers each directional radio hears, plus location sanity (?node= for one
+    radio, ignoring scope)."""
+    try:
+        return jsonify(aim_check.run_report(scope=request.args.get('scope', 'all'),
+                                            node=request.args.get('node') or None))
+    except Exception as e:
+        logger.exception("Antenna aim report failed")
+        return jsonify({'error': str(e)}), 500
+
+
+def _node_aim(node_name):
+    """Aim summary for the node views; never breaks the page."""
+    try:
+        return aim_check.radio_aim(node_name)
+    except Exception:
+        logger.exception("Aim summary failed for %s", node_name)
+        return None
 
 
 @app.route('/api/reports/drift')

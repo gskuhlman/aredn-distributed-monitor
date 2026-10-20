@@ -441,6 +441,7 @@ const NodesModule = {
             `;
 
             html += UnreachableCause.render(data.unreachable_cause, this.escapeHtml.bind(this));
+            if (typeof AimCheck !== 'undefined') html += AimCheck.nodeBlock(data.aim, this.escapeHtml.bind(this));
 
             if (node.is_link_only) {
                 html += `
