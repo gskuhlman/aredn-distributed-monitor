@@ -128,6 +128,13 @@
                 <div id="node-changes"><p class="loading">Loading...</p></div>
             </section>
 
+            <!-- Notes (TODO #23, notes.js) -->
+            <section class="node-page-section">
+                <h2>Notes</h2>
+                <p class="health-footnote">Notes on this node, its links and its site. Pinned notes also show in the Nodes table, the network side panel, link diagnoses and the Channel Map; notes with a time appear as amber dotted markers on charts.</p>
+                <div id="node-notes"><p class="loading">Loading...</p></div>
+            </section>
+
             <section class="node-page-section">
                 <h2>Incident Probes</h2>
                 <p class="health-footnote">High-rate bidirectional pings captured automatically while a watched link is dropped, LQM-blocked, or marginal. Forward and reverse rows isolate which direction is failing.</p>
@@ -185,6 +192,8 @@
     <script src="{{ url_for('static', filename='js/unreachable-cause.js') }}"></script>
     <script src="{{ url_for('static', filename='js/node-page.js') }}"></script>
     <script src="{{ url_for('static', filename='js/node-changes.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/changes.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/notes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/maintenance.js') }}"></script>
 </body>
 </html>

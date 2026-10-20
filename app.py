@@ -38,6 +38,7 @@ import link_diagnostics
 import infra_audit
 import drift
 import change_log
+import notes
 import channel_map
 import channel_planner
 import link_watch
@@ -1074,6 +1075,49 @@ def api_compare_change(change_id):
     return jsonify(result)
 
 # --- end change log ---------------------------------------------------------
+
+# --- notes on nodes, links and sites (TODO #23) ----------------------------
+
+@app.route('/api/notes', methods=['GET'])
+def api_list_notes():
+    """Notes for ?node (its own, its links' and its site's), ?node&peer (the
+    pair, both nodes and both sites), ?site, or all; ?pinned=1 for pinned only."""
+    pinned = request.args.get('pinned')
+    return jsonify({'notes': notes.list_notes(
+        node=request.args.get('node'), peer=request.args.get('peer'), site=request.args.get('site'),
+        pinned=None if pinned in (None, '') else pinned in ('1', 'true'),
+        limit=request.args.get('limit', 200, type=int))})
+
+
+@app.route('/api/notes', methods=['POST'])
+def api_add_note():
+    """{target_type?, node_name?, peer_node?, site?, text, author?, pinned?, event_time?}"""
+    try:
+        note = notes.add_note(request.get_json(silent=True) or {})
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({'success': True, 'note': note})
+
+
+@app.route('/api/notes/<int:note_id>', methods=['PATCH'])
+def api_update_note(note_id):
+    """Edit {text?, pinned?, event_time?, author?}."""
+    try:
+        note = notes.update_note(note_id, request.get_json(silent=True) or {})
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    if not note:
+        return jsonify({'error': 'Note not found'}), 404
+    return jsonify({'success': True, 'note': note})
+
+
+@app.route('/api/notes/<int:note_id>', methods=['DELETE'])
+def api_delete_note(note_id):
+    if not notes.delete_note(note_id):
+        return jsonify({'error': 'Note not found'}), 404
+    return jsonify({'success': True})
+
+# --- end notes ---------------------------------------------------------------
 
 
 # --- maintenance windows (TODO #22) -------------------------------------------

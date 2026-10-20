@@ -324,7 +324,7 @@ const NodesModule = {
 
             html += `
                 <tr>
-                    <td><strong>${nameLink}</strong></td>
+                    <td><strong>${nameLink}</strong>${typeof Notes !== 'undefined' ? Notes.indicator(nodeName) : ''}</td>
                     <td>${ipLink}</td>
                     <td>${this.escapeHtml(modelText)}</td>
                     <td>${this.escapeHtml(firmwareText)}</td>
@@ -521,6 +521,10 @@ const NodesModule = {
             }
 
             container.innerHTML = html;
+            if (typeof Notes !== 'undefined') {
+                const peers = [...new Set(links.map(l => l.source_node === node.name ? l.target_node : l.source_node))].sort();
+                Notes.appendSection(container, { node: node.name, compact: true, peers });
+            }
 
         } catch (error) {
             console.error('Error loading node overview:', error);
@@ -583,6 +587,9 @@ const NodesModule = {
                     pointRadius: 2
                 }];
                 this.charts.snr.update('none');
+            }
+            if (typeof Notes !== 'undefined') {
+                Notes.markCharts([this.charts.quality, this.charts.snr], this.selectedNode);
             }
 
         } catch (error) {
@@ -844,3 +851,8 @@ const NodesModule = {
         return '&#8226;';
     }
 };
+
+// Re-draw the table's pinned-note flags once the pinned notes arrive or change.
+document.addEventListener('notes:pinned', () => {
+    if (NodesModule.filteredNodes?.length) NodesModule.renderTable();
+});

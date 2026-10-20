@@ -2226,3 +2226,33 @@ tr.notify-log-suppressed td { color: #95a5a6; }
 .maint-node-action { display: inline-flex; align-items: center; gap: 6px; }
 .maint-node-form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .maint-node-form .form-input { width: auto; }
+
+/* ---- Notes on nodes, links and sites (#23, notes.js) ---- */
+.notes-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.notes-list { list-style: none; padding: 0; margin: 6px 0; }
+.note-item { border-left: 3px solid #bdc3c7; background: #f8f9f9; padding: 6px 10px; margin-bottom: 6px; border-radius: 3px; }
+.note-item.note-pinned { border-left-color: #d68910; background: #fef9e7; }
+.note-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.8em; }
+.note-head:empty { display: none; }
+.note-target { padding: 0 6px; border-radius: 8px; background: #d5dbdb; color: #2c3e50; }
+.note-target-link { background: #d6eaf8; }
+.note-target-site { background: #e8daef; }
+.note-when { color: #b9770e; font-weight: 600; }
+.note-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 3px 0; }
+.note-meta { font-size: 0.75em; color: #7f8c8d; display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
+.note-actions { display: inline-flex; gap: 8px; }
+.btn-link { background: none; border: none; padding: 0; color: #2e86c1; cursor: pointer; font-size: inherit; }
+.btn-link:hover { text-decoration: underline; }
+.btn-link.note-del { color: #c0392b; }
+.note-flag { font-size: 0.85em; cursor: help; }
+.note-form { border: 1px solid #d5dbdb; border-radius: 4px; padding: 8px; margin: 6px 0; display: flex; flex-direction: column; gap: 6px; }
+.note-form-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+.note-form-row label { display: flex; flex-direction: column; gap: 2px; font-size: 0.85em; }
+.note-form-row label.header-checkbox { flex-direction: row; align-items: center; }
+.note-form-row label[hidden] { display: none; }
+.note-form textarea, .note-edit-text { width: 100%; box-sizing: border-box; resize: vertical; }
+.note-edit-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-top: 4px; }
+.note-edit-row label { display: flex; flex-direction: column; font-size: 0.85em; }
+.diag-notes:empty, .cm-notes:empty { display: none; }
+.diag-notes { margin: 8px 0; }
+.cm-notes { margin-top: 8px; }

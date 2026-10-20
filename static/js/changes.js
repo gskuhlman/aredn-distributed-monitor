@@ -359,14 +359,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Draws chart.$changeMarkers ([{t: ms, label, end?}]) as dashed vertical lines
 // (or shaded bands when `end` is set, e.g. maintenance windows) on charts with
-// a time x axis. Charts without markers are untouched.
+// a time x axis, and chart.$noteMarkers (operator notes with an event time,
+// set by notes.js) as dotted amber lines labelled at the bottom. Charts
+// without markers are untouched.
 if (typeof Chart !== 'undefined') {
     Chart.register({
         id: 'changeMarkers',
         afterDatasetsDraw(chart) {
-            const markers = chart.$changeMarkers;
+            const markers = chart.$changeMarkers || [];
+            const notes = chart.$noteMarkers || [];
             const x = chart.scales?.x;
-            if (!markers || !markers.length || !x || x.type !== 'time') return;
+            if ((!markers.length && !notes.length) || !x || x.type !== 'time') return;
             const { ctx, chartArea } = chart;
             ctx.save();
             ctx.strokeStyle = '#8e44ad';
@@ -394,6 +397,19 @@ if (typeof Chart !== 'undefined') {
                 ctx.lineTo(px, chartArea.bottom);
                 ctx.stroke();
                 ctx.fillText(m.label, Math.min(px + 3, chartArea.right - 80), chartArea.top + 10);
+            }
+            ctx.strokeStyle = '#d68910';
+            ctx.fillStyle = '#b9770e';
+            ctx.setLineDash([1, 3]);
+            ctx.lineWidth = 2;
+            for (const m of notes) {
+                if (!(m.t >= x.min && m.t <= x.max)) continue;
+                const px = x.getPixelForValue(m.t);
+                ctx.beginPath();
+                ctx.moveTo(px, chartArea.top);
+                ctx.lineTo(px, chartArea.bottom);
+                ctx.stroke();
+                ctx.fillText(m.label, Math.min(px + 3, chartArea.right - 120), chartArea.bottom - 16);
             }
             ctx.restore();
         }

@@ -549,6 +549,7 @@ const ChannelMap = {
             <h4>RF links (${links.length})</h4>
             ${links.length ? `<ul class="cm-list">${links.map(l => `<li>${this.esc(l.a === r.name ? l.b : l.a)} · quality ${l.quality ?? '?'}% · SNR ${l.snr ?? '?'} dB · ${(l.distance_m / 1000).toFixed(1)} km</li>`).join('')}</ul>`
                 : '<p class="form-hint">None.</p>'}
+            <div id="cm-notes" class="cm-notes"></div>
             <div class="cm-quick-whatif">
                 <label>Try <input type="number" id="cm-q-freq" class="form-input cm-num" step="5" value="${r.frequency ?? ''}"> MHz</label>
                 <select id="cm-q-width" class="form-input">
@@ -556,6 +557,10 @@ const ChannelMap = {
                 </select>
                 <button id="cm-q-apply" class="btn btn-secondary btn-small">What-if</button>
             </div>`;
+        if (typeof Notes !== 'undefined') {
+            Notes.mount(document.getElementById('cm-notes'),
+                { node: r.name, compact: true, peers: links.map(l => (l.a === r.name ? l.b : l.a)) });
+        }
         el.querySelectorAll('.cm-conf').forEach(li => li.addEventListener('click', () => {
             const other = li.dataset.a === r.name ? li.dataset.b : li.dataset.a;
             this.zoomTo([r.name, other]);
