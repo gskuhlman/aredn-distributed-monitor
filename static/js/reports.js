@@ -243,6 +243,10 @@ const ReportsModule = {
             if (typeof WeatherPanel !== 'undefined') {
                 WeatherPanel.load(document.getElementById('rpt-start').value, document.getElementById('rpt-end').value);
             }
+            // Other Reports sections (health score, heatmap, swimlanes, ...) register here.
+            for (const panel of (window.ReportPanels || [])) {
+                try { panel.load(this.queryString()); } catch (error) { console.error('Report panel error:', error); }
+            }
             if (this.detail) this.reloadDetail();
         } catch (error) {
             if (seq === this.requestSeq) this.setStatus('Failed to load');

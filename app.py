@@ -32,6 +32,9 @@ import scanner
 import rf_stats
 import gateway
 import reports
+import health_score
+import heatmap
+import swimlanes
 import unreachable
 import cleanup
 import link_diagnostics
@@ -46,6 +49,12 @@ import channel_map
 import channel_planner
 import link_watch
 import route_watch
+import path_view
+import spof
+import site_dashboard
+import capacity
+import weekly_report
+import link_budget
 import site_matrix
 import collector_health
 import weather
@@ -317,6 +326,12 @@ def index():
 def node_page(name):
     """Full node information page."""
     return render_template('node.html', node_name=name.lower())
+
+
+@app.route('/sites/<code>')
+def site_page(code):
+    """Site dashboard page (site_dashboard.py)."""
+    return render_template('site.html', site_code=code.upper())
 
 
 # ============ API Routes ============
@@ -1135,6 +1150,183 @@ def api_routes_run(path_id):
     return jsonify(result)
 
 
+@app.route('/api/path')
+def api_path_view():
+    """Expected path, watched-route history and per-hop link quality between
+    source (empty = starting node) and target (path_view.py)."""
+    try:
+        return jsonify(path_view.view(request.args.get('source'), request.args.get('target'),
+                                      hours=_hours_arg()))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/path/live', methods=['POST'])
+def api_path_live():
+    """Traceroute source -> target now and grade each hop (503 when the
+    starting node is unreachable)."""
+    body = request.get_json(silent=True) or {}
+    try:
+        result = path_view.live(body.get('source'), body.get('target'), hours=int(body.get('hours') or 24))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    if result.get('error'):
+        return jsonify(result), 503 if result.get('gateway_unreachable') else 502
+    return jsonify(result)
+
+
+@app.route('/api/reports/spof')
+def api_report_spof():
+    """Links and nodes whose loss cuts nodes off from the starting node,
+    ranked by nodes behind x weakness (spof.py); tunnels=0 = internet down."""
+    return jsonify(spof.report(hours=_hours_arg(),
+                               exclude_tunnels=request.args.get('tunnels') in ('0', 'false', 'no')))
+
+
+@app.route('/api/sites')
+def api_sites():
+    return jsonify({'sites': site_dashboard.sites()})
+
+
+@app.route('/api/sites/<code>')
+def api_site(code):
+    """Site dashboard data: radios, spectrum pairs, clients per sector, uplink
+    paths, dependencies, health scores, events, notes, maintenance."""
+    result = site_dashboard.build(code, hours=_hours_arg())
+    if result is None:
+        return jsonify({'error': f'No infrastructure nodes with site {code.upper()}',
+                        'sites': site_dashboard.sites()}), 404
+    return jsonify(result)
+
+
+# --- Capacity + scheduled iPerf (capacity.py) ---
+@app.route('/api/capacity')
+def api_capacity():
+    """Capacity per key link direction: overnight iPerf capacity, PHY rate,
+    traffic estimate, spare, nightly trend; plus the schedule's state."""
+    return jsonify(capacity.report(hours=_hours_arg(168)))
+
+
+@app.route('/api/capacity/link')
+def api_capacity_link():
+    source = (request.args.get('source') or '').strip().lower()
+    target = (request.args.get('target') or '').strip().lower()
+    if not source or not target:
+        return jsonify({'error': 'source and target are required'}), 400
+    return jsonify(capacity.link_series(source, target, hours=_hours_arg(168)))
+
+
+@app.route('/api/capacity/links', methods=['POST'])
+def api_capacity_links():
+    """Add a key pair {source, target} or turn one on/off {source, target, enabled}."""
+    body = request.get_json(silent=True) or {}
+    try:
+        if 'enabled' in body:
+            capacity.set_enabled((body.get('source') or '').lower(), (body.get('target') or '').lower(),
+                                 bool(body['enabled']))
+        else:
+            capacity.add_link(body.get('source'), body.get('target'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({'success': True, 'key_links': len(capacity.key_links())})
+
+
+@app.route('/api/capacity/run', methods=['POST'])
+def api_capacity_run():
+    """Start the scheduled iPerf pass now (background; ends at the schedule end
+    or after one round when run outside the window)."""
+    if capacity.schedule_state['running']:
+        return jsonify({'error': 'already running', 'state': capacity.schedule_state}), 409
+    if not gateway.is_reachable():
+        return gateway_error_response()
+    socketio.start_background_task(run_iperf_schedule_task, True)
+    return jsonify({'success': True, 'planned': len(capacity.key_links())})
+
+
+def run_iperf_schedule_task(manual=False):
+    try:
+        deadline = datetime.now() + timedelta(hours=1) if manual else None
+        result = capacity.run_schedule(deadline=deadline, rounds=1 if manual else None)
+        logger.info("Scheduled iPerf: %s", result)
+    except Exception as exc:
+        logger.error("Scheduled iPerf error: %s", exc)
+# --- end Capacity ---
+
+
+# --- Weekly report (weekly_report.py) ---
+@app.route('/api/weekly-reports')
+def api_weekly_reports():
+    return jsonify({'reports': weekly_report.list_reports(),
+                    'channels': weekly_report.get_channels(),
+                    'schedule': {'enabled': config.WEEKLY_REPORT_ENABLED, 'day': config.WEEKLY_REPORT_DAY,
+                                 'time': config.WEEKLY_REPORT_TIME}})
+
+
+@app.route('/api/weekly-reports/<int:report_id>')
+def api_weekly_report(report_id):
+    r = weekly_report.get(report_id)
+    if not r:
+        return jsonify({'error': 'Report not found'}), 404
+    return jsonify(r)
+
+
+@app.route('/api/weekly-reports', methods=['POST'])
+def api_weekly_report_generate():
+    """Build and save a report for the last 7 days now; {send: true} also sends it."""
+    body = request.get_json(silent=True) or {}
+    return jsonify(weekly_report.generate(trigger='manual', send_now=bool(body.get('send'))))
+
+
+@app.route('/api/weekly-reports/<int:report_id>/send', methods=['POST'])
+def api_weekly_report_send(report_id):
+    body = request.get_json(silent=True) or {}
+    sent = weekly_report.send(report_id, channels=body.get('channels'))
+    if sent is None:
+        return jsonify({'error': 'Report not found'}), 404
+    return jsonify({'sent': sent})
+
+
+@app.route('/api/weekly-reports/<int:report_id>', methods=['DELETE'])
+def api_weekly_report_delete(report_id):
+    if not weekly_report.delete(report_id):
+        return jsonify({'error': 'Report not found'}), 404
+    return jsonify({'success': True})
+
+
+@app.route('/api/weekly-reports/channels', methods=['POST'])
+def api_weekly_report_channels():
+    """Channels the scheduled report is sent on (names only; secrets stay in notify)."""
+    body = request.get_json(silent=True) or {}
+    return jsonify({'channels': weekly_report.set_channels(body.get('channels') or [])})
+
+
+def run_weekly_report_task():
+    try:
+        result = weekly_report.generate(trigger='scheduled', send_now=True)
+        logger.info("Weekly report %s saved, sent: %s", result['id'], result['sent'])
+    except Exception as exc:
+        logger.error("Weekly report error: %s", exc)
+# --- end Weekly report ---
+
+
+# --- Link budget + terrain (link_budget.py) ---
+@app.route('/api/link-budget/<a>/<b>')
+def api_link_budget(a, b):
+    """Predicted vs measured signal both ways, terrain profile and Fresnel
+    clearance for an RF pair (elevations from the cache or Open-Meteo)."""
+    result = link_budget.budget(a, b, hours=_hours_arg())
+    if result.get('error'):
+        return jsonify(result), 404
+    return jsonify(result)
+
+
+@app.route('/api/reports/link-budget')
+def api_link_budget_report():
+    """Link budget summary for every current RF link with an infrastructure end."""
+    return jsonify(link_budget.infrastructure_links(hours=_hours_arg()))
+# --- end Link budget ---
+
+
 def run_route_watch_task():
     """Scheduled Route Watch run; never blocks scans (own APScheduler job)."""
     try:
@@ -1377,6 +1569,68 @@ def api_report_window_node(name):
     try:
         return jsonify(reports.node_series(
             name.lower(), request.args.get('start'), request.args.get('end')))
+    except reports.ReportError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+# --- Health score + what changed (health_score.py) ---
+@app.route('/api/reports/health-score')
+def api_health_score():
+    """Per-bucket 0-100 scores for nodes (kind=node) or RF links (kind=link)
+    in [start, end), filtered like the Reports tab; worst drops first."""
+    try:
+        return jsonify(health_score.scores(
+            request.args.get('start'), request.args.get('end'),
+            kind='link' if request.args.get('kind') == 'link' else 'node',
+            scope=request.args.get('scope', 'all'),
+            link_type=request.args.get('link_type', 'all'),
+            search=request.args.get('search', '')))
+    except reports.ReportError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/reports/what-changed')
+def api_what_changed():
+    """Events, reboots, config/noise/route changes, starting-node outages,
+    maintenance and notes around [start, end) for node (and optional peer)."""
+    node = (request.args.get('node') or '').strip().lower()
+    if not node:
+        return jsonify({'error': 'node is required'}), 400
+    peer = (request.args.get('peer') or '').strip().lower() or None
+    try:
+        return jsonify(health_score.what_changed(
+            node, request.args.get('start'), request.args.get('end'), peer=peer,
+            pad_minutes=request.args.get('pad_minutes', type=float)))
+    except reports.ReportError as exc:
+        return jsonify({'error': str(exc)}), 400
+# --- end health score ---
+
+
+@app.route('/api/reports/heatmap')
+def api_report_heatmap():
+    """Node x hour heatmap (heatmap.py): metric=reach|lq, fold=1 for hour of day."""
+    try:
+        return jsonify(heatmap.build(
+            request.args.get('start'), request.args.get('end'),
+            metric=request.args.get('metric', 'reach'),
+            fold=request.args.get('fold') in ('1', 'true'),
+            scope=request.args.get('scope', 'all'),
+            link_type=request.args.get('link_type', 'all'),
+            search=request.args.get('search', '')))
+    except reports.ReportError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/reports/swimlanes')
+def api_report_swimlanes():
+    """One lane per link: good/degraded/flapping/down per bucket, with reboot
+    and config-change markers (swimlanes.py)."""
+    try:
+        return jsonify(swimlanes.build(
+            request.args.get('start'), request.args.get('end'),
+            scope=request.args.get('scope', 'all'),
+            link_type=request.args.get('link_type', 'all'),
+            search=request.args.get('search', '')))
     except reports.ReportError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -1880,6 +2134,8 @@ def api_trigger_rf_test(source, target):
                 target_node_name=target
             )
 
+        if result or not gateway.failure_is_ours():
+            capacity.record(source, target, result, kind='manual')
         if result:
             database.update_link_history_throughput(
                 source, target,
@@ -2134,6 +2390,7 @@ def api_notifications_log():
 def cleanup_history_task():
     """Background task for cleaning up old history"""
     rf_stats.cleanup_old_history()
+    capacity.cleanup()
 
 
 def start_scheduler():
@@ -2184,6 +2441,9 @@ def start_scheduler():
         )
     # NWS weather observations (background; failures never touch scans)
     weather.install(scheduler)
+    # Overnight iPerf on key links (capacity.py) and the weekly report.
+    capacity.install(scheduler, run_iperf_schedule_task)
+    weekly_report.install(scheduler, run_weekly_report_task)
 
     scheduler.start()
     logger.info("Scheduler started")

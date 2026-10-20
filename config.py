@@ -198,6 +198,35 @@ WEATHER_POLL_MINUTES = env_int("WEATHER_POLL_MINUTES", 30)
 WEATHER_BACKFILL_DAYS = env_int("WEATHER_BACKFILL_DAYS", 7)
 WEATHER_TIMEOUT_SECONDS = env_int("WEATHER_TIMEOUT_SECONDS", 15)
 # --- end Weather ---
+
+# --- Scheduled iPerf + capacity view (capacity.py) ---
+# Overnight iPerf runs on key links (RF links touching infrastructure plus any
+# added on the Reports tab), both directions, trended night to night.
+IPERF_SCHEDULE_ENABLED = env_bool("IPERF_SCHEDULE_ENABLED", True)
+IPERF_SCHEDULE_START = os.environ.get("IPERF_SCHEDULE_START", "02:00")   # local HH:MM
+IPERF_SCHEDULE_END = os.environ.get("IPERF_SCHEDULE_END", "04:30")       # stop starting tests after this
+IPERF_SCHEDULE_ROUNDS = env_int("IPERF_SCHEDULE_ROUNDS", 2)              # passes over the key links per night
+IPERF_SCHEDULE_GAP_SECONDS = env_int("IPERF_SCHEDULE_GAP_SECONDS", 30)   # pause between tests
+CAPACITY_DROP_PCT = env_int("CAPACITY_DROP_PCT", 25)                     # last night this much below usual = flagged
+# --- end Scheduled iPerf ---
+
+# --- Link budget + terrain (link_budget.py) ---
+# Ground elevations come from the Open-Meteo elevation API (no key; only the
+# path's coordinates are sent) and are cached in SQLite; 0 = no terrain.
+ELEVATION_ENABLED = env_bool("ELEVATION_ENABLED", True)
+ELEVATION_API_URL = os.environ.get("ELEVATION_API_URL", "https://api.open-meteo.com/v1/elevation")
+ELEVATION_TIMEOUT_SECONDS = env_int("ELEVATION_TIMEOUT_SECONDS", 15)
+LINK_BUDGET_TX_DBM = env_int("LINK_BUDGET_TX_DBM", 25)   # AREDN does not report TX power
+# --- end Link budget ---
+
+# --- Weekly report (weekly_report.py) ---
+# Saved every week (Reports tab "Weekly Report"); sent on the listed
+# notification channels (email, discord, ntfy, webhook) when any are set.
+WEEKLY_REPORT_ENABLED = env_bool("WEEKLY_REPORT_ENABLED", True)
+WEEKLY_REPORT_DAY = os.environ.get("WEEKLY_REPORT_DAY", "mon").strip().lower()[:3]
+WEEKLY_REPORT_TIME = os.environ.get("WEEKLY_REPORT_TIME", "07:00")
+WEEKLY_REPORT_CHANNELS = [c.strip() for c in os.environ.get("WEEKLY_REPORT_CHANNELS", "").split(",") if c.strip()]
+# --- end Weekly report ---
 # Total incident capture window and gap between probe rounds, in seconds.
 INCIDENT_DURATION = env_int("INCIDENT_DURATION_SECONDS", 90)
 INCIDENT_PROBE_INTERVAL = env_int("INCIDENT_PROBE_INTERVAL_SECONDS", 5)

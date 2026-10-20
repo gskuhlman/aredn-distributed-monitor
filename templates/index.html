@@ -428,8 +428,56 @@
                         </div>
                         <!-- end Route Watch -->
 
+                        <!-- Path View (#18, path-view.js) -->
+                        <div class="diag-section">
+                            <h3>Path View <small class="form-hint">the route between two nodes, each hop coloured by the quality of the link it crossed</small></h3>
+                            <div class="mh-controls">
+                                <input type="text" id="pv-source" class="form-input" placeholder="source (empty = starting node)">
+                                <input type="text" id="pv-target" class="form-input" placeholder="target node">
+                                <select id="pv-hours" class="form-input" title="History window">
+                                    <option value="6">6 h</option>
+                                    <option value="24" selected>24 h</option>
+                                    <option value="72">3 days</option>
+                                    <option value="168">7 days</option>
+                                </select>
+                                <button id="pv-show" class="btn btn-primary">Show path</button>
+                                <button id="pv-trace" class="btn btn-secondary" title="Traceroute from the source node now">Trace now</button>
+                                <button id="pv-watch" class="btn btn-secondary" title="Add to Route Watch">Watch this path</button>
+                                <span id="pv-status" class="form-hint"></span>
+                            </div>
+                            <div id="pv-result"><p class="log-empty">Enter a target (and optionally a source) and press Show path.</p></div>
+                        </div>
+                        <!-- end Path View -->
+
+                        <!-- Single points of failure (#20, spof.js) -->
+                        <div class="diag-section">
+                            <h3>Single Points of Failure <small class="form-hint">links and nodes whose loss cuts nodes off from the starting node, weakest and most-depended-on first</small></h3>
+                            <div class="mh-controls">
+                                <label class="checkbox-label" title="Leave WireGuard / legacy tunnels out: what the RF and DtD backbone alone carries when the internet is down">
+                                    <input type="checkbox" id="spof-no-tunnels" checked> Internet down (ignore tunnels)</label>
+                                <button id="spof-run" class="btn btn-primary">Rank</button>
+                                <button id="spof-map" class="btn btn-secondary">Show on map</button>
+                                <span id="spof-status" class="form-hint"></span>
+                            </div>
+                            <div id="spof-report"><p class="log-empty">Press Rank.</p></div>
+                        </div>
+                        <!-- end Single points of failure -->
+
+                        <!-- Link budget + terrain (#26, link-budget.js) -->
+                        <div class="diag-section">
+                            <h3>Link Budget <small class="form-hint">predicted vs. measured signal and Fresnel clearance for RF links with an infrastructure end</small></h3>
+                            <div class="mh-controls">
+                                <button id="lb-run" class="btn btn-primary">Compute</button>
+                                <span id="lb-status" class="form-hint">Ground elevations come from Open-Meteo (cached; ELEVATION_ENABLED=0 to stay offline).</span>
+                            </div>
+                            <div id="lb-report"><p class="log-empty">Press Compute.</p></div>
+                            <div id="lb-detail" class="hidden"><div id="lb-detail-body"></div></div>
+                        </div>
+                        <!-- end Link budget -->
+
                         <div class="diag-section">
                             <h3>Infrastructure Review <small class="form-hint">radio settings of every infrastructure node: channel plans, beams, pointing, pairing, firmware</small></h3>
+                            <p class="form-hint">Site dashboards: <span id="site-dash-links">loading...</span></p>
                             <div class="mh-controls">
                                 <label class="checkbox-label" title="Read current settings from each infrastructure node before reviewing">
                                     <input type="checkbox" id="infra-refresh" checked> Refresh settings from nodes
@@ -703,6 +751,97 @@
                             <div class="rf-charts-grid" id="rpt-detail-charts"></div>
                             <div id="rpt-detail-extra"></div>
                         </div>
+
+                        <!-- Health score + what changed (#5, health-score.js) -->
+                        <div class="diag-section">
+                            <h3>Health Score <small class="form-hint">each node or RF link scored 0&ndash;100 over the window; click a drop to see what changed</small></h3>
+                            <div class="mh-controls">
+                                <label class="checkbox-label"><input type="radio" name="hs-kind" value="node" checked> Nodes</label>
+                                <label class="checkbox-label"><input type="radio" name="hs-kind" value="link"> RF links</label>
+                                <label class="checkbox-label" title="Nodes that never answered in the window (legacy tunnels, stale entries): see Unreachable Nodes">
+                                    <input type="checkbox" id="hs-never"> Show nodes that never answered</label>
+                                <span id="hs-hint" class="form-hint"></span>
+                            </div>
+                            <div id="hs-table"><p class="log-empty">Not loaded yet.</p></div>
+                            <div id="hs-changes" class="hs-changes hidden">
+                                <h4><span id="hs-changes-title"></span>
+                                    <button id="hs-changes-close" class="btn btn-secondary btn-small">Close</button></h4>
+                                <div id="hs-changes-list"></div>
+                            </div>
+                            <div class="health-footnote">
+                                <p><strong>Score.</strong> Node: half reachability (scanner polls answered), half the RF link quality it reports; minus 20 for a reboot and 5 per dropped link (up to 20). RF link: half link quality, 30% SNR (5 dB = 0, 30 dB = full), 20% ping loss; minus 15 per down/blocked change the nodes reported. Shaded buckets are maintenance windows and are left out of the drop.</p>
+                            </div>
+                        </div>
+                        <!-- end Health score -->
+
+                        <!-- Node x hour heatmap (#15, heatmap.js) -->
+                        <div class="diag-section">
+                            <h3>Heatmap <small class="form-hint">node &times; hour: whole sites dropping together and nightly patterns; click a row for its charts</small></h3>
+                            <div class="mh-controls">
+                                <select id="hm-metric" class="form-input" title="Colour by">
+                                    <option value="reach">Reachability (polls answered)</option>
+                                    <option value="lq">RF link quality</option>
+                                </select>
+                                <label class="checkbox-label" title="Fold every day of the window onto 24 hours"><input type="checkbox" id="hm-fold"> Hour of day</label>
+                                <span id="hm-hint" class="form-hint"></span>
+                            </div>
+                            <div class="hm-wrap"><canvas id="hm-canvas"></canvas><div id="hm-tip" class="hm-tip hidden"></div></div>
+                        </div>
+                        <!-- end Heatmap -->
+
+                        <!-- Link swimlanes (#17, swimlanes.js) -->
+                        <div class="diag-section">
+                            <h3>Link Swimlanes <small class="form-hint">one bar per link: good / degraded / flapping / down, reboots and config changes marked; click a lane for its charts</small></h3>
+                            <div class="mh-controls">
+                                <label class="checkbox-label" title="Links that were never up in the window (radio off, link removed)"><input type="checkbox" id="sl-never"> Show links never up</label>
+                                <span id="sl-hint" class="form-hint"></span>
+                            </div>
+                            <div id="sl-legend" class="sl-legend"></div>
+                            <div id="sl-lanes" class="sl-lanes"><p class="log-empty">Not loaded yet.</p></div>
+                        </div>
+                        <!-- end Link swimlanes -->
+
+                        <!-- Capacity + scheduled iPerf (#27, #28, capacity.js) -->
+                        <div class="diag-section">
+                            <h3>Capacity <small class="form-hint">iPerf capacity, PHY rate, estimated traffic and spare capacity per key link (last 7 days, not the window above); click a row for its history</small></h3>
+                            <div class="mh-controls">
+                                <button id="cap-refresh" class="btn btn-secondary">Refresh</button>
+                                <button id="cap-run" class="btn btn-secondary" title="One pass over the key links now (one test at a time)">Run iPerf pass now</button>
+                                <label class="checkbox-label"><input type="checkbox" id="cap-all"> Show every tested link</label>
+                                <span id="cap-hint" class="form-hint"></span>
+                            </div>
+                            <div id="cap-table"><p class="log-empty">Not loaded yet.</p></div>
+                            <div id="cap-detail" class="hidden">
+                                <h4 id="cap-detail-title"></h4>
+                                <div class="cap-chart-wrap"><canvas id="cap-chart"></canvas></div>
+                            </div>
+                            <div class="mh-controls rw-add">
+                                <input type="text" id="cap-source" class="form-input" placeholder="source node">
+                                <input type="text" id="cap-target" class="form-input" placeholder="target node">
+                                <button id="cap-add" class="btn btn-secondary">Add key link</button>
+                            </div>
+                            <div class="health-footnote">
+                                <p><strong>How it is estimated.</strong> Capacity is the median of the overnight scheduled runs (quiet network) over the last 7 nights, or the 90th percentile of all runs until there are some. Key links are the RF links with an infrastructure end, both directions, plus any you add. Traffic comes from the radios' packet counters at an assumed 600-byte frame (AREDN does not report channel busy), skipping intervals with an iPerf test, so treat spare capacity as a rough figure.</p>
+                            </div>
+                        </div>
+                        <!-- end Capacity -->
+
+                        <!-- Weekly report (#25, weekly-report.js) -->
+                        <div class="diag-section">
+                            <h3>Weekly Report <small class="form-hint">saved weekly summary: worst links, new problems, infrastructure verdicts, changes</small></h3>
+                            <div class="mh-controls">
+                                <button id="wr-generate" class="btn btn-primary">Generate now</button>
+                                <span id="wr-hint" class="form-hint"></span>
+                                <span id="wr-status" class="form-hint"></span>
+                            </div>
+                            <div id="wr-channels" class="mh-controls"></div>
+                            <div id="wr-list"><p class="log-empty">Not loaded yet.</p></div>
+                            <div id="wr-view" class="hidden">
+                                <div class="mh-controls"><button id="wr-copy" class="btn btn-secondary btn-small">Copy text</button></div>
+                                <pre id="wr-text" class="wr-text"></pre>
+                            </div>
+                        </div>
+                        <!-- end Weekly report -->
 
                         <!-- Starting-node health (collector_health.py) -->
                         <div class="diag-section">
@@ -1243,6 +1382,7 @@
     <script src="{{ url_for('static', filename='js/network.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rf-stats.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-diagnosis.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/link-budget.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rf-channel.js') }}"></script>
     <script src="{{ url_for('static', filename='js/unreachable-cause.js') }}"></script>
     <script src="{{ url_for('static', filename='js/aim-check.js') }}"></script>
@@ -1255,6 +1395,8 @@
     <script src="{{ url_for('static', filename='js/maintenance.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-watch.js') }}"></script>
     <script src="{{ url_for('static', filename='js/route-watch.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/path-view.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/spof.js') }}"></script>
     <script src="{{ url_for('static', filename='js/site-matrix.js') }}"></script>
     <script src="{{ url_for('static', filename='js/cleanup.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
@@ -1262,6 +1404,11 @@
     <script src="{{ url_for('static', filename='js/reports.js') }}"></script>
     <script src="{{ url_for('static', filename='js/collector-health.js') }}"></script>
     <script src="{{ url_for('static', filename='js/weather.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/health-score.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/heatmap.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/swimlanes.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/capacity.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/weekly-report.js') }}"></script>
     <script src="{{ url_for('static', filename='js/changes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/channel-map.js') }}"></script>

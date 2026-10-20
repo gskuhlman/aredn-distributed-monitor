@@ -181,3 +181,13 @@ const InfraReview = {
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 };
+
+// Links to each site's dashboard (/sites/<code>) above the Infrastructure Review.
+document.addEventListener('DOMContentLoaded', () => {
+    const el = document.getElementById('site-dash-links');
+    if (!el) return;
+    fetch('/api/sites').then(r => r.json()).then(d => {
+        el.innerHTML = (d.sites || []).map(s => `<a href="/sites/${encodeURIComponent(s.code)}" title="${InfraReview.esc(s.name)}">${InfraReview.esc(s.code)}</a>`)
+            .join(' · ') || 'none (mark infrastructure nodes with a site first)';
+    }).catch(() => { el.textContent = 'unavailable'; });
+});

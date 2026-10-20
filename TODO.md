@@ -19,7 +19,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 - [x] 4. **Channel planner.** Pick a site (or radios plus their clients) and get suggested
       channels using band edges, busy WiFi ranges, beams, guard bands, and clients that
       must follow their sector. Simulate the result before applying it.
-- [ ] 5. **Health score + "what changed?"** Score each node/link 0–100 over time;
+- [x] 5. **Health score + "what changed?"** Score each node/link 0–100 over time;
       clicking a drop lists new neighbors, reboots, config changes, noise jumps, route
       changes and starting-node outages in that window.
 
@@ -48,17 +48,17 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 
 ## New ways to view the data
 
-- [ ] 15. **Heatmap, node × hour.** Colored by reachability or LQ; shows whole sites
+- [x] 15. **Heatmap, node × hour.** Colored by reachability or LQ; shows whole sites
       dropping together and nightly patterns.
 - [x] 16. **Site neighbor matrix.** Every radio at a site against every radio it hears,
       with SNR/LQ per cell; one-way and lopsided pairs stand out.
-- [ ] 17. **Link swimlanes.** One bar per link, colored good/flapping/down over time,
+- [x] 17. **Link swimlanes.** One bar per link, colored good/flapping/down over time,
       with reboots and config changes marked.
-- [ ] 18. **Path view.** Current and historical route between two nodes, each hop
+- [x] 18. **Path view.** Current and historical route between two nodes, each hop
       colored by link quality.
-- [ ] 19. **Site dashboard.** Per-site page (COL, MMC, EOC): radios, spectrum chart,
+- [x] 19. **Site dashboard.** Per-site page (COL, MMC, EOC): radios, spectrum chart,
       clients per sector, uplink paths, node health.
-- [ ] 20. **Weakest-link / single-point-of-failure map.** Rank links whose loss splits
+- [x] 20. **Weakest-link / single-point-of-failure map.** Rank links whose loss splits
       the mesh, weighted by how many nodes are behind each one.
 
 ## Alerts and operations
@@ -72,17 +72,17 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 - [x] 24. **Cleanup of stale and junk entries.** Exclude or delete nodes that never
       answer (k9lrd-home, the fake "10" node, `mac-…` placeholders). Exclude the
       kc0wkp-ar750 legacy TUN clients from scanning.
-- [ ] 25. **Weekly report.** Saved or emailed summary of the worst links, new problems,
+- [x] 25. **Weekly report.** Saved or emailed summary of the worst links, new problems,
       infrastructure verdicts and changes.
 
 ## Planning
 
-- [ ] 26. **Link budget + terrain.** Free-space loss, antenna gains, Fresnel zone and
+- [x] 26. **Link budget + terrain.** Free-space loss, antenna gains, Fresnel zone and
       elevation data give a predicted SNR to compare with the measured SNR
       (obstructions, misaims).
-- [ ] 27. **Capacity view.** iPerf results with bit rate and channel busy give the spare
+- [x] 27. **Capacity view.** iPerf results with bit rate and channel busy give the spare
       capacity on each backbone link (MMC–COL, MMC–EOC).
-- [ ] 28. **Scheduled iPerf.** Overnight runs on key links, trended over time.
+- [x] 28. **Scheduled iPerf.** Overnight runs on key links, trended over time.
 
 ## Pending radio work (outside the app)
 

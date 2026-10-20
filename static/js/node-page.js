@@ -155,6 +155,13 @@ const NodePage = {
         if (label) {
             const name = site && sites ? sites[site] : null;
             label.textContent = isInfra && site ? `(${site}${name ? ' – ' + name : ''})` : '';
+            if (isInfra && site) {
+                const link = document.createElement('a');
+                link.href = `/sites/${encodeURIComponent(site)}`;
+                link.className = 'site-link';
+                link.textContent = 'site dashboard';
+                label.append(' ', link);
+            }
         }
         if (isInfra && site && !sites) {
             fetch('/api/nodes/infrastructure').then(r => r.json())

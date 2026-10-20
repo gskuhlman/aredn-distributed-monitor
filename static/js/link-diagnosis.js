@@ -79,7 +79,21 @@ const LinkDiagnosis = {
             <details class="diag-details">
                 <summary>Link state changes (${d.state_log.length})</summary>
                 ${this.renderStateLog()}
+            </details>
+            <details class="diag-details" id="diag-budget">
+                <summary>Link budget &amp; terrain <small class="form-hint">predicted vs. measured signal, Fresnel zone</small></summary>
+                <div id="diag-budget-body"><p class="log-empty">Open to compute (looks up ground elevations once).</p></div>
             </details>`;
+        // Link budget (link-budget.js): computed only when opened.
+        const budget = document.getElementById('diag-budget');
+        if (budget && typeof LinkBudget !== 'undefined' && this.pair) {
+            budget.addEventListener('toggle', () => {
+                if (budget.open && !budget.dataset.loaded) {
+                    budget.dataset.loaded = '1';
+                    LinkBudget.renderInto(document.getElementById('diag-budget-body'), this.pair[0], this.pair[1], d.hours);
+                }
+            });
+        }
         // Operator notes, kept apart from the computed findings above.
         if (typeof Notes !== 'undefined' && this.pair) {
             Notes.mount(document.getElementById('diag-notes'),
@@ -392,3 +406,14 @@ const LinkDiagnosis = {
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 };
+
+// Deep link from other pages (site dashboard): /#diagnose/<a>/<b> opens the pair in RF Stats.
+document.addEventListener('DOMContentLoaded', () => {
+    const m = /^#diagnose\/([^/]+)\/([^/]+)$/.exec(location.hash || '');
+    if (!m) return;
+    const [a, b] = [decodeURIComponent(m[1]), decodeURIComponent(m[2])];
+    setTimeout(() => {
+        document.querySelector('.tab-btn[data-tab="rf-stats"]')?.click();
+        setTimeout(() => { if (typeof RFStats !== 'undefined') RFStats.selectLink(a, b); }, 500);
+    }, 300);
+});
