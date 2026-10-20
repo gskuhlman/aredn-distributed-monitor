@@ -50,7 +50,7 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 
 - [ ] 15. **Heatmap, node × hour.** Colored by reachability or LQ; shows whole sites
       dropping together and nightly patterns.
-- [ ] 16. **Site neighbor matrix.** Every radio at a site against every radio it hears,
+- [x] 16. **Site neighbor matrix.** Every radio at a site against every radio it hears,
       with SNR/LQ per cell; one-way and lopsided pairs stand out.
 - [ ] 17. **Link swimlanes.** One bar per link, colored good/flapping/down over time,
       with reboots and config changes marked.

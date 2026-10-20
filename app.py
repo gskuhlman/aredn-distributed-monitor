@@ -43,6 +43,7 @@ import notes
 import channel_map
 import channel_planner
 import link_watch
+import site_matrix
 import collector_health
 import link_health
 import mesh_diagnostics
@@ -1038,6 +1039,28 @@ def api_one_way_report():
     hours = max(1, min(24 * 31, request.args.get('hours', 24, type=int)))
     return jsonify(link_watch.one_way_report(hours=hours))
 # --- end Link Watch routes ---
+
+
+@app.route('/api/reports/site-matrix', methods=['GET', 'POST'])
+def api_site_matrix():
+    """Site neighbor matrix: ?site=COL or ?radios=a,b,c, &hours=24. POST
+    {site|radios, hours, overrides} adds planned channel relations (what-if)."""
+    body = request.get_json(silent=True) or {}
+    site = body.get('site') or request.args.get('site')
+    radios = body.get('radios') or request.args.get('radios')
+    if isinstance(radios, str):
+        radios = [n for n in radios.replace(',', ' ').split() if n]
+    if not site and not radios:
+        return jsonify({'error': 'site or radios is required'}), 400
+    try:
+        hours = int(body.get('hours') or request.args.get('hours') or 24)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'hours must be a number'}), 400
+    result = site_matrix.build(site=site, radios=radios, hours=hours,
+                               overrides=body.get('overrides') or request.args.get('overrides') or None)
+    if result.get('error'):
+        return jsonify(result), 404
+    return jsonify(result)
 
 
 @app.route('/api/rf-stats/diagnose/<a>/<b>')
