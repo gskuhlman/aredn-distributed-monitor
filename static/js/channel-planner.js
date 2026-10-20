@@ -65,6 +65,7 @@ const ChannelPlanner = {
             locked: document.getElementById('cp-locked').value,
             move_clients: document.getElementById('cp-move-clients').checked,
             idle_off: document.getElementById('cp-idle-off')?.checked !== false,
+            separate_sectors: document.getElementById('cp-separate')?.checked === true,
             top: Number(document.getElementById('cp-top').value) || 3
         };
         if (bySite) body.site = document.getElementById('cp-site').value;
@@ -119,7 +120,7 @@ const ChannelPlanner = {
         el.innerHTML = `
             <p class="form-hint">${groups} channel group(s) in ${d.band.low}–${d.band.high} MHz.
                 Radios in a group share one channel${d.move_clients ? ' (sectors with their RF-linked clients, PtP ends together)' : ''}.
-                Lower score is better.</p>
+                Lower score is better.${d.separate_sectors ? ' One channel per radio on each mast.' : ''}</p>
             ${notes ? `<ul class="diag-evidence">${notes}</ul>` : ''}
             ${d.turn_off?.length ? `<p class="node-warning">Suggested off (every plan below includes this):
                 ${d.turn_off.map(t => `<strong>${this.esc(t.name)}</strong> (now ${t.frequency}/${t.chanbw || '20?'})`).join(', ')}
@@ -184,6 +185,8 @@ const ChannelPlanner = {
         return `<details class="diag-details"><summary>Why these channels</summary>${p.groups.map(g => {
             const issues = g.issues.slice(0, 6).map(i => {
                 const label = i.rule === 'same_dish' ? 'same channel as a backbone dish aimed here'
+                    : i.rule === 'shared_airtime' ? 'shared airtime on the mast (back-to-back)'
+                    : i.rule === 'colocated_same' ? 'same channel on the mast'
                     : i.rule ? 'under 20 MHz from infrastructure at another site'
                     : i.relation === 'link_break' ? 'link breaks'
                     : i.relation === 'same' ? 'shares channel' : (i.severity || i.relation);

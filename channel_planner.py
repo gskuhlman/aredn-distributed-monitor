@@ -11,8 +11,12 @@ inside the allowed band. A plan's cost adds:
 - channel conflicts with every other transmitting radio in range (mast
   neighbours, radios within CONFLICT_KM in either beam), weighted by the
   Channel Map severity (overlap/adjacent/near);
-- same-channel reuse between groups that face each other (back-to-back
-  sectors on one mast reuse a channel cheaply);
+- same-channel reuse between groups that face each other. On one mast,
+  sharing a channel is shared airtime: AREDN's channel-planning guide
+  (Collocated Nodes) says it can cut site throughput by half or more and
+  recommends a different channel per sector, DtD-linked. Back-to-back sectors
+  sharing a channel are a warning; overlapping beams, or any sharing when
+  separate_sectors is on, are critical;
 - infrastructure at another site aimed at the radio (either way): a backbone
   dish (narrow beam) aimed at it must not share its channel, and every such
   pair needs a 20 MHz guard band;
@@ -32,6 +36,7 @@ seeded random starts; distinct local optima are ranked. The planner only
 changes frequency and width; it never suggests TX power changes.
 """
 
+import contextvars
 import math
 import random
 import time
@@ -65,6 +70,14 @@ INFRA_GUARD_MHZ = 20
 INFRA_COST = {'same_dish': SEVERITY_COST['critical'], 'same': SEVERITY_COST['warning'],
               'overlap': SEVERITY_COST['critical'], 'adjacent': SEVERITY_COST['critical'],
               'near': SEVERITY_COST['warning']}
+INFRA_RULES = set(INFRA_COST)
+# Radios on one mast sharing a channel (see the module docstring).
+MAST_COST = {'shared_airtime': SEVERITY_COST['warning'], 'colocated_same': SEVERITY_COST['critical']}
+AREDN_SECTOR_NOTE = ("AREDN's channel-planning guide recommends a different channel per sector "
+                     "(shared channels on one mast can halve site throughput)")
+
+# One channel per radio on a mast for the plan being computed (plan(separate_sectors=...)).
+_separate_sectors = contextvars.ContextVar('separate_sectors', default=False)
 
 # Measured noise: dB above NOISE_REF_DBM (per 20 MHz) costs this much per radio.
 NOISE_HOURS = 72
@@ -135,7 +148,9 @@ def _geometry(a, b):
 
 
 def _infra_rule(rel, g):
-    """Infrastructure-site rule that applies to a pair, or None."""
+    """Infrastructure-site or same-mast rule that applies to a pair, or None."""
+    if rel == 'same' and g['colocated']:
+        return 'shared_airtime' if g['back_to_back'] and not _separate_sectors.get() else 'colocated_same'
     if not g['infra_watch']:
         return None
     if rel == 'same':
@@ -146,13 +161,13 @@ def _infra_rule(rel, g):
 def _pair_cost(rel, g):
     """Cost of two radios (different groups) on channels with relation rel."""
     rule = _infra_rule(rel, g)
-    return max(_base_pair_cost(rel, g), INFRA_COST[rule] if rule else 0.0)
+    return max(_base_pair_cost(rel, g), {**INFRA_COST, **MAST_COST}[rule] if rule else 0.0)
 
 
 def _base_pair_cost(rel, g):
     if rel == 'same':
         if g['colocated']:
-            return 15.0 if g['back_to_back'] else 60.0
+            return 0.0  # MAST_COST via _infra_rule
         mutual = g['a_sees'] and g['b_sees']
         km = g['d'] / 1000
         if mutual and km <= 8:
@@ -259,7 +274,18 @@ def _candidates(band, widths):
 
 
 def plan(site=None, radios=None, band=None, widths=None, locked=None, move_clients=True,
-         top=3, compare=None, seed=1, idle_off=True):
+         top=3, compare=None, seed=1, idle_off=True, separate_sectors=False):
+    token = _separate_sectors.set(bool(separate_sectors))
+    try:
+        result = _plan(site, radios, band, widths, locked, move_clients, top, compare, seed, idle_off)
+    finally:
+        _separate_sectors.reset(token)
+    if not result.get('error'):
+        result['separate_sectors'] = bool(separate_sectors)
+    return result
+
+
+def _plan(site, radios, band, widths, locked, move_clients, top, compare, seed, idle_off):
     """Ranked channel plans for a site code or radio list. widths: None =
     keep each group's width, a list for every group, or {name: [..]}."""
     started = time.time()
@@ -520,8 +546,9 @@ def _reasons(i, c, assign, groups, by_name, fixed, issues):
             else:
                 gaps.append((_gap(c, assign[j]), other['lead']))
     for who, b2b in shared:
-        reasons.append(f'reuses the channel of {who} on the mast' +
-                       (' (antennas face opposite ways)' if b2b else ' (antennas overlap: shared airtime)'))
+        reasons.append(f'shares the channel of {who} on the mast: shared airtime' +
+                       (' (antennas face opposite ways)' if b2b else ' with overlapping antennas') +
+                       f'; {AREDN_SECTOR_NOTE}')
     if gaps:
         gmin, who = min(gaps)
         if gmin >= ia.GUARD_MHZ:
@@ -530,7 +557,7 @@ def _reasons(i, c, assign, groups, by_name, fixed, issues):
             reasons.append(f'only {gmin:.0f} MHz guard band to {who} on the mast')
         else:
             reasons.append(f'overlaps {who} on the mast by {-gmin:.0f} MHz')
-    infra = [x for x in issues if x.get('rule')]
+    infra = [x for x in issues if x.get('rule') in INFRA_RULES]
     if not infra and any(gm['infra_watch'] for _, _, gm in g['fixed_geo']):
         reasons.append(f'{INFRA_GUARD_MHZ} MHz or more clear of infrastructure at other sites aimed this way')
     for x in infra:

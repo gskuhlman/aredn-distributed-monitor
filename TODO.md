@@ -102,6 +102,11 @@ It brings Collins's own conflicts from 8 critical / 24 warning to 0 critical / 2
 - [ ] Fix ka0ies-square-one's azimuth setting: set to 135°, but Collins is at 43° from it.
 - [ ] Afterwards: check RF Stats for an rkt-n ↔ rkt-s link or clients linked to the opposite
       sector, and compare before/after on the Changes tab.
+- [ ] Note: sharing a channel between opposite sectors is shared airtime. AREDN's channel-planning
+      guide (Collocated Nodes) recommends a different channel per sector, because sharing can halve site
+      throughput. At Collins alone there isn't room ("One channel per sector" in the planner gives 5 warnings
+      and lands N/W on the MMC/EOC omni channels). Long term: plan COL + MMC + EOC together (moves the
+      MMC↔EOC and MMC↔COL backbones) so each sector gets its own channel.
 - [ ] Known leftovers: E/W are only 10 MHz from the EOC↔MMC dish (5805–5845, aimed toward
       Collins); fixing that means moving MMC radios. Not Collins: k0cta-130-51-138 vs
       w0gq-mmc-rkt-o13 and kf0jcl-qth vs kj0dx-qth-sq.
