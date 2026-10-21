@@ -399,7 +399,7 @@ def _span_text(r):
     return f"{r['low']:.0f}–{r['high']:.0f} MHz"
 
 
-def _nearby_radios(name, cm_radios, neighbors, link_freq, width, exclude, cabled=()):
+def _nearby_radios(name, cm_radios, neighbors, link_freq, width, exclude, cabled=(), radio_off=False):
     """Radios that can interfere with `name`'s receiver, judged like the Channel
     Map: radios at its site (within COLOCATED_METERS, or cabled to it by DtD
     even without a location), radios its antenna faces (toward its RF
@@ -409,6 +409,8 @@ def _nearby_radios(name, cm_radios, neighbors, link_freq, width, exclude, cabled
     import channel_map as cm  # channel_map imports this module
     import infra_audit as ia
     me = cm_radios.get(name) or {'name': name, 'lat': None, 'lon': None}
+    if radio_off:
+        link_freq = width = None
     mine = {'frequency': me.get('frequency') or link_freq,
             'chanbw': me.get('chanbw') or (width if not me.get('frequency') else None)}
     my_lo, my_hi = ia._span(mine) or (None, None)
@@ -562,7 +564,10 @@ def _check_delivery(ctx, f):
         if (broken or lossy) and any(x.get('wired_link_type') for x in ctx['directions']):
             d['delivery'] = 'side-path'
             _add(f, 'info', 'delivery', f'RF from {src} to {dst} is poor, but they are wired',
-                 f"Their traffic uses the cable, so this side path does not matter by itself.", evidence)
+                 f"Their traffic uses the cable, so this side path does not matter by itself."
+                 + (f" {dst} reports its radio off, so this RF entry at {src} is not {dst}'s radio: "
+                    f"it is a leftover or another radio announcing the same name."
+                    if dst in ctx['radio_off'] or src in ctx['radio_off'] else ''), evidence)
             continue
         if broken:
             d['delivery'] = 'broken'
@@ -807,6 +812,9 @@ def _receive_impaired(ctx, end):
     into it, or a receiver-wide problem)."""
     if end in ctx['receiver_problem']:
         return True
+    if ctx.get('wired'):
+        return any(n.get('lq') is not None and n['lq'] < RECEIVE_OK_LQ
+                   for n in ctx['neighbors'].get(end, []))
     for d in ctx['directions']:
         if d['source'] == end and d['found'] and d.get('lq') is not None and d['lq'] < RECEIVE_OK_LQ:
             return True
@@ -1174,6 +1182,8 @@ def _verdict(ctx, findings):
     crit = [x for x in findings if x['severity'] == 'critical']
     causes = [x for x in findings if x['category'] in ('near_far', 'interference')
               and x['severity'] in ('critical', 'warning')]
+    if ctx.get('wired'):
+        return _wired_verdict(ctx, findings)
     if ctx['receiver_problem']:
         end = sorted(ctx['receiver_problem'])[0]
         text = (f"{end}'s receiver is losing traffic from most of its RF neighbors while they hear it fine, "
@@ -1209,6 +1219,39 @@ def _verdict(ctx, findings):
         return {'severity': 'warning', 'text': f"{len(warn)} issue(s) found; the most significant: "
                                                f"{warn[0]['title']}."}
     return {'severity': 'ok', 'text': 'No problems detected between these nodes in this window.'}
+
+
+def _wired_verdict(ctx, findings):
+    """The pair is cabled (DtD): their traffic never uses RF between them, so
+    the link itself is fine. Problems found are about each radio's RF links
+    to other nodes; point at those pairs instead."""
+    a, b = ctx['pair']
+    text = (f"The link between {a} and {b} is fine: they are wired together ({ctx['wired']}), "
+            f"so their traffic uses the cable and the RF path between them doesn't matter.")
+    issues = [x for x in findings if x['severity'] in ('critical', 'warning')]
+    diagnose = []
+    for end in ctx['pair']:
+        if end in ctx['radio_off']:
+            text += f" {end}'s radio is off."
+            continue
+        nbrs = ctx['neighbors'].get(end, [])
+        if not nbrs:
+            continue
+        weak = [n for n in nbrs if n.get('poor') or (n.get('lq') is not None and n['lq'] < RECEIVE_OK_LQ)]
+        for n in (weak or nbrs):
+            if not n['node'].startswith('mac-'):
+                diagnose.append([end, n['node']])
+        if weak:
+            text += (f" Separately, {end}'s radio has trouble on its RF link(s) to "
+                     + ', '.join(f"{n['node']} (LQ {n['lq']:.0f}%)" if n.get('lq') is not None else n['node']
+                                 for n in weak) + '.')
+    if issues:
+        text += (" The findings below are about the radios' links to other nodes: "
+                 + '; '.join(x['title'].lower() for x in issues[:3]) + '.')
+        if diagnose:
+            text += ' Diagnose those pairs for the details.'
+    sev = 'warning' if issues else 'ok'
+    return {'severity': sev, 'text': text, 'wired': ctx['wired'], 'diagnose': diagnose}
 
 
 # --------------------------------------------------------------- series ---
@@ -1303,7 +1346,20 @@ def diagnose_pair(a, b, hours=24):
             WHERE lat IS NOT NULL AND lon IS NOT NULL
         ''')]
         nodes_geo = {r['name']: (r['lat'], r['lon']) for r in radios}
-        neighbors = {n: _neighbors(cur, n, nodes_geo, stale_after, now) for n in (a, b)}
+        import channel_map as cm  # channel_map imports this module
+        cabled = {}
+        for n in (a, b):
+            # Either end may be the one listing the cable.
+            cabled[n] = {r[0] for r in cur.execute('''
+                SELECT CASE WHEN source_node = ? THEN target_node ELSE source_node END FROM links
+                WHERE ? IN (source_node, target_node) AND UPPER(link_type) = 'DTD'
+                  AND status != 'removed' AND last_seen >= ?
+            ''', (n, n, (now - timedelta(days=cm.RECENT_DAYS)).strftime(TS_FMT)))}
+        # A radio's RF tracker for a node it is cabled to (DtD) is a side path
+        # or a leftover, not an RF neighbour: leave it out of the receiver and
+        # near-far checks (the pair's own side path is judged per direction).
+        neighbors = {n: [x for x in _neighbors(cur, n, nodes_geo, stale_after, now)
+                         if x['node'] not in cabled[n]] for n in (a, b)}
         # Also look at receivers where either end is very loud (near-far there).
         for n in (a, b):
             loud_at = cur.execute('''
@@ -1321,19 +1377,13 @@ def diagnose_pair(a, b, hours=24):
                 SELECT raw_tracker FROM links WHERE source_node IN (?, ?) AND UPPER(link_type) = 'RF'
                   AND status != 'removed'
             ''', (a, b))])
-        import channel_map as cm  # channel_map imports this module
         cm_radios, _ = cm._load(conn)
         for r in cm_radios.values():
             cm._apply_span(r)
             r['recent'] = cm._recent(r)
-        cabled = {}
-        for n in (a, b):
-            cabled[n] = {r[0] for r in cur.execute('''
-                SELECT target_node FROM links WHERE source_node = ? AND UPPER(link_type) = 'DTD'
-                  AND status != 'removed' AND last_seen >= ?
-            ''', (n, (now - timedelta(days=cm.RECENT_DAYS)).strftime(TS_FMT)))}
+        radio_off = {n for n in (a, b) if str(nodes[n].get('rf_status') or '').lower() == 'off'}
         nearby = {n: _nearby_radios(n, cm_radios, neighbors.get(n, []), link_freq, width, {a, b},
-                                    cabled[n])
+                                    cabled[n], n in radio_off)
                   for n in (a, b)}
         ga, gb = nodes_geo.get(a), nodes_geo.get(b)
         geo_distance = round(_haversine_m(ga[0], ga[1], gb[0], gb[1])) if ga and gb else None
@@ -1341,7 +1391,9 @@ def diagnose_pair(a, b, hours=24):
     ctx = {'pair': (a, b), 'nodes': nodes, 'directions': directions, 'state_log': state_log,
            'neighbors': neighbors, 'nearby': nearby, 'link_freq': link_freq, 'rf_budget': None,
            'inferred_width_mhz': width, 'geo_distance_m': geo_distance,
-           'receiver_problem': set(), 'infra': set(database.get_infrastructure_node_names())}
+           'receiver_problem': set(), 'infra': set(database.get_infrastructure_node_names()),
+           'radio_off': radio_off,
+           'wired': next((d['wired_link_type'] for d in directions if d.get('wired_link_type')), None)}
     findings = []
     for check in CHECKS:
         check(ctx, findings)

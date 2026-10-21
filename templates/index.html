@@ -25,18 +25,37 @@
         <header class="header">
             <div class="header-left">
                 <h1>AREDN Network Monitor</h1>
-                <nav class="header-tabs">
-                    <button class="tab-btn active" data-tab="network">Network</button>
-                    <button class="tab-btn" data-tab="rf-stats">RF Stats</button>
-                    <button class="tab-btn" data-tab="nodes">Nodes</button>
-                    <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
-                    <button class="tab-btn" data-tab="voip">VOIP</button>
-                    <button class="tab-btn" data-tab="reports">Reports</button>
-                    <button class="tab-btn" data-tab="changes">Changes</button>
-                    <button class="tab-btn" data-tab="channel-map">Channel Map</button>
+                <nav class="header-tabs nav-menu">
+                    <button id="nav-toggle" class="nav-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="nav-panel">
+                        <span class="nav-icon" aria-hidden="true">&#9776;</span>
+                        <span id="nav-current">Topology</span>
+                        <span class="nav-caret" aria-hidden="true">&#9662;</span>
+                    </button>
+                    <div id="nav-panel" class="nav-panel" hidden>
+                        <div class="nav-group">
+                            <div class="nav-group-title">Network</div>
+                            <button class="tab-btn active" data-tab="network">Topology</button>
+                            <button class="tab-btn" data-tab="geo-map">Map</button>
+                            <button class="tab-btn" data-tab="channel-map">Channel Map</button>
+                        </div>
+                        <div class="nav-group">
+                            <div class="nav-group-title">Links &amp; nodes</div>
+                            <button class="tab-btn" data-tab="rf-stats">RF Stats</button>
+                            <button class="tab-btn" data-tab="nodes">Nodes</button>
+                            <button class="tab-btn" data-tab="voip">VOIP</button>
+                        </div>
+                        <div class="nav-group">
+                            <div class="nav-group-title">Analysis</div>
+                            <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
+                            <button class="tab-btn" data-tab="reports">Reports</button>
+                            <button class="tab-btn" data-tab="changes">Changes</button>
+                        </div>
+                    </div>
                 </nav>
             </div>
             <div class="header-controls">
+                <!-- Graph filters: shown only on the Topology and Map pages (nav-menu.js). -->
+                <span id="header-filters" class="header-filters">
                 <label class="header-checkbox">
                     <input type="checkbox" id="filter-rf-only">
                     RF only
@@ -56,6 +75,9 @@
                     <input type="checkbox" id="scan-selected-only">
                     Only selected nodes
                 </label>
+                </span>
+                <span id="selected-scan-badge" class="selected-scan-badge" hidden
+                      title="Scans are limited to the selected nodes. Change it on the Topology or Map page.">Scanning selected nodes only</span>
                 <span id="status-indicator" class="status-indicator"></span>
                 <span id="status-text">Connecting...</span>
                 <button id="scan-btn" class="btn btn-primary">Scan Now</button>
@@ -980,6 +1002,25 @@
                 </div>
             </div>
             <!-- end Changes View -->
+            <!-- Map View: the Topology graph on the real-world map (geo-map.js) -->
+            <div id="geo-map-view" class="view-container">
+                <div class="cm-layout">
+                    <div class="cm-controls">
+                        <span class="form-hint">Same nodes, colors and filters as Topology (header filters apply).</span>
+                        <label class="header-checkbox"><input type="checkbox" id="gm-tunnels" checked> Tunnels</label>
+                        <label class="header-checkbox"><input type="checkbox" id="gm-dtd" checked> DtD</label>
+                        <label class="header-checkbox"><input type="checkbox" id="gm-labels" checked> Names (zoom 14+)</label>
+                        <button id="gm-fit" class="btn btn-secondary">Fit</button>
+                        <span id="gm-status" class="nodes-count"></span>
+                        <details id="gm-unlocated" class="gm-unlocated" hidden></details>
+                    </div>
+                    <div class="cm-body">
+                        <div class="cm-map-wrap">
+                            <div id="gm-map" class="cm-map"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <!-- Channel Map View (TODO #3) -->
             <div id="channel-map-view" class="view-container">
                 <div class="cm-layout">
@@ -1016,6 +1057,7 @@
                             <label>to <input type="number" id="cm-fmax" class="form-input cm-num" value="5950" step="5"></label>
                         </span>
                         <button id="cm-reload" class="btn btn-secondary">Reload</button>
+                        <button id="cm-plan-open" class="btn btn-primary" title="Channel planner: suggest channels for a site or a list of radios">Plan channels</button>
                         <span id="cm-status" class="nodes-count"></span>
                     </div>
                     <div class="cm-body">
@@ -1412,6 +1454,8 @@
     <script src="{{ url_for('static', filename='js/changes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/channel-map.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/geo-map.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/nav-menu.js') }}"></script>
     <script src="{{ url_for('static', filename='js/channel-planner.js') }}"></script>
 </body>
 </html>

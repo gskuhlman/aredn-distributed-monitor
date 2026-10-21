@@ -57,8 +57,7 @@ const ChannelMap = {
             this.bindControls();
         }
         try {
-            await this.loadLeaflet();
-            if (!this.baseMap) await this.loadBaseMap();
+            await this.ensureBase();
         } catch (error) {
             document.getElementById('cm-map').innerHTML =
                 '<p class="log-empty">The map library (Leaflet) could not be loaded.</p>';
@@ -136,21 +135,31 @@ const ChannelMap = {
         });
     },
 
-    createMap() {
-        this.map = L.map('cm-map', { zoomControl: true, preferCanvas: false }).setView([42.0, -91.67], 11);
+    /** Leaflet + base map info, ready for addBaseLayers (also used by the Map tab). */
+    async ensureBase() {
+        await this.loadLeaflet();
+        if (!this.baseMap) await this.loadBaseMap();
+    },
+
+    addBaseLayers(map) {
         if (this.baseMap.offline) {
             // Default: online tiles over the offline map, so the map is
             // complete with internet and still works without it. Each choice
             // gets its own layer instances (a layer can't sit in two groups).
-            const both = L.layerGroup([...this.offlineLayers(), this.onlineLayer()]).addTo(this.map);
+            const both = L.layerGroup([...this.offlineLayers(), this.onlineLayer()]).addTo(map);
             L.control.layers({
                 'Online + offline': both,
                 'Offline only': L.layerGroup(this.offlineLayers()),
                 'Online only': this.onlineLayer()
-            }, null, { position: 'topright' }).addTo(this.map);
+            }, null, { position: 'topright' }).addTo(map);
         } else {
-            this.onlineLayer().addTo(this.map);
+            this.onlineLayer().addTo(map);
         }
+    },
+
+    createMap() {
+        this.map = L.map('cm-map', { zoomControl: true, preferCanvas: false }).setView([42.0, -91.67], 11);
+        this.addBaseLayers(this.map);
         this.layers = {
             beams: L.layerGroup().addTo(this.map),
             links: L.layerGroup().addTo(this.map),

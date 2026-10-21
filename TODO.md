@@ -86,16 +86,23 @@ Recommended order: 2, 1, 3, 8, 7, 21.
 
 ## Pending radio work (outside the app)
 
-Collins plan from the channel planner (Channel Map → Plan channels, site COL), 2026-10-19.
-It brings Collins's own conflicts from 8 critical / 24 warning to 0 critical / 2 warning.
+Channel plan for Collins + MMC + EOC together (Channel Map → Plan channels, Radios = the 12
+infrastructure radios, "One channel per sector" on), 2026-10-20. Replaces the 2026-10-19 Collins-only
+plan, which shared channels between opposite sectors. Today: 9 critical / 24 warning; with this plan
+0 critical / 2 warning (Collins W shares 5875 with the MMC omni 6.2 km away, Collins E shares 5660 with
+the EOC omni 13 km away). Each Collins sector gets its own channel, as AREDN's channel-planning guide
+recommends. The critical left on the Channel Map is kf0jcl-qth vs kj0dx-qth-sq (not infrastructure).
 
-- [ ] Start a maintenance window for COL (Diagnostics → Maintenance, site COL, RF peers
+- [ ] Start a maintenance window for COL, MMC and EOC (Diagnostics → Maintenance, RF peers
       included) so alarms and reports ignore the change.
-- [ ] N + S sectors on ch 132 (5660/20): w0gq-col-rkt-n with kf0jcl-qth-litebeam5ac,
-      w0gq-col-rkt-s with kf9mt-home-litebeam. Opposite sectors share the channel (shared airtime).
-- [ ] E + W sectors on ch 173 (5865/20): w0gq-col-rkt-e with kj0dx-qth-ub,
-      w0gq-col-rkt-w with ka0ies-square-one.
-- [ ] MMC ↔ COL link on ch 142 (5710/40): w0gq-col-sq-2mmc and w0gq-mmc-sq-2col together.
+- [ ] COL N on ch 183 (5915/20): w0gq-col-rkt-n with kf0jcl-qth-litebeam5ac.
+- [ ] COL E on ch 132 (5660/20): w0gq-col-rkt-e with kj0dx-qth-ub.
+- [ ] COL S on ch 155 (5775/20): w0gq-col-rkt-s with kf9mt-home-litebeam.
+- [ ] COL W on ch 175 (5875/20): w0gq-col-rkt-w with ka0ies-square-one.
+- [ ] COL ↔ MMC backbone on ch 142 (5710/40): w0gq-col-sq-2mmc and w0gq-mmc-sq-2col together
+      (also gets it off TDWR: today 5640–5680).
+- [ ] MMC ↔ EOC backbone stays on ch 165 (5825/40).
+- [ ] EOC omni w0gq-eoc-rkt-o13 to ch 132 (5660/20); MMC omni w0gq-mmc-rkt-o13 to ch 175 (5875/20).
 - [ ] Turn off w0gq-col-sq-2bldg112 and w0gq-col-sq-2hiwt until their far ends exist.
 - [ ] Move each client before (or with) its sector, so no link is stranded.
 - [ ] Lower kf9mt-home-litebeam's TX power (near-far at Collins). Never Collins's.
@@ -108,11 +115,6 @@ It brings Collins's own conflicts from 8 critical / 24 warning to 0 critical / 2
 - [ ] Check w0gq-mmc-rkt-o13 and w0gq-eoc-rkt-o13 (omnis hearing nothing): channel and SSID.
 - [ ] Afterwards: check RF Stats for an rkt-n ↔ rkt-s link or clients linked to the opposite
       sector, and compare before/after on the Changes tab.
-- [ ] Note: sharing a channel between opposite sectors is shared airtime. AREDN's channel-planning
-      guide (Collocated Nodes) recommends a different channel per sector, because sharing can halve site
-      throughput. At Collins alone there isn't room ("One channel per sector" in the planner gives 5 warnings
-      and lands N/W on the MMC/EOC omni channels). Long term: plan COL + MMC + EOC together (moves the
-      MMC↔EOC and MMC↔COL backbones) so each sector gets its own channel.
-- [ ] Known leftovers: E/W are only 10 MHz from the EOC↔MMC dish (5805–5845, aimed toward
-      Collins); fixing that means moving MMC radios. Not Collins: k0cta-130-51-138 vs
-      w0gq-mmc-rkt-o13 and kf0jcl-qth vs kj0dx-qth-sq.
+- [ ] Trade-offs to watch: COL S (5765–5785) is in busy UNII-3 WiFi, COL E and the EOC omni
+      (5650–5670) touch the first 10 MHz above TDWR, COL N (5905–5925) is in the C-V2X band.
+      Check Link Watch noise for those radios after the change.

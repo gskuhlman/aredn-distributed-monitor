@@ -52,6 +52,8 @@ import link_watch
 DEFAULT_BAND = cm.HAM_5GHZ
 STEP_MHZ = 5
 RESTARTS = 40
+PERTURB_ROUNDS = 400        # iterated local search from the best plan found
+SEARCH_BUDGET_S = 4.0
 BACK_TO_BACK_DEG = 150      # colocated antennas this far apart may share a channel
 BEAM_GUARD_DEG = 30
 MAX_ROUNDS = 20
@@ -250,7 +252,9 @@ def _groups(planned, radios, links, move_clients):
         for l in links:
             if l['a'] in planned or l['b'] in planned:
                 members.update((l['a'], l['b']))
-    members = {n for n in members if n in radios}
+    # Sorted throughout: set order changes with Python's hash seed, and the
+    # group order steers the search, so plans would differ between restarts.
+    members = sorted(n for n in members if n in radios)
     for n in members:
         find(n)
     for l in links:
@@ -259,7 +263,7 @@ def _groups(planned, radios, links, move_clients):
     groups = {}
     for n in members:
         groups.setdefault(find(n), []).append(n)
-    return [sorted(g) for g in groups.values()]
+    return sorted(sorted(g) for g in groups.values())
 
 
 def _candidates(band, widths):
@@ -448,6 +452,24 @@ def _plan(site, radios, band, widths, locked, move_clients, top, compare, seed, 
         key = tuple(a)
         if key not in seen:
             seen[key] = total(a)
+    # Iterated local search: re-plan two or three groups at random from the
+    # best plan so far and descend again (single-group moves alone get stuck
+    # where two groups would have to swap channels).
+    if len(groups) > 1:
+        best_key = min(seen, key=seen.get)
+        deadline = started + SEARCH_BUDGET_S
+        for _ in range(PERTURB_ROUNDS):
+            if time.time() > deadline:
+                break
+            a = list(best_key)
+            for i in rng.sample(range(len(groups)), min(len(groups), rng.choice((2, 3)))):
+                a[i] = rng.choice(groups[i]['cands'])
+            a = descend(a)
+            key = tuple(a)
+            if key not in seen:
+                seen[key] = total(a)
+                if seen[key] < seen[best_key] - 1e-9:
+                    best_key = key
     def changes(assign):
         return sum(1 for i, g in enumerate(groups) for n in g['members']
                    if (by_name[n]['frequency'], by_name[n]['chanbw'] or 20.0) != assign[i])

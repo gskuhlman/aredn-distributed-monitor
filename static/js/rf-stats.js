@@ -826,10 +826,13 @@ function initTabSwitching() {
             // Hide all views, then activate the selected one.
             allViews.forEach(v => v && v.classList.remove('active'));
             document.querySelectorAll('.view-container.active').forEach(v => v.classList.remove('active'));
-            if (legend) legend.style.display = tab === 'network' ? 'block' : 'none';
+            if (legend) legend.style.display = (tab === 'network' || tab === 'geo-map') ? 'block' : 'none';
 
             if (tab === 'network') {
                 networkView.classList.add('active');
+            } else if (tab === 'geo-map') {
+                document.getElementById('geo-map-view')?.classList.add('active');
+                if (typeof GeoMap !== 'undefined') GeoMap.open();
             } else if (tab === 'rf-stats') {
                 rfStatsView.classList.add('active');
                 RFStats.init();

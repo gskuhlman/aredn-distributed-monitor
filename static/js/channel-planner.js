@@ -315,3 +315,13 @@ const ChannelPlanner = {
 };
 
 document.addEventListener('DOMContentLoaded', () => ChannelPlanner.init());
+
+// Toolbar shortcut: the planner sits at the bottom of the side panel.
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('cm-plan-open')?.addEventListener('click', () => {
+        const box = document.getElementById('cp-box');
+        if (!box) return;
+        box.open = true;
+        box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+});

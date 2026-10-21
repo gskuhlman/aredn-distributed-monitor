@@ -52,10 +52,14 @@ const LinkDiagnosis = {
 
         el.innerHTML = `
             <div class="diag-verdict diag-${d.verdict.severity}">
-                <div class="diag-verdict-label">${this.esc(this.severityLabel(d.verdict.severity))}
+                <div class="diag-verdict-label">${this.esc(d.verdict.wired
+                        ? (d.verdict.severity === 'ok' ? 'Link OK (wired)' : 'Link OK (wired) · radio issues elsewhere')
+                        : this.severityLabel(d.verdict.severity))}
                     <span class="diag-counts">${counts.critical} critical · ${counts.warning} warning ·
                     ${counts.info} info · ${counts.ok} ok · last ${d.hours}h</span></div>
                 <div class="diag-verdict-text">${this.esc(d.verdict.text)}</div>
+                ${(d.verdict.diagnose || []).map(([a, b]) =>
+                    `<button class="btn btn-small diag-pair-btn" data-a="${this.esc(a)}" data-b="${this.esc(b)}">Diagnose ${this.esc(a)} ↔ ${this.esc(b)}</button>`).join(' ')}
             </div>
             <div id="diag-live" class="diag-live hidden"></div>
             <div id="diag-notes" class="diag-notes"></div>
@@ -84,6 +88,10 @@ const LinkDiagnosis = {
                 <summary>Link budget &amp; terrain <small class="form-hint">predicted vs. measured signal, Fresnel zone</small></summary>
                 <div id="diag-budget-body"><p class="log-empty">Open to compute (looks up ground elevations once).</p></div>
             </details>`;
+        // A wired pair's verdict points at the radios' other RF links.
+        el.querySelectorAll('.diag-pair-btn').forEach(btn => btn.addEventListener('click', () => {
+            if (typeof RFStats !== 'undefined') RFStats.selectLink(btn.dataset.a, btn.dataset.b);
+        }));
         // Link budget (link-budget.js): computed only when opened.
         const budget = document.getElementById('diag-budget');
         if (budget && typeof LinkBudget !== 'undefined' && this.pair) {
