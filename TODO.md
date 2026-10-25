@@ -84,6 +84,71 @@ Recommended order: 2, 1, 3, 8, 7, 21.
       capacity on each backbone link (MMC–COL, MMC–EOC).
 - [x] 28. **Scheduled iPerf.** Overnight runs on key links, trended over time.
 
+## Round 2 ideas (2026-10-20)
+
+Grounded in what turned up since: a fake RF tracker named after a node whose radio is off,
+a planner that gave different plans after each restart, 252 links aged out by one short scan,
+and a channel plan that now has to be carried out by hand across three sites.
+
+All built 2026-10-24 (see CLAUDE.md for each module). Not verified against live radios: the WiFi scan page path (#34; import works), alignment readings (#31) and service probes (#36) were only tested off the network.
+
+### Carrying out changes
+
+- [x] 29. **Plan rollout tracker.** Turn a planner plan into an ordered checklist (clients before
+      their sector, backbones last), tick each step off automatically when the scanner sees the
+      radio on its new channel, and flag a link that hasn't come back within N minutes.
+- [x] 30. **Automatic before/after verdict.** 24 h after a `frequency_change` or channel change-log
+      entry, run the Changes comparison by itself and send "better / worse / same" per link
+      (notification + weekly report).
+- [x] 31. **Antenna alignment mode.** Phone-friendly page that polls one radio's LQM every 1–2 s
+      and shows SNR/signal to a chosen peer as a big number, bar and tone, with the best value
+      seen, for tower work.
+- [x] 32. **Field mode / PWA.** Installable, phone-sized Map + node pages that work from the
+      offline maps and the last data when the laptop has no internet.
+
+### Troubleshooting checks
+
+- [x] 33. **Ghost tracker check.** RF trackers that can't be what they claim: named after a node
+      whose radio is off, a node cabled to the radio, LQM distance far from the coordinates, or one
+      MAC under two names. List them (Mesh Health) and leave them out of every RF check.
+- [x] 34. **WiFi survey at the sites.** Use the nodes' own WiFi scan (where the firmware exposes it)
+      on a schedule to record non-mesh access points per channel near COL/MMC/EOC, and feed
+      that into the planner's noise cost instead of the fixed UNII-3/UNII-4 guesses.
+- [x] 35. **Babel cost view.** Read Babel neighbour costs/metrics from the nodes and show where
+      routing prefers a tunnel or a long detour over an RF path that looks fine.
+- [x] 36. **Service checks.** Probe the services nodes advertise (web pages, PBX, cameras,
+      Winlink) and alert when one stops answering while its node is still up.
+- [x] 37. **Node hygiene score.** Per node: location set and plausible, antenna/azimuth set,
+      firmware current, description, contact; a "fix these" list for each owner.
+
+### New ways to view the data
+
+- [x] 38. **Map playback.** Time slider on the Map page replaying links, colors and outages over a
+      chosen window (from link_state_log), to see how an event spread.
+- [x] 39. **Map overlays.** Toggle SNR/quality coloring, SPOF links, Route Watch paths and channel
+      conflicts on the Map page; click a node for "what loses connectivity if this goes down".
+- [x] 40. **Spectrum waterfall per site.** Channel occupancy and measured noise per 5 MHz slot over
+      time at each site, with planned changes marked.
+
+### Operations and robustness
+
+- [x] 41. **Test suite.** pytest with a small fixture database: scan guards (seed degraded, short
+      scan aging), planner determinism and plan quality, pair diagnosis (wired pair, radio off),
+      unreachable classifier, reports. Run before each commit.
+- [x] 42. **Login for changes.** The UI has no authentication: anyone on the LAN can delete nodes,
+      schedule maintenance or send the weekly report. Read-only by default, a password (or
+      reverse-proxy auth) for actions.
+- [x] 43. **Database care page.** Size per table, growth per day, retention settings, VACUUM, and a
+      nightly backup of the SQLite file (keep N copies).
+- [x] 44. **Distributed status.** Build the multi-collector status rules from CLAUDE.md (UP /
+      LOCALLY_UNREACHABLE / PARTITIONED / STALE / DOWN_CONFIRMED) from CouchDB observations, and a
+      second collector to test it.
+- [x] 45. **New node welcome.** When a node appears for the first time: notify, show its hygiene
+      checklist (#37), suggest a channel from the planner for its site, and mark it to watch for
+      a week.
+- [x] 46. **Club report export.** One-page PDF/printable summary (map, health, changes made, what's
+      next) for meetings.
+
 ## Pending radio work (outside the app)
 
 Channel plan for Collins + MMC + EOC together (Channel Map → Plan channels, Radios = the 12

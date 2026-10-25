@@ -30,6 +30,7 @@ const ChannelPlanner = {
             if (btn.dataset.cpAction === 'map') this.showOnMap(plan);
             if (btn.dataset.cpAction === 'copy') this.copyText(plan);
             if (btn.dataset.cpAction === 'schedule') this.schedule(plan, btn);
+            if (btn.dataset.cpAction === 'rollout') this.startRollout(plan, btn);
         });
     },
 
@@ -146,7 +147,9 @@ const ChannelPlanner = {
             <button class="btn btn-primary btn-small" data-cp-action="map" data-cp-plan="${key}">Show on map</button>
             <button class="btn btn-secondary btn-small" data-cp-action="copy" data-cp-plan="${key}">Copy as what-if</button>
             ${key !== 'compare' && p.changes ? `<button class="btn btn-secondary btn-small" data-cp-action="schedule" data-cp-plan="${key}"
-                title="Create a maintenance window for the changed radios and a change-log entry per radio">Schedule…</button>` : ''}
+                title="Create a maintenance window for the changed radios and a change-log entry per radio">Schedule…</button>
+            <button class="btn btn-secondary btn-small" data-cp-action="rollout" data-cp-plan="${key}"
+                title="Turn this plan into a checklist (Changes tab) that ticks itself off as the scanner sees each radio move">Start rollout…</button>` : ''}
             </div>`;
         return `<details class="diag-details cp-plan" ${key === '0' ? 'open' : ''}>
             <summary>${this.esc(title)} · score ${p.cost} · ${p.changes} radio(s) changed ·
@@ -297,6 +300,24 @@ const ChannelPlanner = {
         } catch (error) {
             console.error('Schedule plan error:', error);
             this.setStatus(`Schedule failed: ${error.message}`);
+        } finally {
+            button.disabled = false;
+        }
+    },
+
+    /** Operator-triggered: the plan as a rollout checklist (rollout.py). */
+    async startRollout(plan, button) {
+        const changed = plan.radios.filter(r => r.changed);
+        if (!changed.length || typeof Rollouts === 'undefined') return;
+        if (!window.confirm(`Create a rollout checklist for ${changed.length} radio(s)? Steps are ordered clients first, ` +
+                'backbones last, and tick off as the scanner sees each radio on its new channel. No radio settings are changed.')) return;
+        button.disabled = true;
+        try {
+            const name = `Channel plan${this.result.site ? ' for ' + this.result.site : ''} (score ${plan.cost})`;
+            const ro = await Rollouts.create(changed, name);
+            this.setStatus(`Rollout #${ro.id} created with ${ro.steps.length} step(s); follow it on the Changes tab.`);
+        } catch (error) {
+            this.setStatus(`Rollout failed: ${error.message}`);
         } finally {
             button.disabled = false;
         }

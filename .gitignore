@@ -46,3 +46,5 @@ Thumbs.db
 # Offline map extract and the pmtiles CLI (fetch_offline_map.py)
 maps/
 tools/pmtiles*
+
+backups/

@@ -851,6 +851,8 @@ function initTabSwitching() {
                 }
                 if (typeof InfraReview !== 'undefined') InfraReview.init();
                 if (typeof LinkWatch !== 'undefined') LinkWatch.init();
+                if (typeof NewNodes !== 'undefined' && !NewNodes.loaded) { NewNodes.loaded = true; NewNodes.load(); }
+                if (typeof ServiceChecks !== 'undefined' && !ServiceChecks.data) ServiceChecks.load();
             } else if (tab === 'voip') {
                 if (voipView) voipView.classList.add('active');
                 if (typeof VOIPModule !== 'undefined') {

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - AREDN Network Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container node-page admin-page">
+        <header class="header">
+            <div class="header-left">
+                <a href="/" class="btn btn-secondary">&larr; Monitor</a>
+                <h1>Admin</h1>
+            </div>
+            <div class="header-controls">
+                <span id="admin-auth-badge" class="form-hint"></span>
+            </div>
+        </header>
+        <main class="node-page-content">
+            <section class="node-page-section">
+                <h2>Login for changes</h2>
+                <p class="form-hint">Reading is always open. With a password set, every action (deleting nodes, maintenance,
+                    notifications, sending reports, settings) asks for a login. Previews, the planner, live diagnostics and
+                    scans stay open. The password is stored as a salted hash in this PC's database only.</p>
+                <div id="admin-auth"></div>
+                <div class="admin-form">
+                    <input type="password" id="admin-pw-current" class="form-input" placeholder="Current password (if one is set)" autocomplete="current-password">
+                    <input type="password" id="admin-pw-new" class="form-input" placeholder="New password (8+ characters)" autocomplete="new-password">
+                    <button id="admin-pw-set" class="btn btn-primary">Set password</button>
+                    <button id="admin-pw-clear" class="btn btn-secondary" title="Remove the password: actions open to everyone on the network">Remove password</button>
+                    <button id="admin-login" class="btn btn-secondary">Log in</button>
+                    <button id="admin-logout" class="btn btn-secondary">Log out</button>
+                    <span id="admin-pw-status" class="form-hint"></span>
+                </div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Database <button id="db-refresh" class="btn btn-small btn-secondary">Refresh</button></h2>
+                <div id="db-summary"><p class="loading">Loading...</p></div>
+                <div class="admin-form">
+                    <button id="db-backup" class="btn btn-primary">Back up now</button>
+                    <button id="db-vacuum" class="btn btn-secondary" title="Rewrite the file to drop free pages; locks the database while it runs">VACUUM…</button>
+                    <span id="db-status" class="form-hint"></span>
+                </div>
+                <h3>Tables</h3>
+                <div id="db-tables"></div>
+                <h3>Retention</h3>
+                <div id="db-retention"></div>
+                <h3>Backups</h3>
+                <div id="db-backups"></div>
+            </section>
+
+            <section class="node-page-section">
+                <h2>Collectors &amp; distributed status <button id="ds-refresh" class="btn btn-small btn-secondary">Refresh</button></h2>
+                <p class="form-hint">Status from every collector's observations: UP, LOCALLY_UNREACHABLE (another collector sees it),
+                    PARTITIONED (collectors disagree), STALE (not enough evidence), DOWN_CONFIRMED (several healthy collectors
+                    failed it), UNKNOWN. A node is never called down from this collector alone.</p>
+                <div id="ds-summary"><p class="loading">Loading...</p></div>
+                <div class="admin-form">
+                    <select id="ds-filter" class="form-input">
+                        <option value="">All states</option>
+                        <option value="problem" selected>Not UP</option>
+                        <option>UP</option><option>LOCALLY_UNREACHABLE</option><option>PARTITIONED</option>
+                        <option>STALE</option><option>DOWN_CONFIRMED</option><option>UNKNOWN</option>
+                    </select>
+                </div>
+                <div id="ds-nodes"></div>
+            </section>
+        </main>
+    </div>
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+</body>
+</html>

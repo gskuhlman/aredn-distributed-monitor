@@ -43,6 +43,14 @@
             </section>
 
             <section class="node-page-section">
+                <h2>Spectrum over time
+                    <select id="wf-days" class="form-input" title="Days">
+                        <option value="2">2 days</option><option value="7" selected>7 days</option><option value="14">14 days</option>
+                    </select></h2>
+                <div id="site-waterfall"><p class="loading">Loading...</p></div>
+            </section>
+
+            <section class="node-page-section">
                 <h2>Clients per Sector</h2>
                 <div id="site-sectors"></div>
             </section>
@@ -73,9 +81,11 @@
     <script>
         window.SITE_CODE = {{ site_code|tojson }};
     </script>
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
     <script src="{{ url_for('static', filename='js/infra-review.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/maintenance.js') }}"></script>
     <script src="{{ url_for('static', filename='js/site-page.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/waterfall.js') }}"></script>
 </body>
 </html>

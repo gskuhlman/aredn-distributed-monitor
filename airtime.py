@@ -60,6 +60,8 @@ def _hearing(conn):
     for a, b in conn.execute('''SELECT source_node, target_node FROM links
                                 WHERE UPPER(link_type) = 'DTD' AND status != 'removed' '''):
         cabled.update({(a, b), (b, a)})
+    import ghost_trackers
+    cabled |= ghost_trackers.excluded_pairs(conn)   # radio-off ghosts too
     out = {}
     for r in conn.execute('''
             SELECT source_node, target_node, snr, quality, status, blocked, blocked_reason

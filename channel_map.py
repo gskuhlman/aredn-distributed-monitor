@@ -246,8 +246,10 @@ def _rf_links(conn, radios):
         FROM links WHERE UPPER(link_type) = 'RF' AND status != 'removed'
     ''').fetchall()
     pairs = {}
+    import ghost_trackers
+    ghosts = ghost_trackers.excluded_pairs(conn)
     for src, tgt, q, snr, sig, status, last_seen in rows:
-        if src not in radios or tgt not in radios:
+        if src not in radios or tgt not in radios or (src, tgt) in ghosts:
             continue
         if radios[src]['lat'] is None or radios[tgt]['lat'] is None:
             continue

@@ -67,6 +67,21 @@ import voip_session
 import couch_client
 import notify
 import maintenance
+import rollout
+import change_verdict
+import ghost_trackers
+import wifi_survey
+import babel_view
+import service_check
+import hygiene
+import playback
+import waterfall
+import auth
+import db_care
+import distributed_status
+import welcome
+import align
+import club_report
 
 # Configure logging
 logging.basicConfig(
@@ -78,6 +93,9 @@ logger = logging.getLogger(__name__)
 # Initialize Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'aredn-monitor-secret-key'
+# Login for changes (auth.py): random per-install session key, and a guard
+# that asks for a login on actions once a password is set.
+auth.install(app)
 
 # Initialize SocketIO
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
@@ -265,6 +283,14 @@ def scheduled_scan():
                 logger.error("Link watch error: %s", exc)
         # --- end Link Watch ---
 
+        # Channel-plan rollouts and new-node welcomes, from what this scan stored.
+        for task in (rollout.check, welcome.after_scan):
+            try:
+                for event in task():
+                    socketio.emit('new_event', event)
+            except Exception as exc:
+                logger.error("%s error: %s", task.__module__, exc)
+
         # Kick off high-rate incident probing for any watched link in trouble.
         if config.INCIDENT_MODE_ENABLED:
             rf_stats.maybe_run_incident_probes(socketio)
@@ -332,6 +358,46 @@ def node_page(name):
 def site_page(code):
     """Site dashboard page (site_dashboard.py)."""
     return render_template('site.html', site_code=code.upper())
+
+
+@app.route('/field/')
+@app.route('/field')
+def field_page():
+    """Field mode (phone, installable): map, node list, alignment."""
+    return render_template('field.html')
+
+
+@app.route('/field/align')
+def field_align_page():
+    return render_template('align.html', node_name=(request.args.get('node') or '').lower(),
+                           peer_name=(request.args.get('peer') or '').lower())
+
+
+@app.route('/field/sw.js')
+def field_service_worker():
+    # Served from /field/ so its scope is the field pages only; the main app
+    # is never controlled by it.
+    resp = send_from_directory(os.path.join(app.root_path, 'static', 'field'), 'sw.js')
+    resp.headers['Cache-Control'] = 'no-cache'
+    resp.headers['Service-Worker-Allowed'] = '/field/'
+    return resp
+
+
+@app.route('/field/manifest.webmanifest')
+def field_manifest():
+    resp = send_from_directory(os.path.join(app.root_path, 'static', 'field'), 'manifest.webmanifest')
+    resp.headers['Content-Type'] = 'application/manifest+json'
+    return resp
+
+
+@app.route('/admin')
+def admin_page():
+    return render_template('admin.html')
+
+
+@app.route('/report/club')
+def club_report_page():
+    return render_template('club_report.html', r=club_report.build(request.args.get('days', 30, type=int)))
 
 
 # ============ API Routes ============
@@ -502,6 +568,246 @@ def api_get_node_full(name):
         'maintenance': _node_maintenance(node_name),
         'peer_reach': reach_map
     })
+
+
+# ---- Round 2 routes (TODO #29-46) ----
+def _json_error(exc, code=400):
+    return jsonify({'error': str(exc)}), code
+
+
+@app.route('/api/rollouts')
+def api_rollouts():
+    return jsonify({'rollouts': rollout.list_rollouts(include_finished=request.args.get('all') != '0'),
+                    'grace_minutes': config.ROLLOUT_LINK_GRACE_MINUTES})
+
+
+@app.route('/api/rollouts', methods=['POST'])
+def api_rollout_create():
+    """{plan: what-if lines | radios: [planner radios], name?, note?, author?}"""
+    body = request.get_json(silent=True) or {}
+    try:
+        r = rollout.create(body.get('radios') or body.get('plan'), name=body.get('name'),
+                           note=body.get('note'), author=body.get('author'))
+    except ValueError as exc:
+        return _json_error(exc)
+    return jsonify(r), 201
+
+
+@app.route('/api/rollouts/<int:rid>')
+def api_rollout(rid):
+    r = rollout.get(rid)
+    return jsonify(r) if r else (jsonify({'error': 'not found'}), 404)
+
+
+@app.route('/api/rollouts/<int:rid>', methods=['PATCH'])
+def api_rollout_update(rid):
+    try:
+        ok = rollout.set_status(rid, (request.get_json(silent=True) or {}).get('status'))
+    except ValueError as exc:
+        return _json_error(exc)
+    return jsonify(rollout.get(rid)) if ok else (jsonify({'error': 'not found'}), 404)
+
+
+@app.route('/api/rollouts/<int:rid>', methods=['DELETE'])
+def api_rollout_delete(rid):
+    return jsonify({'deleted': rollout.delete(rid)})
+
+
+@app.route('/api/rollouts/<int:rid>/steps/<int:sid>', methods=['POST'])
+def api_rollout_step(rid, sid):
+    body = request.get_json(silent=True) or {}
+    try:
+        ok = rollout.set_step(rid, sid, body.get('status'), body.get('detail'))
+    except ValueError as exc:
+        return _json_error(exc)
+    return jsonify(rollout.get(rid)) if ok else (jsonify({'error': 'not found'}), 404)
+
+
+@app.route('/api/rollouts/check', methods=['POST'])
+def api_rollout_check():
+    events = rollout.check()
+    for event in events:
+        socketio.emit('new_event', event)
+    return jsonify({'events': events, 'rollouts': rollout.list_rollouts()})
+
+
+@app.route('/api/change-verdicts')
+def api_change_verdicts():
+    ids = [i for i in (request.args.get('ids') or '').split(',') if i.strip().isdigit()]
+    return jsonify({'verdicts': change_verdict.list_verdicts(days=request.args.get('days', 30, type=int),
+                                                             change_ids=ids or None),
+                    'hours': config.CHANGE_VERDICT_HOURS})
+
+
+@app.route('/api/change-verdicts/run', methods=['POST'])
+def api_change_verdicts_run():
+    return jsonify({'written': change_verdict.run()})
+
+
+@app.route('/api/reports/ghost-trackers')
+def api_ghost_trackers():
+    return jsonify(ghost_trackers.report())
+
+
+@app.route('/api/reports/babel')
+def api_babel_view():
+    return jsonify(babel_view.report(node=request.args.get('node') or None))
+
+
+@app.route('/api/reports/hygiene')
+def api_hygiene():
+    return jsonify(hygiene.report(node=request.args.get('node') or None,
+                                  include_inactive=request.args.get('inactive') == '1'))
+
+
+@app.route('/api/services/checks')
+def api_service_checks():
+    return jsonify(service_check.report())
+
+
+def run_service_check_task():
+    try:
+        result = service_check.run()
+        for event in result['events']:
+            socketio.emit('new_event', event)
+        if result.get('aborted'):
+            logger.info("Service checks skipped: %s", result['aborted'])
+        return result
+    except Exception as exc:
+        logger.error("Service check error: %s", exc)
+        return {'events': [], 'aborted': str(exc)}
+
+
+@app.route('/api/services/checks/run', methods=['POST'])
+def api_service_checks_run():
+    result = run_service_check_task()
+    if result.get('aborted'):
+        return jsonify({'error': result['aborted']}), 503
+    return jsonify(service_check.report())
+
+
+@app.route('/api/wifi-survey')
+def api_wifi_survey():
+    return jsonify(wifi_survey.report())
+
+
+@app.route('/api/wifi-survey/scan', methods=['POST'])
+def api_wifi_survey_scan():
+    node = ((request.get_json(silent=True) or {}).get('node') or '').strip().lower()
+    if not node:
+        return _json_error('node is required')
+    try:
+        return jsonify(wifi_survey.scan_node(node))
+    except (RuntimeError, ValueError) as exc:
+        return _json_error(exc, 502)
+
+
+@app.route('/api/wifi-survey/import', methods=['POST'])
+def api_wifi_survey_import():
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify(wifi_survey.import_text((body.get('node') or '').strip().lower(), body.get('text') or ''))
+    except ValueError as exc:
+        return _json_error(exc)
+
+
+@app.route('/api/map/playback')
+def api_map_playback():
+    try:
+        return jsonify(playback.build(request.args.get('start'), request.args.get('end')))
+    except reports.ReportError as exc:
+        return _json_error(exc)
+
+
+@app.route('/api/map/node-down/<name>')
+def api_map_node_down(name):
+    return jsonify(spof.node_down(name.lower(), exclude_tunnels=request.args.get('tunnels') == '0'))
+
+
+@app.route('/api/sites/<code>/waterfall')
+def api_site_waterfall(code):
+    r = waterfall.build(code, request.args.get('days', 7, type=int))
+    return jsonify(r) if r is not None else (jsonify({'error': 'unknown site'}), 404)
+
+
+@app.route('/api/welcome')
+def api_welcomes():
+    return jsonify({'welcomes': welcome.list_welcomes(include_past=request.args.get('all') == '1'),
+                    'watch_days': config.WELCOME_WATCH_DAYS})
+
+
+@app.route('/api/welcome/<name>')
+def api_welcome(name):
+    w = welcome.get(name.lower())
+    return jsonify(w) if w else (jsonify({'error': 'no welcome for this node'}), 404)
+
+
+@app.route('/api/welcome/<name>/dismiss', methods=['POST'])
+def api_welcome_dismiss(name):
+    return jsonify({'dismissed': welcome.dismiss(name.lower())})
+
+
+@app.route('/api/align/<name>')
+def api_align(name):
+    out, code = align.read(name.lower())
+    return jsonify(out), code
+
+
+@app.route('/api/reports/club')
+def api_club_report():
+    return jsonify(club_report.build(request.args.get('days', 30, type=int)))
+
+
+@app.route('/api/auth/status')
+def api_auth_status():
+    return jsonify(auth.status())
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_auth_login():
+    body = request.get_json(silent=True) or {}
+    ok, error, code = auth.login(body.get('password'), body.get('user'))
+    return (jsonify(auth.status()) if ok else jsonify({'error': error})), code
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_auth_logout():
+    auth.logout()
+    return jsonify(auth.status())
+
+
+@app.route('/api/auth/password', methods=['POST'])
+def api_auth_password():
+    body = request.get_json(silent=True) or {}
+    ok, error, code = auth.set_password(body.get('new'), body.get('current'))
+    return (jsonify(auth.status()) if ok else jsonify({'error': error})), code
+
+
+@app.route('/api/admin/database')
+def api_admin_database():
+    return jsonify(db_care.report())
+
+
+@app.route('/api/admin/database/backup', methods=['POST'])
+def api_admin_database_backup():
+    try:
+        return jsonify(db_care.backup('manual'))
+    except RuntimeError as exc:
+        return _json_error(exc, 409)
+
+
+@app.route('/api/admin/database/vacuum', methods=['POST'])
+def api_admin_database_vacuum():
+    try:
+        return jsonify(db_care.vacuum(scan_running=scan_state['is_scanning']))
+    except RuntimeError as exc:
+        return _json_error(exc, 409)
+
+
+@app.route('/api/status/distributed')
+def api_distributed_status():
+    return jsonify(distributed_status.status())
+# ---- end Round 2 routes ----
 
 
 @app.route('/api/nodes/scan/<name>', methods=['POST'])
@@ -2444,6 +2750,11 @@ def start_scheduler():
     # Overnight iPerf on key links (capacity.py) and the weekly report.
     capacity.install(scheduler, run_iperf_schedule_task)
     weekly_report.install(scheduler, run_weekly_report_task)
+    # Round 2: change verdicts, service checks, database backups, WiFi survey.
+    change_verdict.install(scheduler)
+    service_check.install(scheduler, run_service_check_task)
+    db_care.install(scheduler)
+    wifi_survey.install(scheduler)
 
     scheduler.start()
     logger.info("Scheduler started")

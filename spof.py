@@ -143,3 +143,20 @@ def report(hours=24, exclude_tunnels=False):
                      'rf_links': sum(1 for x in out['links'] if x['type'] == 'RF'),
                      'max_behind': max([x['behind'] for x in out['links']] or [0])}
     return out
+
+
+def node_down(name, exclude_tunnels=False):
+    """What loses connectivity to the starting node if `name` goes down
+    (Map page overlay). Polled nodes cut off, with and without tunnels."""
+    seed, scope, adj, pairs, polled, by_name = _graph(exclude_tunnels)
+    if seed is None:
+        return {'error': 'starting node not found among the scanned nodes'}
+    if name == seed:
+        return {'node': name, 'seed': seed, 'is_seed': True, 'lost': sorted(polled - {name}),
+                'exclude_tunnels': bool(exclude_tunnels)}
+    base = _reach(seed, adj)
+    lost = (base - _reach(seed, adj, skip_node=name) - {name}) & polled
+    infra = database.get_infrastructure_nodes()
+    return {'node': name, 'seed': seed, 'is_seed': False, 'exclude_tunnels': bool(exclude_tunnels),
+            'reachable_now': name in base, 'lost': sorted(lost),
+            'lost_infra': sorted(n for n in lost if n in infra)}

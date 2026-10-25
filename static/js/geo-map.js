@@ -176,11 +176,15 @@ const GeoMap = {
                 offMap++;
                 continue;
             }
-            const color = (e.color && (e.color.color || e.color)) || '#7f8c8d';
-            const dashes = Array.isArray(e.dashes) ? e.dashes.join(' ') : (e.dashes ? '6 4' : null);
+            // Overlays / playback (geo-map-extras.js) may restyle or hide a link.
+            const st = this.edgeStyle ? this.edgeStyle(e, type) : null;
+            if (st === false) continue;
+            const color = (st && st.color) || (e.color && (e.color.color || e.color)) || '#7f8c8d';
+            const dashes = st && 'dashArray' in st ? st.dashArray
+                : (Array.isArray(e.dashes) ? e.dashes.join(' ') : (e.dashes ? '6 4' : null));
             const line = L.polyline([a, b], {
-                color, weight: type === 'DTD' ? 1.5 : Math.max(2, (e.width || 1) + 1), dashArray: dashes,
-                opacity: type === 'RF' ? 0.9 : (type === 'DTD' ? 0.45 : 0.6)
+                color, weight: (st && st.weight) || (type === 'DTD' ? 1.5 : Math.max(2, (e.width || 1) + 1)), dashArray: dashes,
+                opacity: (st && st.opacity) ?? (type === 'RF' ? 0.9 : (type === 'DTD' ? 0.45 : 0.6))
             });
             if (e.title) line.bindTooltip(this.esc(e.title).replace(/\n/g, '<br>'), { sticky: true });
             line.on('click', () => {
@@ -198,7 +202,8 @@ const GeoMap = {
 
         for (const id of located) {
             const n = byId.get(id);
-            const color = n.color || {};
+            const ns = this.nodeStyle ? this.nodeStyle(id, n) : null;
+            const color = ns || n.color || {};
             const infra = n.shape === 'diamond' || n.is_infrastructure;
             const size = n.is_supernode ? 18 : (infra ? 15 : 13);
             const borrowed = pos.get(id).borrowed;
@@ -207,14 +212,17 @@ const GeoMap = {
                 iconSize: [size, size],
                 html: `<div class="geo-node${infra ? ' geo-node-infra' : ''}${borrowed ? ' geo-node-borrowed' : ''}"
                     style="width:${size}px;height:${size}px;background:${this.esc(color.background || '#97C2FC')};
-                    border-color:${this.esc(color.border || '#2B7CE9')};opacity:${n.opacity ?? 1}"></div>`
+                    border-color:${this.esc(color.border || '#2B7CE9')};opacity:${(ns && ns.opacity) ?? n.opacity ?? 1}"></div>`
                     + (labels ? `<span class="geo-label" style="${leftLabel.has(id) ? 'right' : 'left'}:${size + 3}px">${this.esc(id)}</span>` : '')
             });
             const marker = L.marker(shown.get(id), { icon, riseOnHover: true, zIndexOffset: infra ? 500 : 0 });
             const title = this.esc(n.title || n.id).replace(/\n/g, '<br>')
                 + (borrowed ? `<br><i>No location stored: drawn at its DtD neighbour ${this.esc(borrowed)}</i>` : '');
             marker.bindTooltip(title, { direction: 'top', offset: [0, -size / 2] });
-            marker.on('click', () => { if (typeof showNodeDetails === 'function') showNodeDetails(id); });
+            marker.on('click', () => {
+                if (this.onNodeClick && this.onNodeClick(id)) return;
+                if (typeof showNodeDetails === 'function') showNodeDetails(id);
+            });
             marker.addTo(this.layers.nodes);
         }
 
@@ -232,6 +240,7 @@ const GeoMap = {
                 <p class="form-hint">Set the location on the node (Setup &gt; Location) to place it.</p></div>` : '';
         }
         if (!this.fitted && this.sized && located.length) this.fit();
+        if (this.afterRender) this.afterRender(shown);
         this.dirty = false;
     },
 

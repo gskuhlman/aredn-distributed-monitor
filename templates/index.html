@@ -50,6 +50,12 @@
                             <button class="tab-btn" data-tab="reports">Reports</button>
                             <button class="tab-btn" data-tab="changes">Changes</button>
                         </div>
+                        <div class="nav-group">
+                            <div class="nav-group-title">More</div>
+                            <a class="nav-link" href="/admin">Admin</a>
+                            <a class="nav-link" href="/report/club" target="_blank" rel="noopener">Club report</a>
+                            <a class="nav-link" href="/field/">Field mode</a>
+                        </div>
                     </div>
                 </nav>
             </div>
@@ -411,6 +417,79 @@
                             </div>
                         </div>
                         <!-- end Link Watch -->
+
+                        <!-- New nodes (#45, new-nodes.js) -->
+                        <div class="diag-section">
+                            <h3>New Nodes <small class="form-hint">nodes discovered recently: setup checklist, links and a suggested channel, watched for a week</small></h3>
+                            <div class="mh-controls">
+                                <button id="nn-refresh" class="btn btn-secondary">Refresh</button>
+                                <label class="checkbox-label"><input type="checkbox" id="nn-all"> Include past</label>
+                                <span id="nn-status" class="form-hint"></span>
+                            </div>
+                            <div id="nn-report"><p class="log-empty">Not loaded yet.</p></div>
+                        </div>
+
+                        <!-- Service checks (#36, service-checks.js) -->
+                        <div class="diag-section">
+                            <h3>Service Checks <small class="form-hint">advertised services (web, phones, cameras, Winlink) that stop answering while their node is up</small></h3>
+                            <div class="mh-controls">
+                                <button id="sc-refresh" class="btn btn-secondary">Refresh</button>
+                                <button id="sc-run" class="btn btn-primary">Check now</button>
+                                <label class="checkbox-label"><input type="checkbox" id="sc-all"> Show all services</label>
+                                <span id="sc-status" class="form-hint"></span>
+                            </div>
+                            <div id="sc-report"><p class="log-empty">Not loaded yet.</p></div>
+                        </div>
+
+                        <!-- Ghost trackers (#33, ghost-trackers.js) -->
+                        <div class="diag-section">
+                            <h3>Ghost Trackers <small class="form-hint">RF trackers that can't be what they claim (radio off, cabled pair, channels apart, wrong distance, one MAC under two names)</small></h3>
+                            <div class="mh-controls">
+                                <button id="gt-run" class="btn btn-primary">Check</button>
+                                <span id="gt-status" class="form-hint"></span>
+                            </div>
+                            <div id="gt-report"><p class="log-empty">Press Check.</p></div>
+                        </div>
+
+                        <!-- Babel costs (#35, babel-view.js) -->
+                        <div class="diag-section">
+                            <h3>Babel Costs <small class="form-hint">where routing doesn't follow the RF links: unroutable good links, detours, tunnels cheaper than RF</small></h3>
+                            <div class="mh-controls">
+                                <button id="bv-run" class="btn btn-primary">Check</button>
+                                <select id="bv-node" class="form-input"><option value="">Neighbour costs for a node…</option></select>
+                                <span id="bv-status" class="form-hint"></span>
+                            </div>
+                            <div id="bv-report"><p class="log-empty">Press Check.</p></div>
+                            <div id="bv-detail"></div>
+                        </div>
+
+                        <!-- Node hygiene (#37, hygiene.js) -->
+                        <div class="diag-section">
+                            <h3>Node Hygiene <small class="form-hint">setup score per node and what each owner should fix</small></h3>
+                            <div class="mh-controls">
+                                <button id="hy-run" class="btn btn-primary">Score</button>
+                                <select id="hy-owner" class="form-input"><option value="">All owners</option></select>
+                                <span id="hy-status" class="form-hint"></span>
+                            </div>
+                            <div id="hy-report"><p class="log-empty">Press Score.</p></div>
+                        </div>
+
+                        <!-- WiFi survey (#34, wifi-survey.js) -->
+                        <div class="diag-section">
+                            <h3>WiFi Survey <small class="form-hint">non-mesh access points heard at each radio; the channel planner uses them instead of fixed WiFi guesses</small></h3>
+                            <div class="mh-controls">
+                                <button id="ws-refresh" class="btn btn-secondary">Refresh</button>
+                                <input type="text" id="ws-node" class="form-input" placeholder="radio name, e.g. w0gq-col-rkt-n" list="chg-node-names">
+                                <button id="ws-scan" class="btn btn-primary" title="Asks the radio for a WiFi scan; its links blip for a few seconds">Scan now…</button>
+                                <span id="ws-status" class="form-hint"></span>
+                            </div>
+                            <details class="diag-details">
+                                <summary>Import scan text</summary>
+                                <textarea id="ws-text" class="form-input cm-whatif-text" rows="6" placeholder="Paste `iw dev wlan0 scan` output or the node's WiFi scan page"></textarea>
+                                <button id="ws-import" class="btn btn-secondary btn-small">Import for this radio</button>
+                            </details>
+                            <div id="ws-report"><p class="log-empty">Not loaded yet.</p></div>
+                        </div>
 
                         <!-- Site Matrix (#16, site-matrix.js) -->
                         <div class="diag-section">
@@ -984,6 +1063,21 @@
                         </div>
                     </div>
                     <div class="diag-section">
+                        <h3>Rollouts <small class="form-hint">channel plans as checklists: clients first, backbones last; steps tick off when a scan sees the radio on its new channel</small></h3>
+                        <div class="mh-controls">
+                            <button id="ro-refresh" class="btn btn-secondary">Refresh</button>
+                            <button id="ro-check" class="btn btn-secondary" title="Re-check every active rollout against the last scan">Check now</button>
+                            <span id="ro-status" class="form-hint"></span>
+                        </div>
+                        <div id="ro-list"><p class="log-empty">Not loaded yet.</p></div>
+                        <details class="diag-details">
+                            <summary>New rollout from what-if lines</summary>
+                            <input type="text" id="ro-name" class="form-input" placeholder="Name (optional)">
+                            <textarea id="ro-text" class="form-input cm-whatif-text" rows="6" placeholder="w0gq-col-rkt-n 5915 20&#10;w0gq-col-sq-2bldg112 off"></textarea>
+                            <button id="ro-create" class="btn btn-primary btn-small">Create rollout</button>
+                        </details>
+                    </div>
+                    <div class="diag-section">
                         <h3>Change log <small class="form-hint">channel, radio-setting and firmware changes are added automatically from scans</small></h3>
                         <div class="table-scroll-wrapper" id="chg-list"></div>
                     </div>
@@ -1011,12 +1105,36 @@
                         <label class="header-checkbox"><input type="checkbox" id="gm-dtd" checked> DtD</label>
                         <label class="header-checkbox"><input type="checkbox" id="gm-labels" checked> Names (zoom 14+)</label>
                         <button id="gm-fit" class="btn btn-secondary">Fit</button>
+                        <select id="gm-overlay" class="form-input" title="Colour the links by">
+                            <option value="">Links: Topology colours</option>
+                            <option value="quality">Links: RF quality</option>
+                            <option value="snr">Links: RF SNR (weaker side)</option>
+                            <option value="spof">Single points of failure</option>
+                            <option value="routes">Route Watch paths</option>
+                            <option value="conflicts">Channel conflicts</option>
+                        </select>
+                        <label class="header-checkbox" title="Click a node to see what loses its connection to the starting node if it goes down">
+                            <input type="checkbox" id="gm-whatif"> What if down</label>
+                        <button id="gm-playback-toggle" class="btn btn-secondary" title="Replay links and outages over a time window">Playback</button>
                         <span id="gm-status" class="nodes-count"></span>
                         <details id="gm-unlocated" class="gm-unlocated" hidden></details>
+                    </div>
+                    <div id="gm-playback" class="gm-playback" hidden>
+                        <select id="gm-pb-range" class="form-input">
+                            <option value="6">Last 6 hours</option>
+                            <option value="24" selected>Last 24 hours</option>
+                            <option value="72">Last 3 days</option>
+                            <option value="168">Last 7 days</option>
+                        </select>
+                        <button id="gm-pb-play" class="btn btn-primary btn-small">Play</button>
+                        <input type="range" id="gm-pb-slider" min="0" max="0" value="0">
+                        <span id="gm-pb-time" class="nodes-count"></span>
+                        <div id="gm-pb-events" class="gm-pb-events"></div>
                     </div>
                     <div class="cm-body">
                         <div class="cm-map-wrap">
                             <div id="gm-map" class="cm-map"></div>
+                            <div id="gm-legend" class="gm-legend" hidden></div>
                         </div>
                     </div>
                 </div>
@@ -1420,6 +1538,7 @@
     </div>
 
     <!-- Custom JavaScript -->
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
     <script src="{{ url_for('static', filename='js/infra-filter.js') }}"></script>
     <script src="{{ url_for('static', filename='js/network.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rf-stats.js') }}"></script>
@@ -1457,5 +1576,13 @@
     <script src="{{ url_for('static', filename='js/geo-map.js') }}"></script>
     <script src="{{ url_for('static', filename='js/nav-menu.js') }}"></script>
     <script src="{{ url_for('static', filename='js/channel-planner.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/rollouts.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ghost-trackers.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/babel-view.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/service-checks.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/hygiene.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/new-nodes.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/wifi-survey.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/geo-map-extras.js') }}"></script>
 </body>
 </html>

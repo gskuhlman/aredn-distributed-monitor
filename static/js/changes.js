@@ -37,12 +37,17 @@ const ChangesModule = {
         const hours = document.getElementById('chg-hours')?.value;
         this.setStatus('Loading...');
         try {
-            const [chg, sel, infra] = await Promise.all([
+            const [chg, sel, infra, verdicts] = await Promise.all([
                 fetch('/api/changes' + (hours && hours !== 'all' ? `?hours=${hours}` : '')).then(r => r.json()),
                 fetch('/api/nodes/selected').then(r => r.json()).catch(() => ({})),
-                fetch('/api/nodes/infrastructure').then(r => r.json()).catch(() => ({}))
+                fetch('/api/nodes/infrastructure').then(r => r.json()).catch(() => ({})),
+                fetch('/api/change-verdicts?days=400').then(r => r.json()).catch(() => ({}))
             ]);
             this.changes = chg.changes || [];
+            // Automatic before/after verdicts (change_verdict.py), by change id.
+            this.verdicts = new Map((verdicts.verdicts || []).map(v => [v.change_id, v]));
+            this.verdictHours = verdicts.hours || 24;
+            if (typeof Rollouts !== 'undefined') Rollouts.load();
             this.selected = new Set(sel.selected_nodes || []);
             this.infrastructure = new Set(Object.keys(infra.infrastructure_nodes || {}));
             this.renderList();
@@ -89,7 +94,7 @@ const ChangesModule = {
         }
         el.innerHTML = `<table class="info-table diag-table chg-table">
             <thead><tr><th>Time</th><th>Node</th><th>Peer</th><th>Category</th><th>Description</th>
-            <th>Source</th><th></th></tr></thead>
+            <th>Source</th><th title="Automatic before/after verdict, ${this.verdictHours || 24} h after the change">Verdict</th><th></th></tr></thead>
             <tbody>${rows.map(c => `<tr class="${this.current && this.current.id === c.id ? 'chg-active' : ''}">
                 <td>${this.esc(c.timestamp)}</td>
                 <td><a href="/nodes/${encodeURIComponent(c.node_name)}">${this.esc(c.node_name)}</a>
@@ -98,10 +103,19 @@ const ChangesModule = {
                 <td><span class="chg-cat chg-cat-${this.esc(c.category)}">${this.esc(c.category)}</span></td>
                 <td class="chg-desc">${this.esc(c.description || '')}${c.author ? ` <small>(${this.esc(c.author)})</small>` : ''}</td>
                 <td>${this.esc(c.source)}</td>
+                <td>${this.verdictBadge(c)}</td>
                 <td class="chg-actions">
                     <button class="btn btn-small btn-primary" data-chg-action="compare" data-id="${c.id}">Before / after</button>
                     <button class="btn btn-small btn-secondary" data-chg-action="delete" data-id="${c.id}" title="Remove from the log">Delete</button>
                 </td></tr>`).join('')}</tbody></table>`;
+    },
+
+    verdictBadge(c) {
+        const v = this.verdicts?.get(c.id);
+        if (!v) return '';
+        if (v.verdict === 'duplicate') return `<small title="${this.esc(v.text)}">see #${v.duplicate_of}</small>`;
+        const cls = { better: 'better', worse: 'worse', same: 'same', mixed: 'na', 'n/a': 'na' }[v.verdict] || 'na';
+        return `<span class="chg-verdict chg-v-${cls}" title="${this.esc(v.text)}">${this.esc(v.verdict)}</span>`;
     },
 
     toggleForm(show) {

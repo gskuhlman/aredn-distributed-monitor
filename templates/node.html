@@ -45,6 +45,7 @@
             </div>
         </header>
         <div id="maint-banner" class="maint-banner" hidden></div>
+        <div id="node-welcome" class="node-welcome" hidden></div>
 
         <main class="node-page-content">
             <section class="node-page-section">
@@ -53,8 +54,15 @@
             </section>
 
             <section class="node-page-section">
+                <h2>Setup Checklist <a id="node-align-link" class="btn btn-small btn-secondary" href="/field/align"
+                    title="Live SNR to a chosen neighbour for tower work (phone-friendly)">Alignment mode</a></h2>
+                <div id="node-setup"><p class="loading">Loading...</p></div>
+            </section>
+
+            <section class="node-page-section">
                 <h2>Services</h2>
                 <div id="node-services"></div>
+                <div id="node-service-checks"></div>
             </section>
 
             <section class="node-page-section">
@@ -130,6 +138,11 @@
             </section>
 
             <!-- Power advisor (TODO #11, power-advisor.js) -->
+            <section class="node-page-section">
+                <h2>Babel Costs</h2>
+                <div id="node-babel"><p class="form-hint">Loading...</p></div>
+            </section>
+
             <section class="node-page-section" id="power-advisor">
                 <h2>Power Advisor</h2>
                 <p class="health-footnote">Predicts what every RF neighbour would hear from this radio after a TX power cut
@@ -197,6 +210,7 @@
     <script>
         window.NODE_NAME = "{{ node_name }}";
     </script>
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rf-channel.js') }}"></script>
     <script src="{{ url_for('static', filename='js/unreachable-cause.js') }}"></script>
     <script src="{{ url_for('static', filename='js/aim-check.js') }}"></script>
@@ -207,5 +221,8 @@
     <script src="{{ url_for('static', filename='js/notes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/weather.js') }}"></script>
     <script src="{{ url_for('static', filename='js/maintenance.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/hygiene.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/new-nodes.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/node-extras.js') }}"></script>
 </body>
 </html>

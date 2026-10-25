@@ -271,6 +271,45 @@ VOIP_SESSION_MAX_SECONDS = env_int("VOIP_SESSION_MAX_SECONDS", 2 * 3600)
 
 
 
+# ---- Round 2 (TODO #29-46) ----
+# Plan rollout tracker: a moved radio's RF links must be back within this.
+ROLLOUT_LINK_GRACE_MINUTES = env_int("ROLLOUT_LINK_GRACE_MINUTES", 15)
+# Automatic before/after verdict for channel/power/antenna changes.
+CHANGE_VERDICT_ENABLED = env_bool("CHANGE_VERDICT_ENABLED", True)
+CHANGE_VERDICT_HOURS = env_int("CHANGE_VERDICT_HOURS", 24)
+CHANGE_VERDICT_MAX_AGE_DAYS = env_int("CHANGE_VERDICT_MAX_AGE_DAYS", 7)
+# Service checks (services nodes advertise).
+SERVICE_CHECK_ENABLED = env_bool("SERVICE_CHECK_ENABLED", True)
+SERVICE_CHECK_INTERVAL_MINUTES = env_int("SERVICE_CHECK_INTERVAL_MINUTES", 15)
+SERVICE_CHECK_FAILS = env_int("SERVICE_CHECK_FAILS", 2)
+# New node welcome.
+WELCOME_ENABLED = env_bool("WELCOME_ENABLED", True)
+WELCOME_WATCH_DAYS = env_int("WELCOME_WATCH_DAYS", 7)
+# Antenna alignment mode: fastest allowed poll of one radio (seconds).
+ALIGN_MIN_INTERVAL_SECONDS = float(os.environ.get("ALIGN_MIN_INTERVAL_SECONDS", "1.0"))
+ALIGN_TIMEOUT_SECONDS = env_int("ALIGN_TIMEOUT_SECONDS", 5)
+# WiFi survey: on demand only unless enabled (a scan briefly takes the radio off its channel).
+WIFI_SURVEY_ENABLED = env_bool("WIFI_SURVEY_ENABLED", False)
+WIFI_SURVEY_HOUR = env_int("WIFI_SURVEY_HOUR", 3)
+WIFI_SURVEY_MAX_AGE_DAYS = env_int("WIFI_SURVEY_MAX_AGE_DAYS", 14)
+# Database backups.
+BACKUP_ENABLED = env_bool("BACKUP_ENABLED", True)
+BACKUP_DIR = os.environ.get("BACKUP_DIR", "backups")
+BACKUP_KEEP = env_int("BACKUP_KEEP", 7)
+BACKUP_TIME = os.environ.get("BACKUP_TIME", "03:30")
+# Login for changes: when a password is set (here or on the Admin page), every
+# action (POST/PATCH/DELETE) needs a login; reading stays open.
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+# Trust a reverse proxy's authenticated-user header instead (e.g. "X-Remote-User").
+AUTH_PROXY_HEADER = os.environ.get("AUTH_PROXY_HEADER", "")
+AUTH_SESSION_HOURS = env_int("AUTH_SESSION_HOURS", 12)
+# Distributed status (multi-collector rules).
+DIST_RECENT_SECONDS = env_int("DIST_RECENT_SECONDS", 900)
+DIST_HEALTHY_SECONDS = env_int("DIST_HEALTHY_SECONDS", 900)
+DIST_DOWN_MIN_COLLECTORS = env_int("DIST_DOWN_MIN_COLLECTORS", 2)
+DIST_DOWN_MIN_FAILS = env_int("DIST_DOWN_MIN_FAILS", 2)
+
+
 def is_watched_node(node_name):
     """Return True when this node should get incident-mode attention."""
     if not node_name:

@@ -48,6 +48,7 @@ import database
 import infra_audit as ia
 import link_diagnostics as ld
 import link_watch
+import wifi_survey
 
 DEFAULT_BAND = cm.HAM_5GHZ
 STEP_MHZ = 5
@@ -91,9 +92,9 @@ NOISE_DB_COST = 3.0
 NOISE_RANGES = [
     {'low': 5600, 'high': 5650, 'label': 'TDWR weather radar (5600–5650)', 'cost': 200.0},
     {'low': 5650, 'high': 5660, 'label': 'first 10 MHz above TDWR', 'cost': 4.0},
-    {'low': 5490, 'high': 5730, 'label': 'WiFi ch 100–144 (DFS)', 'cost': 3.0},
-    {'low': 5735, 'high': 5835, 'label': 'WiFi ch 149–165 (UNII-3, heavy)', 'cost': 20.0},
-    {'low': 5835, 'high': 5895, 'label': 'WiFi 6E/7 UNII-4 (indoor, growing)', 'cost': 3.0},
+    {'low': 5490, 'high': 5730, 'label': 'WiFi ch 100–144 (DFS)', 'cost': 3.0, 'wifi': True},
+    {'low': 5735, 'high': 5835, 'label': 'WiFi ch 149–165 (UNII-3, heavy)', 'cost': 20.0, 'wifi': True},
+    {'low': 5835, 'high': 5895, 'label': 'WiFi 6E/7 UNII-4 (indoor, growing)', 'cost': 3.0, 'wifi': True},
     {'low': 5895, 'high': 5925, 'label': 'C-V2X (vehicles)', 'cost': 2.0},
 ]
 RELATIONS = ('overlap', 'adjacent', 'near', 'same', 'clear')
@@ -183,10 +184,14 @@ def _base_pair_cost(rel, g):
     return 0.0
 
 
-def _noise_cost(chan, members):
+def _noise_cost(chan, members, surveyed=False):
+    """Fixed noise ranges; with WiFi survey data (wifi_survey.py) the WiFi
+    guesses are replaced by the access points actually heard."""
     lo, hi = _span(*chan)
     cost, hits = 0.0, []
     for rng in NOISE_RANGES:
+        if surveyed and rng.get('wifi'):
+            continue
         overlap = min(hi, rng['high']) - max(lo, rng['low'])
         if overlap > 0:
             frac = overlap / (hi - lo)
@@ -381,6 +386,7 @@ def _plan(site, radios, band, widths, locked, move_clients, top, compare, seed, 
         g['noise_refs'] = [smp for smp in noise if any(
             (ld._haversine_m(by_name[n]['lat'], by_name[n]['lon'], smp['lat'], smp['lon']) or 1e9) <= cm.SITE_METERS
             for n in g['members'])]
+        g['survey_aps'] = wifi_survey.aps_for(g['members'], by_name)
         g['cost'] = {c: _single_cost(g, c, by_name) for c in set(g['cands']) | {g['current']}}
 
     # Group-pair cost depends only on the spectral relation: precompute it.
@@ -592,8 +598,17 @@ def _reasons(i, c, assign, groups, by_name, fixed, issues):
     if ref:
         reasons.append(f"measured noise {ref['noise20']:g} dBm (per 20 MHz) at {ref['name']} on "
                        f"{ref['frequency']:g}/{ref['chanbw']:g}, covering {ref['overlap_pct']}% of this channel")
-    hits = _noise_cost(c, 1)[1]
-    if not hits:
+    surveyed = bool(g.get('survey_aps'))
+    if surveyed:
+        _, aps = wifi_survey.ap_cost(*_span(*c), g['survey_aps'], 1)
+        if aps:
+            loud = max(aps, key=lambda a: a['signal'] if a['signal'] is not None else -200)
+            reasons.append(f"WiFi survey: {len(aps)} access point(s) on this channel, strongest "
+                           f"{loud['ssid'] or loud['bssid'] or '?'} at {loud['signal']} dBm")
+        else:
+            reasons.append('WiFi survey: no access points heard on this channel')
+    hits = _noise_cost(c, 1, surveyed)[1]
+    if not hits and not surveyed:
         reasons.append('outside busy WiFi ranges')
     for label, pct in hits:
         reasons.append(f'{pct}% inside {label}')
@@ -705,7 +720,10 @@ def _single_cost(g, c, by_name):
         p = by_name.get(peer)
         if p and p.get('frequency') and (p['frequency'], p['chanbw'] or 20.0) != c:
             cost += LINK_BREAK_COST
-    cost += _noise_cost(c, len(g['members']))[0]
+    surveyed = bool(g.get('survey_aps'))
+    cost += _noise_cost(c, len(g['members']), surveyed)[0]
+    if surveyed:
+        cost += wifi_survey.ap_cost(*_span(*c), g['survey_aps'], len(g['members']))[0]
     cost += _measured_noise(g, c)[0]
     for n in g['members']:
         r = by_name[n]

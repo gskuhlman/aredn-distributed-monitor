@@ -1,0 +1,13 @@
+{
+  "name": "AREDN Field",
+  "short_name": "AREDN Field",
+  "description": "AREDN Network Monitor field mode: map, nodes and antenna alignment",
+  "start_url": "/field/",
+  "scope": "/field/",
+  "display": "standalone",
+  "background_color": "#ecf0f1",
+  "theme_color": "#2c3e50",
+  "icons": [
+    {"src": "/static/field/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+  ]
+}

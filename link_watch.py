@@ -387,13 +387,15 @@ def _rf_pairs(cur, now, stale_after):
     """Named RF pairs with a current tracker on at least one side."""
     cutoff = (now - timedelta(seconds=stale_after)).strftime(TS_FMT)
     pairs = set()
+    import ghost_trackers
+    ghosts = ghost_trackers.excluded_unordered()
     for r in cur.execute('''
         SELECT source_node, target_node FROM links
         WHERE UPPER(link_type) = 'RF' AND status != 'removed' AND last_seen >= ?
           AND target_node NOT LIKE 'mac-%' AND source_node NOT LIKE 'mac-%'
     ''', (cutoff,)).fetchall():
         a, b = sorted((r[0], r[1]))
-        if a != b:
+        if a != b and (a, b) not in ghosts:
             pairs.add((a, b))
     return sorted(pairs)
 

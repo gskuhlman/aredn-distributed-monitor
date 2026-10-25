@@ -2449,3 +2449,103 @@ tr.site-down td { opacity: 0.65; }
     border: 1px solid rgba(243, 156, 18, 0.5);
     white-space: nowrap;
 }
+
+/* ---- Round 2 (TODO #29-46) ---- */
+.nav-panel .nav-link {
+    display: block; text-decoration: none; color: #2c3e50; border-radius: 4px; padding: 7px 10px; font-size: 0.92rem;
+}
+.nav-panel .nav-link:hover, .nav-panel .nav-link:focus { background: #ecf0f1; outline: none; }
+
+/* Login box (auth.js) */
+.auth-overlay {
+    position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.auth-box { background: white; color: #2c3e50; border-radius: 8px; padding: 18px; width: 100%; max-width: 360px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3); display: flex; flex-direction: column; gap: 10px; }
+.auth-error { color: #c0392b; font-size: 0.9rem; }
+.auth-actions { display: flex; gap: 8px; }
+
+/* Rollouts (rollouts.js) */
+.ro-progress { height: 6px; background: #ecf0f1; border-radius: 3px; margin: 6px 0; overflow: hidden; }
+.ro-progress div { height: 100%; background: #27ae60; }
+.ro-next td { background: #fef9e7; }
+.ro-bad { color: #c0392b; }
+
+/* Diagnostics round 2 */
+.hy-fixes { margin: 2px 0 2px 18px; font-size: 0.88rem; }
+.hy-block { display: flex; flex-direction: column; gap: 4px; }
+.nn-card { border: 1px solid #e5e8e8; border-radius: 6px; padding: 8px 10px; margin: 6px 0; }
+.nn-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.nn-suggest { margin: 4px 0; font-size: 0.9rem; }
+.nn-actions { display: flex; gap: 6px; }
+.sc-link { max-width: 280px; overflow-wrap: anywhere; font-size: 0.85rem; }
+.sc-up { color: #1e8449; }
+.sc-down { color: #c0392b; }
+.node-welcome { margin: 8px 20px; padding: 10px 14px; border-radius: 6px; background: #eaf2f8; border: 1px solid #aed6f1; }
+
+/* Map overlays and playback (geo-map-extras.js) */
+.gm-playback { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 12px; background: #f8f9f9;
+    border-bottom: 1px solid #e5e8e8; }
+.gm-playback[hidden] { display: none; }
+.gm-playback .form-input { width: auto; flex: none; }
+.gm-playback .btn { flex: none; }
+.gm-playback input[type=range] { flex: 1 1 240px; min-width: 160px; }
+.gm-pb-events { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 0.82rem; max-height: 60px; overflow: auto; }
+.gm-pb-event.sev-critical { color: #c0392b; }
+.gm-pb-event.sev-warning { color: #b9770e; }
+.cm-map-wrap { position: relative; }
+.gm-legend { position: absolute; left: 54px; top: 10px; z-index: 900; background: rgba(255,255,255,0.93);
+    border-radius: 6px; padding: 6px 10px; max-width: min(420px, calc(100% - 20px)); font-size: 0.85rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
+.gm-legend[hidden] { display: none; }
+.gm-legend-list { max-height: 90px; overflow: auto; font-size: 0.8rem; color: #566573; margin-top: 4px; }
+#gm-playback-toggle.active { background: #2c3e50; color: white; }
+
+/* Site waterfall (waterfall.js) */
+.wf-canvas { max-width: 100%; height: auto; image-rendering: pixelated; border: 1px solid #e5e8e8; }
+.wf-tip { min-height: 1.2em; }
+
+/* Admin page */
+.admin-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.admin-form .form-input { max-width: 260px; }
+
+/* Field mode + alignment (field.js, align.js) */
+.field-body { background: #ecf0f1; min-height: 100vh; display: flex; flex-direction: column; }
+.field-header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: #2c3e50; color: white;
+    padding-top: max(10px, env(safe-area-inset-top)); }
+.field-header strong { flex: 1; }
+.field-link { color: #d6eaf8; text-decoration: none; font-size: 0.9rem; }
+.field-conn { font-size: 0.8rem; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,0.15); }
+.field-conn.ok { background: #1e8449; }
+.field-conn.off { background: #a93226; }
+.field-tabs { display: flex; background: white; border-bottom: 1px solid #d5d8dc; }
+.field-tab { flex: 1; padding: 10px; text-align: center; border: none; background: none; font-size: 1rem; color: #2c3e50;
+    text-decoration: none; cursor: pointer; }
+.field-tab.active { border-bottom: 3px solid #2980b9; font-weight: 600; }
+.field-main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.field-view { display: none; flex: 1; flex-direction: column; padding: 0; min-height: 0; }
+.field-view.active { display: flex; }
+.field-map { flex: 1; min-height: 60vh; }
+#fd-nodes-view { padding: 10px 16px; gap: 8px; }
+.field-list { overflow: auto; }
+.field-row { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid #d5d8dc; cursor: pointer; }
+.field-name { flex: 1; overflow-wrap: anywhere; }
+.field-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.field-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2000; background: white; border-radius: 12px 12px 0 0;
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.25); padding: 14px 16px max(14px, env(safe-area-inset-bottom)); max-height: 60vh; overflow: auto; }
+.field-sheet[hidden] { display: none; }
+.field-sheet-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.field-links { margin: 8px 0; display: flex; flex-direction: column; gap: 4px; }
+.field-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.align-main { padding: 12px 16px; gap: 12px; }
+.align-form { display: flex; flex-wrap: wrap; gap: 8px; }
+.align-form .form-input { flex: 1 1 160px; min-width: 0; }
+.align-readout { background: white; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.align-big { font-size: clamp(3rem, 18vw, 6rem); font-weight: 700; text-align: center; line-height: 1; color: #2c3e50; }
+.align-label { display: block; font-size: 0.8rem; color: #7f8c8d; }
+.align-bar { position: relative; height: 22px; background: #ecf0f1; border-radius: 11px; overflow: hidden; }
+.align-bar > div:first-child { height: 100%; width: 0; transition: width 0.3s; }
+.align-best-mark { position: absolute; top: 0; bottom: 0; width: 3px; background: #2c3e50; }
+.align-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.align-spark { width: 100%; height: 80px; background: #fbfcfc; border-radius: 4px; }

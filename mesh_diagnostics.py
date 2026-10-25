@@ -29,6 +29,7 @@ from collections import defaultdict, deque
 from datetime import datetime
 
 import config
+import ghost_trackers
 import database
 import link_health
 
@@ -100,6 +101,7 @@ CATEGORY_LABELS = {
     'hidden_node': 'Hidden node',
     'channel': 'Overlapping / adjacent channel',
     'topology': 'Topology / single point of failure',
+    'ghost_tracker': 'Ghost RF tracker',
 }
 
 # AREDN LQM block reasons -> what to do about them.
@@ -884,6 +886,29 @@ def _check_topology(f, impact, nodes_by_name, scope, rf_neighbors):
 
 # ============ Entry point ============
 
+def _check_ghosts(f, ghosts, scope):
+    """RF trackers that can't be what they claim (ghost_trackers.py): one
+    finding per pair."""
+    seen = set()
+    for g in ghosts:
+        key = _pair(g['source'], g['target'])
+        if key in seen or (g['source'] not in scope and g['target'] not in scope):
+            continue
+        seen.add(key)
+        if g['exclude']:
+            f.add('info', 'ghost_tracker', f"Ghost RF tracker: {g['source']} → {g['target']} ({', '.join(g['labels'])})",
+                  list(key), '; '.join(g['notes']) + '. Left out of the RF checks.',
+                  'Nothing to fix on the link. If the radio really is off, the tracker ages out by itself; '
+                  'a tracker that stays current may be another radio using the same name.',
+                  {'kinds': g['kinds'], 'snr': g['snr'], 'quality': g['quality']})
+        else:
+            f.add('warning' if 'channel_mismatch' in g['kinds'] or 'mac_conflict' in g['kinds'] else 'info',
+                  'ghost_tracker', f"Suspicious RF tracker: {g['source']} → {g['target']} ({', '.join(g['labels'])})",
+                  list(key), '; '.join(g['notes']) + '.',
+                  'Check the node names and location settings of both radios (Antenna Aim lists location problems).',
+                  {'kinds': g['kinds'], 'distance_m': g['distance_m'], 'mac': g['mac'], 'diagnose': [list(key)]})
+
+
 def run_health_check(hours=24):
     """Diagnose the in-scope mesh and return a findings report."""
     hours = max(1, min(int(hours or 24), 24 * 30))
@@ -896,7 +921,15 @@ def run_health_check(hours=24):
     seed, scope = compute_scope(nodes, current_links, boundaries)
     polled_scope = {n for n in scope if (nodes_by_name.get(n) or {}).get('is_active')}
 
-    rf_links = [l for l in all_links if _is_rf(l)]
+    # Ghost trackers (radio off, cabled pair) are not RF neighbours: leave
+    # them out of every RF check and list them once (ghost_trackers.py).
+    try:
+        ghosts = ghost_trackers.find()
+    except Exception as exc:
+        logger.warning("Ghost tracker check failed: %s", exc)
+        ghosts = []
+    ghost_keys = {(g['source'], g['target']) for g in ghosts if g['exclude']}
+    rf_links = [l for l in all_links if _is_rf(l) and (l['source_node'], l['target_node']) not in ghost_keys]
     rf_index = {(l['source_node'], l['target_node']): l for l in rf_links}
     rf_by_source = defaultdict(list)
     rf_neighbors = defaultdict(set)
@@ -950,6 +983,7 @@ def run_health_check(hours=24):
                  database.get_event_counts(database.EVENT_NODE_REBOOT, hours), hours)
     _check_hidden_nodes(f, rf_neighbors, scope, polled_scope, degraded_nodes)
     _check_topology(f, impact, nodes_by_name, scope, rf_neighbors)
+    _check_ghosts(f, ghosts, scope)
     try:
         _check_channels(f, scope, weak_peer)
     except Exception as exc:  # never lose the whole report to this check

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#2c3e50">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>AREDN Field</title>
+    <link rel="manifest" href="/field/manifest.webmanifest">
+    <link rel="icon" href="{{ url_for('static', filename='field/icon.svg') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="field-body">
+    <header class="field-header">
+        <strong>AREDN Field</strong>
+        <span id="fd-conn" class="field-conn">…</span>
+        <a href="/" class="field-link">Full app</a>
+    </header>
+    <nav class="field-tabs">
+        <button class="field-tab active" data-fd-tab="map">Map</button>
+        <button class="field-tab" data-fd-tab="nodes">Nodes</button>
+        <a class="field-tab" href="/field/align">Align</a>
+    </nav>
+    <main class="field-main">
+        <div id="fd-map-view" class="field-view active">
+            <div id="fd-map" class="field-map"></div>
+        </div>
+        <div id="fd-nodes-view" class="field-view">
+            <input type="search" id="fd-search" class="form-input" placeholder="Search nodes">
+            <div id="fd-list" class="field-list"></div>
+        </div>
+    </main>
+    <div id="fd-sheet" class="field-sheet" hidden></div>
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/channel-map.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/field.js') }}"></script>
+</body>
+</html>

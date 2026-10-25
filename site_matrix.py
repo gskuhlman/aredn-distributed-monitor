@@ -210,6 +210,9 @@ def build(site=None, radios=None, hours=24, overrides=None, now=None):
             if key:
                 mac_owner.setdefault(key, r[0])
 
+        import ghost_trackers
+        ghosts = ghost_trackers.excluded_pairs(conn)
+        link_rows = [r for r in link_rows if (r['source_node'], r['target_node']) not in ghosts]
         views = {}
         for r in link_rows:
             views[(r['source_node'], r['target_node'])] = _tracker_view(r, now, stale_after)

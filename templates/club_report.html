@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesh Report {{ r.start[:10] }} – {{ r.end[:10] }}</title>
+    <style>
+        :root { --ink: #1c2833; --muted: #5d6d7e; --line: #d5d8dc; --ok: #1e8449; --warn: #b9770e; --bad: #a93226; }
+        * { box-sizing: border-box; }
+        body { font: 13px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: #fff; margin: 0; }
+        .page { max-width: 900px; margin: 0 auto; padding: 16px; }
+        h1 { font-size: 20px; margin: 0 0 2px; }
+        h2 { font-size: 14px; margin: 14px 0 6px; border-bottom: 1px solid var(--line); padding-bottom: 2px; }
+        .muted { color: var(--muted); }
+        .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 10px 0; }
+        .tile { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+        .tile b { display: block; font-size: 18px; }
+        .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        table { width: 100%; border-collapse: collapse; }
+        td, th { text-align: left; padding: 2px 4px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+        th { color: var(--muted); font-weight: 600; }
+        .v-better { color: var(--ok); } .v-worse { color: var(--bad); } .v-same, .v-mixed { color: var(--muted); }
+        svg { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfc; }
+        ul { margin: 4px 0; padding-left: 18px; }
+        .actions { margin: 8px 0; }
+        .actions button, .actions a { font: inherit; padding: 4px 10px; margin-right: 6px; }
+        @media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+        @media print { .actions { display: none; } .page { padding: 0; } h2 { break-after: avoid; } }
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="actions">
+        <button onclick="window.print()">Print / Save as PDF</button>
+        {% for d in (7, 30, 90) %}<a href="?days={{ d }}">{{ d }} days</a>{% endfor %}
+        <a href="/">Back to the monitor</a>
+    </div>
+    <h1>AREDN mesh report</h1>
+    <div class="muted">{{ r.start[:10] }} – {{ r.end[:10] }} ({{ r.days }} days) · generated {{ r.generated_at }}</div>
+
+    {% set h = r.headline %}
+    {% if h.error %}<p class="muted">Headline unavailable: {{ h.error }}</p>{% else %}
+    <div class="tiles">
+        <div class="tile"><b>{{ h.starting_node_availability_pct if h.starting_node_availability_pct is not none else '?' }}%</b>starting node available</div>
+        <div class="tile"><b>{{ h.nodes_answering }}</b>nodes answering</div>
+        <div class="tile"><b>{{ h.really_down }}</b>really down</div>
+        <div class="tile"><b>{{ h.intermittent }}</b>intermittent</div>
+        <div class="tile"><b>{{ h.warning_events }}</b>warnings</div>
+        <div class="tile"><b>{{ h.reboots }}</b>reboots</div>
+        <div class="tile"><b>{{ h.maintenance_windows }}</b>maintenance windows</div>
+    </div>
+    {% endif %}
+
+    {% set m = r.map %}
+    {% if not m.error and m.svg_nodes %}
+    <h2>Network</h2>
+    <svg viewBox="0 0 {{ m.width }} {{ m.height }}" role="img" aria-label="Network map">
+        {% for l in m.svg_links %}<line x1="{{ l.x1 }}" y1="{{ l.y1 }}" x2="{{ l.x2 }}" y2="{{ l.y2 }}" stroke="{{ l.color }}" stroke-width="{{ 2 if l.rf else 1 }}" opacity="0.8"/>{% endfor %}
+        {% for n in m.svg_nodes %}
+            {% if n.infra %}<rect x="{{ n.x - 5 }}" y="{{ n.y - 5 }}" width="10" height="10" transform="rotate(45 {{ n.x }} {{ n.y }})" fill="{{ '#27ae60' if n.up else '#c0392b' }}" stroke="#1c2833"/>
+            {% else %}<circle cx="{{ n.x }}" cy="{{ n.y }}" r="3.5" fill="{{ '#27ae60' if n.up else '#c0392b' }}" stroke="#1c2833" stroke-width="0.5"/>{% endif %}
+        {% endfor %}
+    </svg>
+    <div class="muted">Located nodes within {{ m.radius_km }} km of the densest cluster{% if m.off_map %} ({{ m.off_map }} farther away not drawn){% endif %}.
+        Diamonds: infrastructure. RF links green/yellow/red by quality, DtD blue.</div>
+    {% endif %}
+
+    <div class="cols">
+        <div>
+            <h2>Weakest links</h2>
+            {% if r.worst_links.error %}<p class="muted">{{ r.worst_links.error }}</p>{% elif r.worst_links %}
+            <table>{% for i in r.worst_links %}<tr><td>{{ i.name }}</td><td>avg {{ i.avg }}</td><td>min {{ i.min }}</td></tr>{% endfor %}</table>
+            {% else %}<p class="muted">No link scores.</p>{% endif %}
+        </div>
+        <div>
+            <h2>Weakest nodes</h2>
+            {% if r.worst_nodes.error %}<p class="muted">{{ r.worst_nodes.error }}</p>{% elif r.worst_nodes %}
+            <table>{% for i in r.worst_nodes %}<tr><td>{{ i.name }}</td><td>avg {{ i.avg }}</td><td>min {{ i.min }}</td></tr>{% endfor %}</table>
+            {% else %}<p class="muted">No node scores.</p>{% endif %}
+        </div>
+    </div>
+
+    <h2>Changes made</h2>
+    {% if r.changes.error %}<p class="muted">{{ r.changes.error }}</p>{% elif r.changes %}
+    <table><tr><th>When</th><th>Node</th><th>What</th><th>24 h verdict</th></tr>
+        {% for c in r.changes %}<tr><td>{{ c.timestamp[5:16] }}</td><td>{{ c.node_name }}</td>
+            <td>{{ c.category }}: {{ c.description or '' }}</td>
+            <td class="v-{{ c.verdict or 'none' }}" title="{{ c.verdict_text or '' }}">{{ c.verdict or '' }}</td></tr>{% endfor %}
+    </table>
+    {% else %}<p class="muted">No changes logged.</p>{% endif %}
+    {% if r.rollouts and not r.rollouts.error %}
+    <ul>{% for ro in r.rollouts %}<li>Rollout #{{ ro.id }} {{ ro.name }}: {{ ro.status }}, {{ ro.progress.done }} of {{ ro.progress.total }} done{% if ro.progress.problem %}, {{ ro.progress.problem }} problem(s){% endif %}</li>{% endfor %}</ul>
+    {% endif %}
+
+    {% if r.new_nodes and not r.new_nodes.error %}
+    <h2>New nodes</h2>
+    <ul>{% for n in r.new_nodes %}<li>{{ n.node }} (discovered {{ n.discovered_at[:10] }}{% if n.score is not none %}, setup {{ n.score }}/100{% endif %})</li>{% endfor %}</ul>
+    {% endif %}
+
+    <h2>What's next</h2>
+    {% set nx = r.next %}
+    {% if nx.error %}<p class="muted">{{ nx.error }}</p>{% else %}
+    <ul>
+        {% for s in nx.rollout_steps %}<li>{{ s.rollout }}: {{ s.node }} → {{ s.to }} ({{ s.status }}{% if s.detail %}: {{ s.detail }}{% endif %})</li>{% endfor %}
+        {% for w in nx.maintenance %}<li>Maintenance {{ w.start[5:16] }} – {{ w.end[11:16] }}: {{ w.note or '' }}</li>{% endfor %}
+        {% for t in nx.critical %}<li>Infrastructure: {{ t }}</li>{% endfor %}
+        {% for s in nx.services_down %}<li>Service down: {{ s.service }} on {{ s.node }} ({{ s.error }})</li>{% endfor %}
+        {% for o in nx.owners %}<li>{{ o.owner }}: {{ o.fixes }} setup fix(es) on {{ o.nodes }} node(s) (average {{ o.avg_score }}/100)</li>{% endfor %}
+    </ul>
+    {% if not (nx.rollout_steps or nx.maintenance or nx.critical or nx.services_down or nx.owners) %}<p class="muted">Nothing open.</p>{% endif %}
+    {% endif %}
+</div>
+</body>
+</html>

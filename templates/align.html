@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#2c3e50">
+    <title>Antenna Alignment - AREDN Field</title>
+    <link rel="manifest" href="/field/manifest.webmanifest">
+    <link rel="icon" href="{{ url_for('static', filename='field/icon.svg') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="field-body">
+    <header class="field-header">
+        <a href="/field/" class="field-link">&larr; Field</a>
+        <strong>Antenna alignment</strong>
+        <span id="al-conn" class="field-conn">idle</span>
+    </header>
+    <main class="field-main align-main">
+        <div class="align-form">
+            <input type="text" id="al-node" class="form-input" placeholder="Radio being aimed" list="al-nodes" value="{{ node_name }}">
+            <datalist id="al-nodes"></datalist>
+            <select id="al-peer" class="form-input"><option value="">Neighbour (strongest)</option></select>
+            <select id="al-interval" class="form-input" title="How often to read the radio">
+                <option value="1">every 1 s</option><option value="2" selected>every 2 s</option><option value="5">every 5 s</option>
+            </select>
+            <button id="al-start" class="btn btn-primary">Start</button>
+        </div>
+        <div class="align-readout">
+            <div class="align-label">SNR at <span id="al-node-name">this radio</span></div>
+            <div id="al-snr" class="align-big">–</div>
+            <div class="align-bar"><div id="al-bar"></div><div id="al-best-mark" class="align-best-mark"></div></div>
+            <div class="align-grid">
+                <div><span class="align-label">Far end hears us</span><strong id="al-rev">–</strong></div>
+                <div><span class="align-label">Signal</span><strong id="al-signal">–</strong></div>
+                <div><span class="align-label">Best seen</span><strong id="al-best">–</strong> <button id="al-reset" class="btn btn-small btn-secondary">Reset</button></div>
+                <div><span class="align-label">LQ / quality</span><strong id="al-lq">–</strong></div>
+                <div><span class="align-label">Bitrate tx / rx</span><strong id="al-rate">–</strong></div>
+                <div><span class="align-label">Value changed</span><strong id="al-age">–</strong></div>
+            </div>
+            <canvas id="al-spark" class="align-spark" width="600" height="80"></canvas>
+            <label class="header-checkbox"><input type="checkbox" id="al-tone"> Tone (higher pitch = better)</label>
+            <p class="form-hint">Reads the radio's own LQM (sysinfo.json?lqm=1). The radio refreshes these numbers on its own
+                schedule, so "value changed" shows how fresh a reading is: move slowly and wait for it to update.</p>
+        </div>
+    </main>
+    <script>window.ALIGN = {{ {'node': node_name, 'peer': peer_name}|tojson }};</script>
+    <script src="{{ url_for('static', filename='js/align.js') }}"></script>
+</body>
+</html>

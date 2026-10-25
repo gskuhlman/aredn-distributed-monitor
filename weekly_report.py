@@ -183,6 +183,15 @@ def _changes(start, end):
             WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp''', (_fmt(start), _fmt(end)))]
 
 
+def _verdicts(start, end):
+    import change_verdict
+    return [{'change_id': v['change_id'], 'node': v['node_name'], 'time': v['change_time'], 'verdict': v['verdict'],
+             'text': v['text']}
+            for v in change_verdict.list_verdicts(days=max(1, (datetime.now() - start).days + 1))
+            if start.strftime(TS_FMT) <= (v['created_at'] or '') < end.strftime(TS_FMT)
+            and v['verdict'] not in ('duplicate', 'n/a')]
+
+
 def _capacity():
     import capacity
     r = capacity.report(hours=24 * 7)
@@ -215,6 +224,7 @@ def build(end=None, days=7):
     _section(out, 'new_problems', lambda: _new_problems(start, end))
     _section(out, 'infrastructure', _infrastructure)
     _section(out, 'changes', lambda: _changes(start, end))
+    _section(out, 'change_verdicts', lambda: _verdicts(start, end))
     _section(out, 'capacity', _capacity)
     _section(out, 'spof', _spof)
     _section(out, 'weather', lambda: _weather(start, end))
@@ -271,6 +281,7 @@ def render_text(r, short=False):
         block('Infrastructure findings', inf.get('findings'), lambda f: f"{f['severity']}: {f['title']}", lim)
         block('Infrastructure links', inf.get('links'), lambda l: f"{l['a']} ↔ {l['b']}: {l['verdict']}", lim)
     block('Changes', r.get('changes'), lambda c: f"{c['timestamp'][5:16]} {c['node_name']}: {c['category']} – {c['description'] or ''}", lim)
+    block('Before/after verdicts', r.get('change_verdicts'), lambda v: f"{v['verdict']}: {v['text']}", lim)
     cap = r.get('capacity') or {}
     if not _err(cap):
         block('Capacity drops', cap.get('flags'), lambda f: f"{f['link']}: {f['flag']}", lim)
