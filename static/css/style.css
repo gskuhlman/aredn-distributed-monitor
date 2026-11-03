@@ -1598,6 +1598,11 @@ body {
     color: #6c757d;
 }
 
+.flap-polling {
+    color: #6c757d;
+    font-style: italic;
+}
+
 .flap-link {
     color: #721c24;
 }
@@ -2549,3 +2554,83 @@ tr.site-down td { opacity: 0.65; }
 .align-best-mark { position: absolute; top: 0; bottom: 0; width: 3px; background: #2c3e50; }
 .align-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
 .align-spark { width: 100%; height: 80px; background: #fbfcfc; border-radius: 4px; }
+
+/* Spectrum by location (spectrum.js) */
+.sp-body { flex: 1; overflow: auto; padding: 8px 12px 16px; }
+.sp-chart { width: 100%; overflow-x: auto; background: #fff; border: 1px solid #e3e3e3; border-radius: 6px; }
+.sp-svg { display: block; font-family: inherit; }
+.sp-axis { font-size: 12px; fill: #444; }
+.sp-ch { fill: #888; font-size: 10px; }
+.sp-label { font-size: 12px; fill: #333; cursor: pointer; }
+.sp-label-site { font-weight: 600; font-size: 13px; }
+.sp-label-scan { fill: #555; font-size: 12px; }
+.sp-label-muted, .sp-label-common { fill: #666; font-style: italic; font-size: 11px; }
+.sp-cell { cursor: pointer; stroke: #fff; stroke-width: 0.5; }
+.sp-cell:hover { stroke: #333; stroke-width: 1; }
+.sp-grid { stroke: rgba(0, 0, 0, 0.16); stroke-width: 1; pointer-events: none; }
+.sp-grid-strong { stroke: rgba(0, 0, 0, 0.38); }
+.sp-ham { stroke: #c0392b; stroke-width: 2; stroke-dasharray: 4 3; }
+.sp-ours { fill: #2f6fb5; stroke: #1d4f86; stroke-width: 1; }
+.sp-ours-client { fill: #6b9bd1; }
+.sp-ours-whatif { fill: #7b3fb5; stroke: #4e2575; }
+.sp-ours-old { fill: none; stroke: #555; stroke-width: 1.5; stroke-dasharray: 3 2; pointer-events: none; }
+.sp-ours-text { font-size: 11px; fill: #fff; font-weight: 600; pointer-events: none; }
+.sp-none { font-size: 11px; fill: #888; font-style: italic; }
+.sp-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 8px; font-size: 12px; color: #444; }
+.sp-key { display: inline-flex; align-items: center; gap: 5px; }
+.sp-key i { display: inline-block; width: 16px; height: 12px; border: 1px solid #bbb; border-radius: 2px; }
+.sp-key i.sp-key-ours { background: #2f6fb5; border-color: #1d4f86; }
+.sp-key i.sp-key-whatif { background: #7b3fb5; border: 1.5px dashed #555; }
+.sp-key i.sp-key-may { background: repeating-linear-gradient(45deg, #f6e9b8 0 3px, #c9a227 3px 5px); }
+.sp-bottom { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; margin-top: 10px; }
+.sp-detail { background: #fff; border: 1px solid #e3e3e3; border-radius: 6px; padding: 10px 12px; font-size: 13px; }
+.sp-detail h4 { margin-bottom: 6px; font-size: 14px; }
+.sp-detail p { margin: 4px 0; }
+.sp-list { margin: 4px 0 6px 18px; max-height: 260px; overflow: auto; }
+@media (max-width: 900px) { .sp-bottom { grid-template-columns: 1fr; } }
+
+/* Round 4: spectrum history and scan reminders (spectrum.js) */
+.sp-change-new { fill: #8e44ad; }
+.sp-change-gone { fill: #7f8c8d; }
+.sp-change-both { fill: #d35400; }
+.sp-key i.sp-key-change { background: #8e44ad; height: 4px; align-self: flex-start; }
+.sp-new { color: #8e44ad; margin-right: 8px; }
+.sp-gone { color: #7f8c8d; margin-right: 8px; text-decoration: line-through; }
+.sp-reminders { margin-top: 10px; }
+
+/* Round 4: Prometheus details on the node page (node-prom.js) */
+.np-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 8px 0; }
+.np-tile { border: 1px solid #e3e3e3; border-radius: 6px; padding: 8px 10px; background: #fff; }
+.np-tile-warn { border-color: #e67e22; background: #fdf2e9; }
+.np-tile-label { font-size: 12px; color: #6b7785; }
+.np-tile-value { font-size: 18px; font-weight: 600; }
+.np-tile-sub { font-size: 12px; color: #6b7785; }
+.np-embed-code { display: block; margin-top: 4px; font-size: 11px; word-break: break-all; background: #f6f8fa; padding: 4px 6px; border-radius: 4px; }
+
+/* Round 4: link MCS / LQM ping, link alerts, link potential */
+.lp-summary { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 6px 0; }
+.lp-dir { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; }
+.lp-num { width: 70px; }
+.lp-rules { margin: 4px 0 8px 18px; font-size: 13px; }
+.la-form { flex-wrap: wrap; margin-top: 8px; }
+.la-clients { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 13px; }
+.la-client { display: inline-flex; gap: 4px; align-items: center; }
+.lpot-chart-wrap { position: relative; height: 340px; margin: 8px 0; }
+@media (max-width: 600px) { .lpot-chart-wrap { height: 260px; } }
+
+/* Phone connectivity on the VOIP tab (phones.js) */
+.ph-table td { vertical-align: top; }
+.ph-actions { white-space: nowrap; }
+.ph-edit { display: flex; flex-wrap: wrap; gap: 4px; max-width: 360px; white-space: normal; }
+.ph-edit .form-input { width: 160px; }
+.ph-more { margin-top: 10px; }
+.ph-more summary { cursor: pointer; font-weight: 600; }
+.ph-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 8px; }
+.ph-forms h4 { margin: 8px 0 4px; }
+.ph-textarea { width: 100%; font-family: monospace; font-size: 12px; box-sizing: border-box; }
+.ph-small { width: 130px; }
+.ph-tiny { width: 70px; }
+.ph-hosts { max-height: 180px; overflow-y: auto; margin-top: 4px; }
+.ph-host { padding: 2px 0; font-size: 13px; }
+.ph-unresolved { margin: 4px 0; padding-left: 18px; font-size: 13px; }
+.ph-unresolved li { margin: 2px 0; }

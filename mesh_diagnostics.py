@@ -26,10 +26,12 @@ a local-event report. Findings are suggestions from heuristics, not verdicts.
 
 import logging
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import config
 import ghost_trackers
+import prom_source
+import routing_errors
 import database
 import link_health
 
@@ -102,6 +104,9 @@ CATEGORY_LABELS = {
     'channel': 'Overlapping / adjacent channel',
     'topology': 'Topology / single point of failure',
     'ghost_tracker': 'Ghost RF tracker',
+    'routing': 'Routing error',
+    'resources': 'Node resources (Prometheus)',
+    'mcs': 'MCS below what SNR supports',
 }
 
 # AREDN LQM block reasons -> what to do about them.
@@ -909,6 +914,83 @@ def _check_ghosts(f, ghosts, scope):
                   {'kinds': g['kinds'], 'distance_m': g['distance_m'], 'mac': g['mac'], 'diagnose': [list(key)]})
 
 
+def _check_routing(f, scope):
+    """Connected tunnels Babel won't route over (routing_errors.py, kept by
+    the scanner): one finding per node."""
+    for r in routing_errors.active():
+        if r['node_name'] not in scope and not any(v in scope for v in r['via']):
+            continue
+        f.add('warning', 'routing',
+              f"Routing error: no route to {r['node_name']} over its {r['link_type'] or 'tunnel'}",
+              [r['node_name']] + r['via'],
+              routing_errors.describe(r['node_name'], r['via'], r['link_type'], r['answered'])
+              + f" Open since {r['since']}.",
+              'On the tunnel server and client, check the tunnel is enabled for routing (not just connected) '
+              'and that neither end blocks the other; then re-scan.',
+              {'via': r['via'], 'answered': r['answered'], 'since': r['since']})
+
+
+def _check_resources(f, scope):
+    """Memory, flash, /tmp, CPU, Babel routes, interface errors and MCS vs SNR
+    from the Prometheus samples (prom_source.py); open prom_watch alarms
+    (leaks, route drops, MCS drops) are listed too. Nothing when Prometheus
+    isn't configured or has no recent samples."""
+    if not prom_source.enabled():
+        return
+    import prom_watch
+    latest = prom_source.latest_nodes()
+    alarms = {(a['kind'], a['node_name'], a['peer']) for a in prom_watch.active()}
+    now = datetime.now()
+    for node, row in latest.items():
+        if node not in scope:
+            continue
+        for kind, (sev, detail) in prom_watch.node_conditions(row, prom_source.node_history(node, 72), now).items():
+            if kind in ('mem_leak', 'route_drop') and (kind, node, None) not in alarms:
+                continue  # trends only once the alarm confirmed them
+            f.add(sev, 'resources', f"{prom_watch.LABELS[kind]} on {node}", [node], detail.capitalize() + '.',
+                  {'mem_low': 'Reboot to recover for now; look for a leaking package or too many services.',
+                   'mem_leak': 'Plan a reboot before it runs out; note the firmware and packages for a bug report.',
+                   'flash_low': 'Remove unused packages or old settings backups; a firmware upgrade with "keep settings" needs room.',
+                   'tmp_full': 'Clear large files in /tmp (logs, captures) or reboot; /tmp uses RAM.',
+                   'cpu_busy': 'Check for a busy tunnel server, a looping service or a routing storm.',
+                   'route_drop': 'Check the backbone and tunnel links near this node; nodes past the break will drop next.',
+                   }[kind], {'kind': kind, 'source': 'prometheus', 'sampled_at': row['timestamp']})
+    with database.get_connection() as conn:
+        prom_source.ensure_tables()
+        since = (now - timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')
+        for r in conn.execute('''SELECT node_name, iface, kind, AVG(errors_ps) AS err, AVG(drops_ps) AS drops,
+                                     AVG(rx_pps + tx_pps) AS pps FROM prom_iface_samples WHERE timestamp >= ?
+                                 GROUP BY node_name, iface''', (since,)):
+            # WireGuard counts packets to a peer that is down as errors: not a fault here.
+            if r['node_name'] not in scope or not r['pps'] or r['kind'] == 'tunnel':
+                continue
+            err = (r['err'] or 0) / r['pps'] * 100
+            if err >= 1 and (r['err'] or 0) >= 0.1:
+                f.add('warning' if err >= 5 else 'info', 'resources',
+                      f"Interface errors on {r['node_name']} {r['iface']}", [r['node_name']],
+                      f"{round(err, 1)}% of packets on {r['iface']} ({r['kind']}) had errors in the last hour.",
+                      'For an Ethernet port: check the cable, connectors and PoE; for a radio: look for interference.',
+                      {'iface': r['iface'], 'errors_ps': round(r['err'], 2), 'source': 'prometheus'})
+        for m in prom_watch.low_mcs_for_snr(conn, now):
+            if m['node'] not in scope:
+                continue
+            f.add('warning', 'mcs', f"MCS {m['mcs']} at {m['snr']} dB SNR: {m['node']} → {m['peer']}",
+                  [m['node'], m['peer']],
+                  f"{m['node']} sends to {m['peer']} at MCS {m['mcs']}"
+                  + (f" ({m['rate_mbps']} Mbps)" if m['rate_mbps'] else '')
+                  + f" although {m['snr']} dB SNR supports about MCS {m['supports']} per stream. "
+                    "Signal is fine; retries are holding the rate down.",
+                  'Look for interference on the channel (Spectrum tab, WiFi survey) or a hidden node; '
+                  'a channel move usually helps more than re-aiming.',
+                  {'diagnose': [[m['node'], m['peer']]], 'source': 'prometheus', **m})
+    for a in prom_watch.active():
+        if a['kind'] == 'mcs_drop' and a['node_name'] in scope:
+            f.add('warning', 'mcs', f"MCS drop with steady SNR: {a['node_name']} → {a['peer']}",
+                  [a['node_name'], a['peer']], a['detail'] + f" (since {a['since']}).",
+                  'Something new on the channel: check the Spectrum tab and any recent WiFi survey.',
+                  {'diagnose': [[a['node_name'], a['peer']]], 'source': 'prometheus'})
+
+
 def run_health_check(hours=24):
     """Diagnose the in-scope mesh and return a findings report."""
     hours = max(1, min(int(hours or 24), 24 * 30))
@@ -984,6 +1066,14 @@ def run_health_check(hours=24):
     _check_hidden_nodes(f, rf_neighbors, scope, polled_scope, degraded_nodes)
     _check_topology(f, impact, nodes_by_name, scope, rf_neighbors)
     _check_ghosts(f, ghosts, scope)
+    try:
+        _check_routing(f, scope)
+    except Exception as exc:
+        logger.warning("Mesh health routing check failed: %s", exc)
+    try:
+        _check_resources(f, scope)
+    except Exception as exc:
+        logger.warning("Mesh health resource check failed: %s", exc)
     try:
         _check_channels(f, scope, weak_peer)
     except Exception as exc:  # never lose the whole report to this check

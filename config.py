@@ -149,6 +149,11 @@ MESH_PROBE_COOLDOWN_SECONDS = env_int("MESH_PROBE_COOLDOWN_SECONDS", 300)
 # A mesh probe result is "recent" (trusted for status) for this long.
 MESH_PROBE_FRESH_SECONDS = env_int("MESH_PROBE_FRESH_SECONDS", 900)
 
+# Poll connected tunnel neighbours Babel reports not routable when they answered a
+# scanner poll or mesh probe this recently; flagged as routing errors (routing_errors.py).
+POLL_UNROUTABLE_TUNNELS = env_bool("POLL_UNROUTABLE_TUNNELS", True)
+UNROUTABLE_ANSWER_SECONDS = env_int("UNROUTABLE_ANSWER_SECONDS", 3600)
+
 # --- Link Watch (link_watch.py): noise-floor watch and one-way link alarm ---
 # Noise = signal - SNR from each radio's own LQM trackers, vs. a rolling
 # baseline (same hour of day once NOISE_HOUR_MIN_DAYS days exist).
@@ -308,6 +313,31 @@ DIST_RECENT_SECONDS = env_int("DIST_RECENT_SECONDS", 900)
 DIST_HEALTHY_SECONDS = env_int("DIST_HEALTHY_SECONDS", 900)
 DIST_DOWN_MIN_COLLECTORS = env_int("DIST_DOWN_MIN_COLLECTORS", 2)
 DIST_DOWN_MIN_FAILS = env_int("DIST_DOWN_MIN_FAILS", 2)
+
+# Prometheus (TODO #63-68, #74): extra node details from a Prometheus that
+# already scrapes AREDN's /cgi-bin/metrics. Empty = off; our own polling is unchanged.
+PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://w0gsk-ubuntu:9090")
+PROMETHEUS_TIMEOUT_SECONDS = env_int("PROMETHEUS_TIMEOUT_SECONDS", 10)
+PROMETHEUS_POLL_MINUTES = env_int("PROMETHEUS_POLL_MINUTES", 10)
+# Optional Grafana dashboard linked from the node page and embeds.
+GRAFANA_URL = os.environ.get("GRAFANA_URL", "http://w0gsk-ubuntu:3125/grafanau/d/fLi0yXAWk/aredn-w0gsk")
+# Resource alarms (prom_watch.py).
+RESOURCE_MEM_LOW_PCT = env_int("RESOURCE_MEM_LOW_PCT", 10)
+RESOURCE_FLASH_LOW_PCT = env_int("RESOURCE_FLASH_LOW_PCT", 10)
+RESOURCE_CPU_BUSY_PCT = env_int("RESOURCE_CPU_BUSY_PCT", 90)
+RESOURCE_LEAK_DAYS = env_int("RESOURCE_LEAK_DAYS", 3)
+RESOURCE_LEAK_HORIZON_DAYS = env_int("RESOURCE_LEAK_HORIZON_DAYS", 7)
+ROUTE_DROP_PCT = env_int("ROUTE_DROP_PCT", 30)
+# MCS alarm: transmit rate this much below its usual while SNR is within MCS_SNR_HOLD_DB.
+MCS_RATE_DROP_PCT = env_int("MCS_RATE_DROP_PCT", 40)
+MCS_SNR_HOLD_DB = env_int("MCS_SNR_HOLD_DB", 3)
+# Spectrum scan reminders (spectrum_view.py).
+SCAN_REMINDER_DAYS = env_int("SCAN_REMINDER_DAYS", 14)
+# Phone connectivity (phones.py): ping every listed phone after each committed scan.
+PHONE_PING_ENABLED = env_bool("PHONE_PING_ENABLED", True)
+PHONE_PING_COUNT = env_int("PHONE_PING_COUNT", 3)
+PHONE_PING_TIMEOUT_SECONDS = env_int("PHONE_PING_TIMEOUT_SECONDS", 2)
+PHONE_PING_FAILS = env_int("PHONE_PING_FAILS", 2)
 
 
 def is_watched_node(node_name):

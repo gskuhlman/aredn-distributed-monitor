@@ -31,6 +31,7 @@ PROTECTED_METHODS = ('POST', 'PUT', 'PATCH', 'DELETE')
 OPEN_POSTS = [re.compile(p) for p in (
     r'^/api/auth/(login|logout)$',
     r'^/api/channel-map/what-if$',
+    r'^/api/spectrum$',
     r'^/api/channel-planner$',
     r'^/api/reports/(airtime|site-matrix|infrastructure)$',
     r'^/api/rf-stats/diagnose/[^/]+/[^/]+/live$',
@@ -41,6 +42,8 @@ OPEN_POSTS = [re.compile(p) for p in (
     r'^/api/collector/health/check$',
     r'^/api/weather/refresh$',
     r'^/api/routes/\d+/run$',
+    r'^/api/voip/phones/run$',
+    r'^/api/voip/phones/\d+/ping$',
 )]
 MAX_FAILS = 5
 FAIL_WINDOW_S = 300

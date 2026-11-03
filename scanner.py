@@ -13,9 +13,11 @@ from time import monotonic
 from urllib.parse import urlparse
 import config
 import database
+import phones
 import couch_client
 import gateway
 import observations
+import routing_errors
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +42,13 @@ _last_scan_partial = False
 # loss is taken as real.
 PARTIAL_SCAN_FRACTION = 0.5
 PARTIAL_SCAN_MIN_ACTIVE = 10
+
+# A node that answered only bare sysinfo (no LQM, so its links weren't
+# observed), or whose poll failed while a fully polled neighbour still lists it
+# as routable, keeps its links (and active state) for up to this many scans in
+# a row instead of aging them all out and back on the next scan.
+HOLD_MAX_SCANS = 3
+_held_scans = {}   # node -> consecutive scans held
 
 
 def build_sysinfo_url(ip_or_hostname, full=True):
@@ -268,6 +277,9 @@ def process_node_data(data, refresh_services=True):
             'severity': 'warning'
         })
 
+    # Mesh host list (name, ip) for the phone list (phones.py); stored after the scan.
+    phones.note_hosts(data.get('hosts'))
+
     # Process services_local (services provided by this node)
     if refresh_services:
         database.clear_node_services(node_name)
@@ -391,10 +403,14 @@ def get_show_tunnels():
     return database.get_setting('show_tunnels', 'false').lower() == 'true' or config.SHOW_TUNNELS
 
 
-def discover_neighbors(data, show_tunnels):
+def discover_neighbors(data, show_tunnels, answering=None):
     """Return the routable neighbors to queue for discovery from one node's
     sysinfo. Pure (no DB writes), so a scan can walk the mesh before deciding
     whether its results are trustworthy enough to commit.
+
+    ``answering`` (names that answered a poll or mesh probe recently) also
+    queues connected tunnel neighbours Babel reports not routable, marked
+    ``routable: False`` (routing_errors.py).
     """
     trackers = lqm_trackers(data) if data else None
     if not trackers:
@@ -419,12 +435,18 @@ def discover_neighbors(data, show_tunnels):
         discover_host = discover_ip or (
             f"{tracker_hostname}.local.mesh" if tracker_hostname else None
         )
-        if tracker.get('routable') and discover_host:
+        routable = bool(tracker.get('routable'))
+        unroutable_tunnel = (not routable and answering is not None and tracker_hostname
+                             and tracker_hostname in answering
+                             and is_tunnel_link_type(tracker.get('type', ''))
+                             and tracker_is_connected(tracker))
+        if (routable or unroutable_tunnel) and discover_host:
             discovered_nodes.append({
                 'hostname': hostname,
                 'ip': discover_ip,
                 'url': build_sysinfo_url(discover_host),
-                'link_type': tracker.get('type')
+                'link_type': tracker.get('type'),
+                'routable': routable
             })
     return discovered_nodes
 
@@ -684,6 +706,7 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
 
     visited_urls = set()
     visited_nodes = set()
+    visited_full = set()   # nodes whose full sysinfo (with LQM) was read
     # Queue contains tuples of (url, depth, target_hint). target_hint is the
     # neighbor-reported LQM hostname for a discovered node, so a FAILED poll can
     # be recorded under the real node name instead of the URL/IP-derived slug.
@@ -714,6 +737,15 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
     fetched_results = []
     # url -> (reporting neighbor, its LQM link type), recorded with failed polls.
     poll_via = {}
+    # Connected tunnel neighbours Babel won't route to are polled too when
+    # they answered recently (routing_errors.py); full scans only.
+    answering = (database.get_recently_answered(config.UNROUTABLE_ANSWER_SECONDS)
+                 if record_depth and config.POLL_UNROUTABLE_TUNNELS else None)
+    routable_seen = set()
+    unroutable_via = {}   # hostname -> {'via': set, 'link_type'}
+    # Nodes whose links weren't observed this scan although they are up
+    # (bare sysinfo, or failed poll but listed routable): see HOLD_MAX_SCANS.
+    hold_candidates = set()
 
     def process_result(url, depth, target_hint, data, degraded, response_ms):
         """Commit one fetched node (all DB writes happen here, serially, and
@@ -740,6 +772,8 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
             )
             # Record an unreachable health sample so the scanner-to-node downtime
             # is visible in the time series under the real node name.
+            if failed_target and failed_target in routable_seen:
+                hold_candidates.add(failed_target)
             if config.NODE_HEALTH_ENABLED and failed_target:
                 reporter, via_type = poll_via.get(url.lower(), (None, None))
                 database.update_node_health(
@@ -764,6 +798,7 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
 
         # Emit degraded/recovered events only on transitions
         if degraded:
+            hold_candidates.add(node_name)
             if node_name not in _degraded_nodes:
                 _degraded_nodes.add(node_name)
                 all_events.append({
@@ -835,6 +870,8 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
             )
         )
 
+        if not degraded:
+            visited_full.add(node_name)
         if node_name not in visited_nodes:
             visited_nodes.add(node_name)
             nodes_found += 1
@@ -871,7 +908,13 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
 
         # A degraded (bare sysinfo) response has no LQM data, so it has no
         # neighbors to traverse.
-        discovered = [] if degraded else discover_neighbors(data, show_tunnels)
+        discovered = [] if degraded else discover_neighbors(data, show_tunnels, answering)
+        for node_info in discovered:
+            hostname = node_info.get('hostname')
+            if not hostname:
+                continue
+            if node_info.get('routable', True):
+                routable_seen.add(hostname)
 
         # Queue next-level nodes (unless at max depth or past a supernode).
         next_nodes = []
@@ -886,6 +929,9 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
                 if hostname and boundaries.get(hostname) == 'exclude':
                     boundary_skipped.add(hostname)
                     continue
+                if hostname and not node_info.get('routable', True):
+                    entry = unroutable_via.setdefault(hostname, {'via': set(), 'link_type': node_info.get('link_type')})
+                    entry['via'].add(node_name)
                 if node_url.lower() not in visited_urls:
                     next_nodes.append((node_url, depth + 1, hostname))
         return next_nodes
@@ -977,6 +1023,29 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
     for (url, depth, target_hint), (data, degraded, response_ms) in fetched_results:
         process_result(url, depth, target_hint, data, degraded, response_ms)
 
+    if record_depth:
+        hold_candidates -= visited_full
+        for name in list(_held_scans):
+            if name not in hold_candidates:
+                del _held_scans[name]
+        for name in hold_candidates:
+            _held_scans[name] = _held_scans.get(name, 0) + 1
+        held = sorted(n for n in hold_candidates if _held_scans[n] <= HOLD_MAX_SCANS)
+        if held:
+            logger.info("Holding link aging for %d node(s) not fully read this scan: %s",
+                        len(held), ', '.join(held))
+    else:
+        held = []
+
+    if answering is not None:
+        flagged = {name: {'via': sorted(info['via']), 'link_type': info['link_type'],
+                          'answered': name in visited_nodes}
+                   for name, info in unroutable_via.items() if name not in routable_seen}
+        try:
+            all_events.extend(routing_errors.update(flagged, routable_seen))
+        except Exception as exc:  # never lose a committed scan to this check
+            logger.warning("Routing error check failed: %s", exc)
+
     logger.info(f"Discovery complete: {nodes_found} nodes, {links_found} links, max depth reached: {max_depth_reached}")
 
     return {
@@ -996,7 +1065,8 @@ def discover_network(start_url=None, max_depth=None, record_depth=True, gateway_
         'boundaries_active': bool(boundaries),
         'boundary_skipped': sorted(boundary_skipped),
         'boundary_stopped': sorted(boundary_stopped),
-        'seen_names': sorted(seen_names)
+        'seen_names': sorted(seen_names),
+        'held_nodes': held
     }
 
 
@@ -1082,10 +1152,11 @@ def prune_database_retention():
     return removed
 
 
-def update_link_statuses():
-    """Update link statuses based on timeouts, return details of changes"""
+def update_link_statuses(held_nodes=None):
+    """Update link statuses based on timeouts, return details of changes.
+    Links from ``held_nodes`` (up but not fully read this scan) don't age."""
     # Get links that will be dropped before marking them
-    dropped_links = database.get_links_to_drop(config.LINK_TIMEOUT)
+    dropped_links = database.get_links_to_drop(config.LINK_TIMEOUT, held_nodes)
     remove_after_seconds = get_link_remove_after_seconds()
     removed_links = database.get_links_to_remove(remove_after_seconds)
     events = []
@@ -1117,7 +1188,7 @@ def update_link_statuses():
                 origin='scanner_inferred'
             )
 
-    dropped = database.mark_stale_links_dropped(config.LINK_TIMEOUT)
+    dropped = database.mark_stale_links_dropped(config.LINK_TIMEOUT, held_nodes)
     removed = database.remove_old_dropped_links(remove_after_seconds)
 
     for link in removed_links:
@@ -1142,7 +1213,7 @@ def update_link_statuses():
     }
 
 
-def update_node_statuses(seen_names=None, boundaries_active=False):
+def update_node_statuses(seen_names=None, boundaries_active=False, held_nodes=None):
     """Update node statuses based on timeouts, return details of changes.
 
     When scan boundaries are configured, a node that nobody in this scan polled
@@ -1151,7 +1222,7 @@ def update_node_statuses(seen_names=None, boundaries_active=False):
     outage warning so setting a boundary doesn't flood the log with "offline".
     """
     # Get nodes that will be marked inactive before marking them
-    inactive_nodes = database.get_nodes_to_mark_inactive(config.LINK_TIMEOUT)
+    inactive_nodes = database.get_nodes_to_mark_inactive(config.LINK_TIMEOUT, held_nodes)
     events = []
     seen = set(seen_names or [])
 
@@ -1172,7 +1243,7 @@ def update_node_statuses(seen_names=None, boundaries_active=False):
             'severity': 'warning'
         })
 
-    count = database.mark_stale_nodes_inactive(config.LINK_TIMEOUT)
+    count = database.mark_stale_nodes_inactive(config.LINK_TIMEOUT, held_nodes)
 
     if count > 0:
         logger.info(f"Marked {count} nodes as inactive (stale)")
@@ -1241,7 +1312,7 @@ def run_scan():
         result['inactive_nodes'] = []
     else:
         # Update link statuses
-        link_status = update_link_statuses()
+        link_status = update_link_statuses(result.get('held_nodes'))
         result['dropped'] = link_status['dropped']
         result['removed'] = link_status['removed']
         result['dropped_links'] = link_status['dropped_links']
@@ -1250,7 +1321,8 @@ def run_scan():
         # Update node statuses
         node_status = update_node_statuses(
             seen_names=result.get('seen_names'),
-            boundaries_active=result.get('boundaries_active', False)
+            boundaries_active=result.get('boundaries_active', False),
+            held_nodes=result.get('held_nodes')
         )
         result['inactive_nodes'] = node_status['inactive_nodes']
         all_events.extend(node_status.get('events', []))

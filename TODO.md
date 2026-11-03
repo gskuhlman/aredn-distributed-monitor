@@ -149,6 +149,123 @@ All built 2026-10-24 (see CLAUDE.md for each module). Not verified against live 
 - [x] 46. **Club report export.** One-page PDF/printable summary (map, health, changes made, what's
       next) for meetings.
 
+## Round 3 ideas (2026-10-24)
+
+Grounded in what turned up while building Round 2: link_history is 80% of the database and grows
+about 15 MB a day, one collector can only ever say UP / STALE, three Round 2 features have never
+met a live radio, and alarms for one root cause (the starting node, a site losing power) still
+arrive as many separate events.
+
+### Verify and harden
+
+- [ ] 47. **Live check of Round 2 radio features.** With the operator present: find which WiFi scan
+      page the firmware offers (#34), watch alignment readings update during a real adjustment
+      (#31), and confirm service probes against a few known services (#36). Fix what differs.
+- [ ] 48. **History rollup.** Keep raw link_history scan samples for 7 days, then hourly
+      aggregates (median/p10/p90 SNR, LQ, counters) for the rest of the retention, so the database
+      stops growing ~15 MB/day and old Reports windows load faster.
+- [ ] 49. **Second collector kit.** A setup page and script for another PC: `COLLECTOR_ID`,
+      `COUCH_URL`, CouchDB replication check, clock skew check, and a "collectors agree?" view, so
+      distributed status (#44) can say LOCALLY_UNREACHABLE / PARTITIONED / DOWN_CONFIRMED for real.
+- [ ] 50. **Audit log.** Who did what and when: deletes, excludes, maintenance, rollouts,
+      settings, password changes, with the client address and (once logged in) the session.
+
+### Smarter alarms
+
+- [ ] 51. **Incident grouping.** Fold events that share one cause into one incident with a root
+      cause and a timeline: starting node lost, a site where every radio dropped at once, a
+      backbone link whose loss cut off the nodes behind it (spof). One notification per incident.
+- [ ] 52. **Site power outage detection.** All radios at a site unreachable together, then all
+      back with uptime reset = power, not RF. Say so in the alarm and in the weekly report.
+- [ ] 53. **Slow degradation watch.** Per RF link direction, the 30-day SNR/LQ trend and the gap
+      to the link budget prediction (#26); flag links slipping a few dB per month (antenna
+      moving, corrosion, foliage) before they fail.
+- [ ] 54. **Storm warning.** Use the NWS forecast with the measured rain fade per link (#13):
+      "heavy rain expected at 18:00; these 3 links lost 6+ dB in the last rain".
+- [ ] 55. **Notification acknowledgement.** Ack an alert from the page or a link in the message;
+      unacknowledged critical alerts repeat or escalate to a second channel after N minutes.
+
+### Troubleshooting
+
+- [ ] 56. **Noise source finder.** When noise jumps on several directional radios at about the
+      same time, intersect their antenna beams on the Channel Map to point at the likely
+      interference area.
+- [ ] 57. **Tunnel health.** Per tunnel (legacy and WireGuard): up time, flaps, latency, which
+      nodes reach the mesh only through it, and what loses the mesh if the internet goes down.
+- [ ] 58. **Firmware upgrade planner.** Order upgrades far ends first so no node loses its path
+      mid-upgrade, tracked like a rollout (#29) and ticked off when the scanner sees the new
+      version.
+
+### For the club
+
+- [ ] 59. **"Can I reach the mesh from here?"** Enter an address or click the map: nearest sites in
+      view, predicted signal per sector from the link budget and terrain, suggested antenna and
+      aim bearing. For new members.
+- [ ] 60. **Served-agency status board.** Big tiles for the EOC, hospital and other served
+      agencies: their nodes and services, path health to them, uptime this month. For use during
+      an activation.
+- [ ] 61. **Prometheus / Grafana export.** Read-only `/metrics` (node up, link SNR/LQ, noise, scan
+      duration) with an optional token, for anyone who already runs Grafana.
+- [ ] 62. **Global search.** One box in the header for node, site, MAC, IP, callsign or service
+      that jumps to the right page.
+
+## Round 4 ideas (2026-10-25)
+
+From the W0GSK Grafana dashboard (AREDN's built-in Prometheus exporter, `/cgi-bin/metrics`,
+firmware 3.24.4.0+), other mesh/WISP tools (MeshMap, Freifunk meshviewer, UISP, LibreNMS) and what
+the Spectrum page showed. sysinfo.json only gives free memory (`sysinfo.freememory`, KB, now
+captured); the metrics page has everything else, at ~60 KB a poll. Our own polling stays; these add to it.
+
+### Node health from the metrics page
+
+- [x] 63. **Prometheus details on the node page.** Keep our own polling as it is; add a section
+      to the node page that pulls extra details for that node from W0GSK's Prometheus (behind the
+      Grafana at w0gsk-ubuntu:3125, which already scrapes `/cgi-bin/metrics`): memory total and
+      used, CPU, flash, conntrack, per-interface traffic, per-station MCS. Read on demand when the
+      page opens; nothing replaces the scanner's data, and the page still works when Prometheus
+      is unreachable.
+- [x] 64. **Full node health.** Total RAM and % used, CPU busy, root filesystem free, conntrack
+      entries vs limit, process count and file descriptors, on the node page and in Mesh Health
+      (low memory, conntrack near full, flash nearly full, CPU pegged).
+      *Built from Prometheus: node page tiles and Mesh Health `resources`. conntrack and file descriptors are not in the exporter, so they are listed as unavailable.*
+- [x] 65. **Traffic per interface.** wlan0 / eth / DtD / tunnel bytes and packets per second,
+      drops, errors, FIFO and frame errors; "busiest radios" ranking. Shown in Capacity next to
+      the LQM packet estimate, not instead of it: the estimate covers every RF link from our own
+      polls, the measured traffic covers what Prometheus scrapes, and the two together show when
+      the estimate is off.
+- [x] 66. **Per-station MCS and signal.** `node_wifi_station_*` transmit/receive MCS, rate, signal
+      and noise per client: an MCS chart per link next to SNR, and an alarm when MCS falls while
+      SNR holds (interference, not path loss) -- exactly the COL<->MMC 7.2 Mbps case.
+      *Built: RF Stats "MCS, rate & LQM ping", `mcs_drop` alarm, and Mesh Health `mcs` for links stuck at a low MCS with good SNR.*
+- [x] 67. **LQM ping success and quality** (`node_lqm_tracker_ping_*`) per link in RF Stats and
+      Link Health, alongside our own pings.
+- [x] 68. **Babel route and neighbour counts over time** (`node_arednlink_neighbors_count_total`,
+      routes): a sudden route-count drop flags a partition before nodes go unreachable.
+
+### Seeing the network
+
+- [x] 69. **Link potential plot (UISP style).** Every RF link as a dot: distance across, SNR or
+      capacity up, coloured by measured / theoretical capacity from the link budget. Links far
+      below the curve are the ones to re-aim or re-channel.
+      *Built: Diagnostics "Link Potential" (PHY rate vs what the SNR supports; iPerf only as a fallback).*
+- [x] 70. **Spectrum history.** The Spectrum page over time: replay WiFi surveys and our channel
+      changes per site, and "what changed since the last scan" per slot.
+- [x] 71. **Scan reminders.** Spectrum rows marked "not scanned" or older than 14 days get a
+      to-do (radio, why, how long the link drops), and a "scan all sector radios tonight" job for
+      infrastructure when WiFi survey is enabled.
+- [x] 72. **Embeddable panels.** Like meshviewer's nodeInfos: per-node and per-site image/iframe
+      URLs (or links into Grafana) so the club website or a Grafana dashboard can show our charts.
+      *Built: /embed/node/<name>, /embed/site/<code> and badge.svg for each.*
+
+### Alarms
+
+- [x] 73. **Per-link alerts on PtMP sectors.** Alert rules that target one client link of a sector
+      (SNR, MCS, capacity, flaps), not just the whole radio -- the gap LibreNMS/SolarWinds users
+      hit with multipoint radios.
+- [x] 74. **Resource alarms.** Memory low / falling for days (leak before a reboot), conntrack near
+      limit, root FS full, using the metrics from #64.
+      *Built: memory low / leak trend, flash, /tmp, CPU (prom_watch.py). No conntrack metric to alarm on.*
+
 ## Pending radio work (outside the app)
 
 Channel plan for Collins + MMC + EOC together (Channel Map → Plan channels, Radios = the 12

@@ -61,6 +61,11 @@ EVENT_TYPES = [
     EVENT_ONE_WAY_LINK, EVENT_ONE_WAY_LINK_CLEARED,
     EVENT_NOISE_JUMP, EVENT_NOISE_CLEARED,
     'route_changed', EVENT_ROUTE_DETOUR, EVENT_ROUTE_RESTORED,
+    # Round 4: Prometheus alarms (prom_watch.py) and per-link alerts (link_alerts.py)
+    'resource_alarm', 'resource_cleared', 'route_count_drop', 'route_count_restored',
+    'mcs_drop', 'mcs_restored', 'link_alert', 'link_alert_cleared',
+    # Phone connectivity (phones.py)
+    'phone_unreachable', 'phone_restored',
 ]
 
 # problem event -> its recovery event (flap pairing and "recovery only if alerted")
@@ -72,6 +77,11 @@ RECOVERY_OF = {
     EVENT_ONE_WAY_LINK: EVENT_ONE_WAY_LINK_CLEARED,
     EVENT_NOISE_JUMP: EVENT_NOISE_CLEARED,
     EVENT_ROUTE_DETOUR: EVENT_ROUTE_RESTORED,
+    'resource_alarm': 'resource_cleared',
+    'route_count_drop': 'route_count_restored',
+    'mcs_drop': 'mcs_restored',
+    'link_alert': 'link_alert_cleared',
+    'phone_unreachable': 'phone_restored',
 }
 PROBLEM_OF = {v: k for k, v in RECOVERY_OF.items()}
 
@@ -118,6 +128,13 @@ DEFAULT_RULES = [
      'min_severity': 'info', 'scope': 'any'},
     {'name': 'Route detour', 'event_types': [EVENT_ROUTE_DETOUR, EVENT_ROUTE_RESTORED],
      'min_severity': 'info', 'scope': 'any'},
+    {'name': 'Per-link alerts', 'event_types': ['link_alert', 'link_alert_cleared'],
+     'min_severity': 'info', 'scope': 'any'},
+    {'name': 'Phones not answering', 'event_types': ['phone_unreachable', 'phone_restored'],
+     'min_severity': 'info', 'scope': 'any'},
+    {'name': 'Node resources / routes', 'event_types': ['resource_alarm', 'resource_cleared', 'route_count_drop',
+                                                         'route_count_restored'],
+     'min_severity': 'info', 'scope': 'infrastructure'},
 ]
 
 LINK_DETAIL_RE = re.compile(r'^(?P<type>[\w-]+) link to (?P<peer>\S+)')

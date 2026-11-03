@@ -13,6 +13,8 @@ count only nodes that are really down and explain the rest:
 - excluded: the node is now an 'exclude' scan boundary
 - legacy_tunnel_only: only reported over old-style (vtun) "Tunnel" links,
   whose routes do not reach this collector
+- routing_error: a neighbor's ping reaches it over a connected tunnel that
+  every reporting neighbor says is not routable (the mesh has no route to it)
 - pings_no_http: a neighbor-relayed mesh probe reaches it but the scanner's
   sysinfo fetch does not (up, but its web server is unreachable from here)
 - intermittent: some polls answered, some failed (a real, partial problem)
@@ -38,6 +40,7 @@ STALE_DAYS = 30
 RECENT_HOURS = 24
 DOWN_AFTER_FAILS = 3      # consecutive failures (polls or probes) that mean "down now"
 LEGACY_TUNNEL_TYPES = {'TUNNEL', 'TUN', 'VTUN'}
+TUNNEL_TYPES = LEGACY_TUNNEL_TYPES | {'WIREGUARD', 'WG'}
 
 CAUSES = {
     'maintenance': ('Maintenance', True, 'info',
@@ -52,6 +55,10 @@ CAUSES = {
     'legacy_tunnel_only': ('Legacy tunnel only', True, 'info',
                            'Only reported over old-style (vtun) tunnel links. Their routes are not carried '
                            'back to this part of the mesh, so the scanner cannot reach it even when it is up.'),
+    'routing_error': ('Routing error', True, 'warning',
+                      "A neighbour's ping reaches the node over a connected tunnel, but every neighbour that "
+                      "reports it says Babel has no route to it. The node and tunnel are up; the tunnel's "
+                      'routing is broken (check it on both ends).'),
     'pings_no_http': ('Up, no HTTP from here', True, 'warning',
                       'A neighbor-relayed mesh probe reaches the node, but the scanner\'s sysinfo request '
                       'does not. The node is up; the path or its web server is unreachable from here.'),
@@ -249,6 +256,13 @@ def _cause(name, ctx):
         if s['probe_ok']:
             ev.append(f'{s["probe_ok"]} mesh probe(s) from a neighbor reached it')
         return 'legacy_tunnel_only', ev
+
+    if (s['probe_ok'] and not s['answered'] and reps
+            and all(r['routability_status'] == 'not_routable' for r in reps)
+            and all(str(r['link_type'] or '').upper() in TUNNEL_TYPES for r in reps)):
+        ev.append(f'{s["probe_ok"]} mesh probe(s) reached it; {s["failed"]} direct poll(s) failed')
+        ev.append('connected tunnel, not routable per ' + ', '.join(sorted({r['source_node'] for r in reps})))
+        return 'routing_error', ev
 
     if s['probe_ok'] and not s['answered']:
         ev.append(f'{s["probe_ok"]} mesh probe(s) reached it; {s["failed"]} direct poll(s) failed')

@@ -1664,7 +1664,19 @@ const EVENT_ICONS = {
     // Route Watch (route_watch.py)
     'route_changed': { icon: '&#128256;', label: 'Route Changed', class: 'event-info' },
     'route_detour': { icon: '&#8618;', label: 'Route Detour', class: 'event-warning' },
-    'route_restored': { icon: '&#128257;', label: 'Route Restored', class: 'event-success' }
+    'route_restored': { icon: '&#128257;', label: 'Route Restored', class: 'event-success' },
+    // Prometheus alarms (prom_watch.py) and per-link alerts (link_alerts.py)
+    'resource_alarm': { icon: '&#128202;', label: 'Node Resources', class: 'event-warning' },
+    'resource_cleared': { icon: '&#10004;', label: 'Node Resources OK', class: 'event-success' },
+    'route_count_drop': { icon: '&#128201;', label: 'Babel Routes Dropped', class: 'event-warning' },
+    'route_count_restored': { icon: '&#128200;', label: 'Babel Routes Back', class: 'event-success' },
+    'mcs_drop': { icon: '&#128246;', label: 'MCS Drop (SNR Steady)', class: 'event-warning' },
+    'mcs_restored': { icon: '&#128246;', label: 'MCS Back to Usual', class: 'event-success' },
+    'link_alert': { icon: '&#128276;', label: 'Link Alert', class: 'event-warning' },
+    'link_alert_cleared': { icon: '&#128277;', label: 'Link Alert Cleared', class: 'event-success' },
+    // Phone connectivity (phones.py)
+    'phone_unreachable': { icon: '&#128222;', label: 'Phone Not Answering', class: 'event-warning' },
+    'phone_restored': { icon: '&#128222;', label: 'Phone Answering', class: 'event-success' }
 };
 
 /**

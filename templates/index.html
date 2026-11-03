@@ -37,6 +37,7 @@
                             <button class="tab-btn active" data-tab="network">Topology</button>
                             <button class="tab-btn" data-tab="geo-map">Map</button>
                             <button class="tab-btn" data-tab="channel-map">Channel Map</button>
+                            <button class="tab-btn" data-tab="spectrum" title="Frequency across, locations down: what is free where">Spectrum</button>
                         </div>
                         <div class="nav-group">
                             <div class="nav-group-title">Links &amp; nodes</div>
@@ -449,6 +450,44 @@
                                 <span id="gt-status" class="form-hint"></span>
                             </div>
                             <div id="gt-report"><p class="log-empty">Press Check.</p></div>
+                        </div>
+
+                        <!-- Link potential (#69, link-potential.js) -->
+                        <div class="diag-section">
+                            <h3>Link Potential <small class="form-hint">every RF link: distance vs measured SNR or rate against what its antennas should give; links far below the curve are the ones to re-aim or re-channel</small></h3>
+                            <div class="mh-controls">
+                                <button id="lpot-run" class="btn btn-primary">Plot</button>
+                                <select id="lpot-metric" class="form-input">
+                                    <option value="snr">Measured SNR</option>
+                                    <option value="rate">Measured rate</option>
+                                </select>
+                                <span id="lpot-status" class="form-hint"></span>
+                            </div>
+                            <div class="lpot-chart-wrap"><canvas id="lpot-chart"></canvas></div>
+                            <div id="lpot-report"><p class="log-empty">Press Plot.</p></div>
+                        </div>
+
+                        <!-- Per-link alerts (#73, link-alerts.js) -->
+                        <div class="diag-section">
+                            <h3>Link Alerts <small class="form-hint">alert on one client link of a sector (SNR, LQ, rate, drops), not just the whole radio</small></h3>
+                            <div class="mh-controls">
+                                <button id="la-run" class="btn btn-primary">Show rules</button>
+                                <span id="la-status" class="form-hint"></span>
+                            </div>
+                            <div id="la-report"><p class="log-empty">Press Show rules.</p></div>
+                            <div class="mh-controls la-form">
+                                <select id="la-sector" class="form-input"><option value="">Sector radio…</option></select>
+                                <input id="la-sector-name" class="form-input" placeholder="or any radio name">
+                                <button id="la-sector-load" class="btn btn-small btn-secondary">List clients</button>
+                                <label>SNR below <input id="la-snr" type="number" class="form-input lp-num" placeholder="dB"></label>
+                                <label>LQ below <input id="la-lq" type="number" class="form-input lp-num" placeholder="%"></label>
+                                <label>Rate below <input id="la-rate" type="number" class="form-input lp-num" placeholder="Mbps"></label>
+                                <label>More than <input id="la-flaps" type="number" class="form-input lp-num" placeholder="n"> drops/h</label>
+                                <label><input id="la-missing" type="checkbox" checked> when missing</label>
+                                <select id="la-sev" class="form-input"><option value="warning">warning</option><option value="critical">critical</option><option value="info">info</option></select>
+                                <button id="la-sector-add" class="btn btn-small btn-primary">Add for checked clients</button>
+                            </div>
+                            <div id="la-clients" class="la-clients"></div>
                         </div>
 
                         <!-- Babel costs (#35, babel-view.js) -->
@@ -1139,6 +1178,35 @@
                     </div>
                 </div>
             </div>
+            <!-- Spectrum by location (spectrum.js / spectrum_view.py) -->
+            <div id="spectrum-view" class="view-container">
+                <div class="cm-layout">
+                    <div class="cm-controls">
+                        <select id="sp-scope" class="form-input" title="Which locations to show">
+                            <option value="infrastructure" selected>Infrastructure sites + scanned radios</option>
+                            <option value="all">Every site with a radio in range</option>
+                        </select>
+                        <label>MHz <input type="number" id="sp-low" class="form-input cm-num" value="5640" step="10"></label>
+                        <label>to <input type="number" id="sp-high" class="form-input cm-num" value="5930" step="10"></label>
+                        <label class="header-checkbox" title="Include radios not seen for more than 7 days"><input type="checkbox" id="sp-inactive"> Old radios</label>
+                        <label class="header-checkbox" title="Apply the Channel Map's what-if box (e.g. a plan loaded from the planner)"><input type="checkbox" id="sp-whatif"> Channel Map what-if</label>
+                        <label title="Show the spectrum as it was: the surveys taken by then and each radio's channel at that time">As of
+                            <select id="sp-at" class="form-input"><option value="">Now</option></select></label>
+                        <button id="sp-reload" class="btn btn-secondary">Reload</button>
+                        <span id="sp-status" class="nodes-count"></span>
+                    </div>
+                    <div class="sp-body">
+                        <div id="sp-legend" class="sp-legend"></div>
+                        <div id="sp-chart" class="sp-chart"></div>
+                        <div class="sp-bottom">
+                            <div id="sp-detail" class="sp-detail"><p class="form-hint">Click a slot for what is in it, or a row name for where it is free.
+                                Rows under a site are what each scanned radio hears in its antenna's direction.</p></div>
+                            <div id="sp-summary" class="sp-detail"></div>
+                        </div>
+                        <div id="sp-reminders" class="sp-detail sp-reminders"></div>
+                    </div>
+                </div>
+            </div>
             <!-- Channel Map View (TODO #3) -->
             <div id="channel-map-view" class="view-container">
                 <div class="cm-layout">
@@ -1279,6 +1347,50 @@
                         <div class="nodes-count"><span id="voip-status">Idle</span></div>
                     </div>
                     <div class="diag-scroll">
+                        <!-- Phone connectivity (phones.py, phones.js) -->
+                        <div class="diag-section">
+                            <h3>Phone Connectivity <small class="form-hint">every phone on the PBX, pinged after each scan</small></h3>
+                            <div class="mh-controls">
+                                <select id="ph-hours" class="form-input" title="History window">
+                                    <option value="6">6 h</option><option value="24" selected>24 h</option>
+                                    <option value="72">3 days</option><option value="168">7 days</option>
+                                </select>
+                                <label class="header-checkbox"><input type="checkbox" id="ph-hidden"> show hidden</label>
+                                <button id="ph-run" class="btn btn-small btn-primary">Ping now</button>
+                                <span id="ph-status" class="form-hint"></span>
+                            </div>
+                            <div id="ph-tiles" class="np-tiles"></div>
+                            <div id="ph-report"><p class="log-empty">Loading...</p></div>
+                            <div id="ph-unresolved"></div>
+                            <details class="ph-more" id="ph-add-box">
+                                <summary>Add phones</summary>
+                                <div class="ph-forms">
+                                    <div>
+                                        <h4>From the PBX</h4>
+                                        <p class="form-hint">Paste the output of <code>pjsip show contacts</code> or <code>sip show peers</code>
+                                            from the Asterisk CLI, or lines of <code>extension,name,ip</code>.</p>
+                                        <textarea id="ph-pbx-text" class="form-input ph-textarea" rows="5"
+                                            placeholder="  Contact:  1200/sip:1200@10.15.99.115:5060;ob   a1b2c3 Avail  12.3"></textarea>
+                                        <button id="ph-import" class="btn btn-small btn-primary">Import</button>
+                                        <span id="ph-import-msg" class="form-hint"></span>
+                                    </div>
+                                    <div>
+                                        <h4>From the mesh host list</h4>
+                                        <input id="ph-host-q" class="form-input" placeholder="search host name or IP">
+                                        <div id="ph-hosts" class="ph-hosts"></div>
+                                        <h4>By hand</h4>
+                                        <div class="mh-controls">
+                                            <input id="ph-ip" class="form-input ph-small" placeholder="IP">
+                                            <input id="ph-name" class="form-input ph-small" placeholder="name">
+                                            <input id="ph-ext" class="form-input ph-tiny" placeholder="ext">
+                                            <input id="ph-node" class="form-input ph-small" placeholder="node (optional)">
+                                            <button id="ph-add" class="btn btn-small btn-primary">Add</button>
+                                        </div>
+                                        <span id="ph-add-msg" class="form-hint"></span>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
                         <div class="diag-section">
                             <h3>Call quality <small class="form-hint">live end-to-end test between two endpoints</small></h3>
                             <div id="voip-result"><p class="log-empty">Pick a source and target endpoint, then Run Call Test.</p></div>
@@ -1543,6 +1655,7 @@
     <script src="{{ url_for('static', filename='js/network.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rf-stats.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-diagnosis.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/link-prom.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-budget.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rf-channel.js') }}"></script>
     <script src="{{ url_for('static', filename='js/unreachable-cause.js') }}"></script>
@@ -1561,6 +1674,7 @@
     <script src="{{ url_for('static', filename='js/site-matrix.js') }}"></script>
     <script src="{{ url_for('static', filename='js/cleanup.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/phones.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reports.js') }}"></script>
     <script src="{{ url_for('static', filename='js/collector-health.js') }}"></script>
@@ -1573,6 +1687,7 @@
     <script src="{{ url_for('static', filename='js/changes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/channel-map.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/spectrum.js') }}"></script>
     <script src="{{ url_for('static', filename='js/geo-map.js') }}"></script>
     <script src="{{ url_for('static', filename='js/nav-menu.js') }}"></script>
     <script src="{{ url_for('static', filename='js/channel-planner.js') }}"></script>
@@ -1584,5 +1699,7 @@
     <script src="{{ url_for('static', filename='js/new-nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/wifi-survey.js') }}"></script>
     <script src="{{ url_for('static', filename='js/geo-map-extras.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/link-potential.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/link-alerts.js') }}"></script>
 </body>
 </html>

@@ -12,6 +12,7 @@ Computes derived health metrics per link from collected data:
 """
 
 import math
+import re
 import logging
 from datetime import datetime, timedelta
 import database
@@ -289,12 +290,17 @@ def compute_flap_score(node_name, link_peer, link_type='',
     """
     Count and classify link state transitions in a time window.
 
-    Distinguishes three cases:
+    Distinguishes these cases:
+      - polling_flaps: drops that coincide with a scanner poll of either end
+                     that got only bare sysinfo or no answer: the link wasn't
+                     observed, it didn't go down. Shown, never rated.
       - node_flaps:  link drops that coincide with the source or peer node
                      going offline (node reboot / unreachable).
       - link_flaps:  link drops with no corresponding node outage — the link
                      itself is unstable.
-      - total_flaps: sum of both.
+      - total_flaps: node + link flaps.
+
+    A restore takes the class of the drop before it.
 
     For DTD (wired) links, all drops are attributed to the node because a
     physical ethernet cable does not independently flap.
@@ -330,34 +336,56 @@ def compute_flap_score(node_name, link_peer, link_type='',
             node_offline_times.add(ts)
 
     # Collect link drop/restore events for this specific peer.
-    link_event_times = []
+    link_events = []
     for ev in events:
         ts = ev.get('timestamp', '')
         if ts < cutoff:
             continue
         etype = ev.get('event_type', '')
         details = ev.get('details', '')
-        if etype in ('link_dropped', 'link_restored') and link_peer in details:
-            link_event_times.append(ts)
+        if etype in ('link_dropped', 'link_restored') and _names_peer(details, link_peer):
+            link_events.append((ts, etype))
+    link_events.sort()
 
+    poll_problem_times = _poll_problem_times((node_name, link_peer), cutoff)
     is_wired = link_type.upper() in ('DTD', 'XLINK')
-    total = len(link_event_times)
 
-    if is_wired:
-        # Wired links don't independently flap — attribute everything to node.
-        node_flaps = total
-        link_flaps = 0
-    else:
-        # Classify each link event: does it fall near a node outage event?
-        node_flaps = 0
-        link_flaps = 0
-        for lt in link_event_times:
-            if _near_any(lt, node_offline_times, _COINCIDENCE_WINDOW):
-                node_flaps += 1
-            else:
-                link_flaps += 1
+    counts = {'polling': 0, 'node': 0, 'link': 0}
+    last_class = None
+    for ts, etype in link_events:
+        if etype == 'link_restored' and last_class:
+            cls = last_class
+        elif _near_any(ts, poll_problem_times, _COINCIDENCE_WINDOW):
+            cls = 'polling'
+        elif is_wired or _near_any(ts, node_offline_times, _COINCIDENCE_WINDOW):
+            # Wired links don't independently flap — attribute to the node.
+            cls = 'node'
+        else:
+            cls = 'link'
+        counts[cls] += 1
+        last_class = cls if etype == 'link_dropped' else None
 
-    return _flap_result(node_flaps, link_flaps, hours, link_type)
+    return _flap_result(counts['node'], counts['link'], hours, link_type, polling_flaps=counts['polling'])
+
+
+def _names_peer(details, peer):
+    """'... link to <peer> dropped' names exactly this peer (not a longer name)."""
+    return bool(re.search(r'link to ' + re.escape(peer) + r'(?![\w-])', details or ''))
+
+
+def _poll_problem_times(names, cutoff):
+    """Times the scanner polled one of ``names`` and got only bare sysinfo
+    or no answer (its links weren't observed in that scan)."""
+    try:
+        with database.get_connection() as conn:
+            rows = conn.execute(f'''
+                SELECT timestamp FROM node_health_history
+                WHERE node_name IN ({','.join('?' * len(names))}) AND timestamp >= ?
+                  AND probe_via IS NULL AND (reachable = 0 OR degraded = 1)
+            ''', (*names, cutoff)).fetchall()
+    except Exception:
+        return set()
+    return {r['timestamp'] for r in rows}
 
 
 def _near_any(timestamp_str, timestamp_set, window_seconds):
@@ -376,8 +404,9 @@ def _near_any(timestamp_str, timestamp_set, window_seconds):
     return False
 
 
-def _flap_result(node_flaps, link_flaps, hours, link_type):
-    """Build the flapping result dict with a human-readable cause label."""
+def _flap_result(node_flaps, link_flaps, hours, link_type, polling_flaps=0):
+    """Build the flapping result dict with a human-readable cause label.
+    ``polling_flaps`` (scanner couldn't read a node) are reported, not rated."""
     total = node_flaps + link_flaps
 
     # Rating is based on total state changes regardless of cause
@@ -390,7 +419,10 @@ def _flap_result(node_flaps, link_flaps, hours, link_type):
 
     # Cause: what to show the operator
     is_wired = link_type.upper() in ('DTD', 'XLINK')
-    if total == 0:
+    if total == 0 and polling_flaps:
+        cause = 'polling'
+        cause_label = 'Node polling'
+    elif total == 0:
         cause = 'none'
         cause_label = 'Stable'
     elif is_wired:
@@ -410,6 +442,7 @@ def _flap_result(node_flaps, link_flaps, hours, link_type):
         'flap_count': total,
         'node_flaps': node_flaps,
         'link_flaps': link_flaps,
+        'polling_flaps': polling_flaps,
         'cause': cause,
         'cause_label': cause_label,
         'window_hours': hours,
@@ -780,6 +813,40 @@ def _deduplicate_links(node_name, links):
     return merged
 
 
+def lqm_ping_summary(node_name, hours=24):
+    """{peer: {quality_avg, quality_min, rtt_avg, samples, prom_quality, prom_ms}}:
+    the LQM's own pings to each neighbour (TODO #67), from our scans
+    (link_history.ping_quality / lqm_rtt) and, when Prometheus is configured,
+    the latest scraped node_lqm_tracker_ping_* values. Shown next to our own
+    pings; not part of the grade."""
+    cutoff = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    out = {}
+    with database.get_connection() as conn:
+        for r in conn.execute('''SELECT target_node, AVG(ping_quality) AS q, MIN(ping_quality) AS qmin,
+                                        AVG(lqm_rtt) AS rtt, COUNT(ping_quality) AS n
+                                 FROM link_history WHERE source_node = ? AND timestamp >= ?
+                                   AND (ping_quality IS NOT NULL OR lqm_rtt IS NOT NULL)
+                                 GROUP BY target_node''', (node_name, cutoff)):
+            out[r['target_node']] = {'quality_avg': round(r['q'], 1) if r['q'] is not None else None,
+                                     'quality_min': r['qmin'], 'rtt_avg': round(r['rtt'], 1) if r['rtt'] is not None else None,
+                                     'samples': r['n']}
+        try:
+            rows = conn.execute('''SELECT peer, ping_quality, ping_ms FROM prom_lqm_samples
+                                   WHERE node_name = ? AND timestamp = (SELECT MAX(timestamp) FROM prom_lqm_samples
+                                                                      WHERE node_name = ?)''',
+                                (node_name, node_name)).fetchall()
+        except Exception:
+            rows = []  # no Prometheus table yet
+        for r in rows:
+            row = out.setdefault(r['peer'], {})
+            row['prom_quality'] = r['ping_quality']
+            row['prom_ms'] = round(r['ping_ms'], 1) if r['ping_ms'] is not None else None
+    for row in out.values():
+        q = row.get('quality_avg') if row.get('quality_avg') is not None else row.get('prom_quality')
+        row['rating'] = None if q is None else 'good' if q >= 95 else 'marginal' if q >= 80 else 'poor'
+    return out
+
+
 def analyze_node_links(node_name, hours=24):
     """
     Compute health analysis for all links of a node.
@@ -793,11 +860,17 @@ def analyze_node_links(node_name, hours=24):
     deduped = _deduplicate_links(node_name, links)
     quality_history = database.get_node_history(node_name, hours=hours)
     ping_history = database.get_node_ping_history(node_name, hours=hours)
+    try:
+        lqm_pings = lqm_ping_summary(node_name, hours)
+    except Exception as exc:
+        logger.warning("LQM ping summary for %s failed: %s", node_name, exc)
+        lqm_pings = {}
 
     results = []
     for link in deduped:
         try:
             analysis = analyze_link(node_name, link, quality_history, ping_history)
+            analysis['lqm_ping'] = lqm_pings.get(analysis['peer'])
             results.append(analysis)
         except Exception as exc:
             logger.warning("Health analysis failed for %s -> %s: %s",

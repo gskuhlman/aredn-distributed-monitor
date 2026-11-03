@@ -87,6 +87,10 @@ const LinkDiagnosis = {
             <details class="diag-details" id="diag-budget">
                 <summary>Link budget &amp; terrain <small class="form-hint">predicted vs. measured signal, Fresnel zone</small></summary>
                 <div id="diag-budget-body"><p class="log-empty">Open to compute (looks up ground elevations once).</p></div>
+            </details>
+            <details class="diag-details" id="diag-prom" open>
+                <summary>MCS, rate &amp; LQM ping <small class="form-hint">Prometheus station samples and LQM ping quality, plus per-link alerts</small></summary>
+                <div id="diag-prom-body"><p class="log-empty">Loading...</p></div>
             </details>`;
         // A wired pair's verdict points at the radios' other RF links.
         el.querySelectorAll('.diag-pair-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -101,6 +105,10 @@ const LinkDiagnosis = {
                     LinkBudget.renderInto(document.getElementById('diag-budget-body'), this.pair[0], this.pair[1], d.hours);
                 }
             });
+        }
+        // MCS / rate / LQM ping per direction and link alert rules (link-prom.js).
+        if (typeof LinkProm !== 'undefined' && this.pair) {
+            LinkProm.renderInto(document.getElementById('diag-prom-body'), this.pair[0], this.pair[1], d.hours);
         }
         // Operator notes, kept apart from the computed findings above.
         if (typeof Notes !== 'undefined' && this.pair) {

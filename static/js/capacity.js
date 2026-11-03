@@ -81,7 +81,8 @@ const CapacityPanel = {
         document.getElementById('cap-table').innerHTML = `<div class="table-scroll-wrapper"><table class="info-table diag-table cap-table">
             <thead><tr><th>Link (iPerf direction)</th><th title="Overnight median, else 90th percentile">Capacity</th><th>Latest</th>
             <th>Daytime median</th><th>PHY</th><th title="iPerf / PHY rate">Efficiency</th>
-            <th title="Estimated from LQM packet counters (median / 90th percentile)">Traffic</th><th>Spare</th>
+            <th title="Estimated from LQM packet counters (median / 90th percentile)">Traffic (est.)</th>
+            <th title="Measured by Prometheus: the radio's wlan bytes split by station packets (median / 90th percentile)">Traffic (measured)</th><th>Spare</th>
             <th>Nightly</th><th>Runs</th><th></th></tr></thead>
             <tbody>${rows.map(l => `<tr data-a="${this.esc(l.source)}" data-b="${this.esc(l.target)}" class="${l.flag ? 'rel-row rel-row-adjacent' : ''}">
                 <td>${this.esc(l.source)} → ${this.esc(l.target)}${l.backbone ? ' <small class="hs-infra">backbone</small>' : ''}
@@ -91,11 +92,26 @@ const CapacityPanel = {
                 <td>${n(l.daytime_median)}</td><td>${n(l.phy_mbps)}</td>
                 <td>${l.efficiency_pct != null ? l.efficiency_pct + '%' : '-'}</td>
                 <td>${l.traffic_mbps != null ? `${l.traffic_mbps} / ${l.traffic_peak_mbps}` : '-'}</td>
+                <td>${l.measured_mbps != null ? `${l.measured_mbps} / ${l.measured_peak_mbps}` : (l.measured_pps != null ? `${l.measured_pps} pkt/s` : '-')}
+                    ${l.estimate_off_pct != null && Math.abs(l.estimate_off_pct) >= 50 ? `<div class="form-hint" title="Estimate vs measured">estimate ${l.estimate_off_pct > 0 ? '+' : ''}${l.estimate_off_pct}%</div>` : ''}</td>
                 <td>${l.spare_mbps != null ? `<strong>${l.spare_mbps}</strong>` : '-'}</td>
                 <td>${this.spark(l.nightly)}</td>
                 <td>${l.runs}${l.failed ? ` <small>(${l.failed} failed)</small>` : ''}</td>
                 <td>${l.key ? `<button class="btn btn-small btn-secondary" data-cap-off="1" data-a="${this.esc(l.source)}" data-b="${this.esc(l.target)}"
-                    title="Leave this pair out of the overnight schedule">Unschedule</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+                    title="Leave this pair out of the overnight schedule">Unschedule</button>` : ''}</td></tr>`).join('')}</tbody></table></div>
+            ${this.busiest(d)}`;
+    },
+
+    busiest(d) {
+        if (!d.prometheus) return '';
+        const rows = (d.busiest || []).filter(r => r.peak_mbps > 0).slice(0, 15);
+        if (!rows.length) return '<p class="form-hint">Busiest radios: no Prometheus traffic samples yet.</p>';
+        return `<h4 class="subsection-heading">Busiest radios (measured, last 6 h, Prometheus)</h4>
+            <div class="table-scroll-wrapper"><table class="info-table diag-table"><thead><tr><th>Radio</th>
+            <th>Total Mbps (median)</th><th>Peak</th><th>Receive</th><th>Transmit</th><th>Drops/s</th><th>Errors/s</th></tr></thead>
+            <tbody>${rows.map(r => `<tr><td><a href="/nodes/${encodeURIComponent(r.node)}">${this.esc(r.node)}</a></td>
+                <td><strong>${r.total_mbps}</strong></td><td>${r.peak_mbps}</td><td>${r.rx_mbps}</td><td>${r.tx_mbps}</td>
+                <td>${r.drops_ps}</td><td>${r.errors_ps}</td></tr>`).join('')}</tbody></table></div>`;
     },
 
     async showLink(a, b) {

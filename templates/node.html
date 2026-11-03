@@ -80,6 +80,13 @@
                 </div>
             </section>
 
+            <!-- Prometheus details (TODO #63/#64/#68, node-prom.js) -->
+            <section class="node-page-section">
+                <h2>Prometheus Details</h2>
+                <div id="node-prom"><p class="loading">Loading...</p></div>
+                <p id="node-embed-links" class="form-hint"></p>
+            </section>
+
             <section class="node-page-section">
                 <h2>Recent Link Metrics <label class="header-checkbox wx-inline" title="Overlay NWS rain, temperature and wind on the quality and SNR charts">
                     <input type="checkbox" id="np-weather-toggle"> Weather</label></h2>
@@ -224,5 +231,6 @@
     <script src="{{ url_for('static', filename='js/hygiene.js') }}"></script>
     <script src="{{ url_for('static', filename='js/new-nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/node-extras.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/node-prom.js') }}"></script>
 </body>
 </html>

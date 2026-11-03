@@ -171,7 +171,9 @@ def node_health_fields(data):
         uptime_seconds = _parse_uptime_seconds(uptime_raw)
 
     memory = data.get('memory', {}) or sysinfo.get('memory', {}) or {}
-    mem_free = _to_int(memory.get('freeram') or memory.get('free') or memory.get('memfree'))
+    # AREDN sends free memory as sysinfo.freememory (KB, a string); no total.
+    mem_free = _to_int(memory.get('freeram') or memory.get('free') or memory.get('memfree')
+                       or sysinfo.get('freememory'))
     mem_total = _to_int(memory.get('totalram') or memory.get('total') or memory.get('memtotal'))
 
     meshrf = data.get('meshrf', {}) or {}

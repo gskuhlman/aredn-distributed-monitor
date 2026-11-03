@@ -24,6 +24,7 @@ import logging
 import atexit
 import time
 import os
+import html
 from datetime import datetime, timedelta
 
 import config
@@ -46,6 +47,7 @@ import airtime
 import change_log
 import notes
 import channel_map
+import spectrum_view
 import channel_planner
 import link_watch
 import route_watch
@@ -82,6 +84,12 @@ import distributed_status
 import welcome
 import align
 import club_report
+import prom_source
+import prom_watch
+import link_alerts
+import phones
+import link_potential
+import embeds
 
 # Configure logging
 logging.basicConfig(
@@ -283,13 +291,17 @@ def scheduled_scan():
                 logger.error("Link watch error: %s", exc)
         # --- end Link Watch ---
 
-        # Channel-plan rollouts and new-node welcomes, from what this scan stored.
-        for task in (rollout.check, welcome.after_scan):
+        # Channel-plan rollouts, new-node welcomes and per-link alert rules, from what this scan stored.
+        for task in (rollout.check, welcome.after_scan, link_alerts.evaluate):
             try:
                 for event in task():
                     socketio.emit('new_event', event)
             except Exception as exc:
                 logger.error("%s error: %s", task.__module__, exc)
+
+        # Phone connectivity: refresh the phone list and ping every phone once (off the scan path).
+        if config.PHONE_PING_ENABLED:
+            socketio.start_background_task(run_phone_pings_task)
 
         # Kick off high-rate incident probing for any watched link in trouble.
         if config.INCIDENT_MODE_ENABLED:
@@ -1346,6 +1358,182 @@ def api_channel_map_what_if():
         overrides=body.get('overrides') or {}, include_inactive=bool(body.get('include_inactive'))))
 
 
+@app.route('/api/spectrum', methods=['GET', 'POST'])
+def api_spectrum():
+    """Spectrum by location: per site (and per scanned radio) which 5 MHz
+    slots are ours, busy, partly used or free. GET ?scope=infrastructure|all
+    &low&high&include_inactive; POST the same as JSON plus overrides (what-if
+    lines, nothing is saved)."""
+    body = (request.get_json(silent=True) or {}) if request.method == "POST" else request.args
+    try:
+        low = float(body.get('low') or spectrum_view.DEFAULT_BAND[0])
+        high = float(body.get('high') or spectrum_view.DEFAULT_BAND[1])
+    except (TypeError, ValueError):
+        return jsonify({'error': 'low/high must be MHz'}), 400
+    if high - low < 20 or high - low > 1000:
+        return jsonify({'error': 'band must be 20 to 1000 MHz wide'}), 400
+    inactive = body.get('include_inactive')
+    at = None
+    if body.get('at'):
+        text = str(body['at']).replace('T', ' ').strip()
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M'):
+            try:
+                at = datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                pass
+        if at is None:
+            return jsonify({'error': 'at must be YYYY-MM-DD HH:MM[:SS]'}), 400
+    return jsonify(spectrum_view.build(
+        scope='all' if body.get('scope') == 'all' else 'infrastructure', band=(low, high),
+        overrides=(body.get('overrides') or None) if request.method == 'POST' else None,
+        include_inactive=inactive in (True, '1', 'true'), at=at))
+
+
+@app.route('/api/wifi-survey/tonight', methods=['GET', 'POST', 'DELETE'])
+def api_wifi_survey_tonight():
+    """Radios queued for tonight's WiFi survey run (scan reminders). POST
+    {radios: [...], reason?} adds, DELETE {radios?} removes (all without)."""
+    if request.method == 'GET':
+        return jsonify({'queued': wifi_survey.queued(), 'hour': config.WIFI_SURVEY_HOUR})
+    body = request.get_json(silent=True) or {}
+    radios = body.get('radios')
+    if request.method == 'DELETE':
+        removed = wifi_survey.unqueue(radios if isinstance(radios, list) else None)
+        return jsonify({'removed': removed, 'queued': wifi_survey.queued()})
+    if not isinstance(radios, list) or not radios:
+        return _json_error('radios (a list) is required')
+    added = wifi_survey.queue_tonight(radios, (body.get('reason') or '').strip() or None)
+    return jsonify({'added': added, 'queued': wifi_survey.queued(), 'hour': config.WIFI_SURVEY_HOUR})
+
+
+# ---- Prometheus details, alarms, per-link alerts, link potential (TODO #63-74) ----
+@app.route('/api/prometheus/status')
+def api_prometheus_status():
+    return jsonify(prom_source.status())
+
+
+@app.route('/api/prometheus/node/<name>')
+def api_prometheus_node(name):
+    """Extra details for one node read from Prometheus now (node page)."""
+    hours = max(1, min(_hours_arg(24), 24 * 7))
+    out = prom_source.node_details(name, hours=hours)
+    out['alarms'] = prom_watch.active(name.lower())
+    out['stored'] = prom_source.node_history(name.lower(), hours=72)[-1:] or None
+    return jsonify(out)
+
+
+@app.route('/api/prometheus/link/<a>/<b>')
+def api_prometheus_link(a, b):
+    """Per direction: station MCS / rate / signal and LQM ping quality."""
+    return jsonify(prom_source.link_series(a.lower(), b.lower(), hours=max(1, min(_hours_arg(24), 24 * 31))))
+
+
+def run_prometheus_task():
+    try:
+        result = prom_source.snapshot()
+        for event in result['events']:
+            socketio.emit('new_event', event)
+        return result
+    except Exception as exc:
+        logger.error("Prometheus snapshot error: %s", exc)
+        return {'nodes': 0, 'events': [], 'error': str(exc)}
+
+
+@app.route('/api/prometheus/snapshot', methods=['POST'])
+def api_prometheus_snapshot():
+    result = run_prometheus_task()
+    if result.get('error'):
+        return jsonify(result), 502 if result['error'] != 'disabled' else 409
+    return jsonify(result)
+
+
+@app.route('/api/prometheus/alarms')
+def api_prometheus_alarms():
+    return jsonify({'alarms': prom_watch.active(request.args.get('node') or None)})
+
+
+@app.route('/api/link-alerts', methods=['GET', 'POST'])
+def api_link_alerts():
+    if request.method == 'GET':
+        return jsonify({'rules': link_alerts.list_rules()})
+    try:
+        rule_id = link_alerts.save_rule(request.get_json(silent=True) or {})
+    except ValueError as exc:
+        return _json_error(str(exc))
+    return jsonify({'id': rule_id, 'rules': link_alerts.list_rules()})
+
+
+@app.route('/api/link-alerts/<int:rule_id>', methods=['PATCH', 'DELETE'])
+def api_link_alert(rule_id):
+    if request.method == 'DELETE':
+        if not link_alerts.delete_rule(rule_id):
+            return jsonify({'error': 'no such rule'}), 404
+        return jsonify({'deleted': rule_id, 'rules': link_alerts.list_rules()})
+    try:
+        link_alerts.save_rule(request.get_json(silent=True) or {}, rule_id=rule_id)
+    except ValueError as exc:
+        return _json_error(str(exc))
+    except LookupError:
+        return jsonify({'error': 'no such rule'}), 404
+    return jsonify({'rules': link_alerts.list_rules()})
+
+
+@app.route('/api/link-alerts/clients/<node>')
+def api_link_alert_clients(node):
+    """RF clients of a radio, to add one rule per client of a sector."""
+    return jsonify({'node': node.lower(), 'clients': link_alerts.sector_clients(node.lower())})
+
+
+@app.route('/api/reports/link-potential')
+def api_link_potential():
+    return jsonify(link_potential.report(hours=max(1, min(_hours_arg(24), 24 * 31))))
+
+
+# ---- Embeddable panels (embeds.py) ----
+def _embed_args():
+    try:
+        refresh = max(0, min(int(request.args.get('refresh', 120)), 3600))
+    except ValueError:
+        refresh = 120
+    return refresh, 'dark' if request.args.get('theme') == 'dark' else 'light'
+
+
+def _embed_response(body, mimetype):
+    resp = app.response_class(body, mimetype=mimetype)
+    resp.headers['Cache-Control'] = 'max-age=60'
+    resp.headers['Content-Security-Policy'] = "frame-ancestors *"
+    return resp
+
+
+@app.route('/embed/node/<name>')
+def embed_node(name):
+    card = embeds.node_card(name)
+    if card is None:
+        return _embed_response(f'<p>Unknown node {html.escape(name)}</p>', 'text/html'), 404
+    refresh, theme = _embed_args()
+    return _embed_response(embeds.render(card, request.host_url, refresh, theme), 'text/html')
+
+
+@app.route('/embed/site/<code>')
+def embed_site(code):
+    card = embeds.site_card(code)
+    if card is None:
+        return _embed_response(f'<p>Unknown site {html.escape(code)}</p>', 'text/html'), 404
+    refresh, theme = _embed_args()
+    return _embed_response(embeds.render(card, request.host_url, refresh, theme), 'text/html')
+
+
+@app.route('/embed/node/<name>/badge.svg')
+def embed_node_badge(name):
+    return _embed_response(embeds.node_badge(name), 'image/svg+xml')
+
+
+@app.route('/embed/site/<code>/badge.svg')
+def embed_site_badge(code):
+    return _embed_response(embeds.site_badge(code), 'image/svg+xml')
+
+
 # ---- Channel planner (TODO #4) ----
 @app.route('/api/channel-planner', methods=['POST'])
 def api_channel_planner():
@@ -2224,6 +2412,80 @@ def api_voip_ping_all():
     return jsonify(response)
 
 
+def run_phone_pings_task():
+    try:
+        result = phones.run()
+    except Exception as exc:
+        logger.error("Phone pings error: %s", exc)
+        return
+    for event in result['events']:
+        socketio.emit('new_event', event)
+    if result.get('checked'):
+        socketio.emit('phones_update', {'checked': result['checked']})
+
+
+@app.route('/api/voip/phones', methods=['GET', 'POST'])
+def api_voip_phones():
+    """Phone connectivity list (GET ?hours=24) or add a phone (POST {ip, name?, extension?, node_name?, kind?, note?})."""
+    if request.method == 'POST':
+        try:
+            phone_id = phones.save_phone(request.get_json(silent=True) or {})
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+        return jsonify({'id': phone_id})
+    return jsonify(phones.report(hours=max(1, min(request.args.get('hours', 24, type=int), 24 * 31))))
+
+
+@app.route('/api/voip/phones/<int:phone_id>', methods=['PATCH', 'DELETE'])
+def api_voip_phone(phone_id):
+    try:
+        if request.method == 'DELETE':
+            if not phones.delete_phone(phone_id):
+                raise KeyError(phone_id)
+            return jsonify({'deleted': phone_id})
+        phones.save_phone(request.get_json(silent=True) or {}, phone_id=phone_id)
+    except KeyError:
+        return jsonify({'error': 'no such phone'}), 404
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({'id': phone_id})
+
+
+@app.route('/api/voip/phones/<int:phone_id>/ping', methods=['POST'])
+def api_voip_phone_ping(phone_id):
+    """Ping one phone now; the result is shown, not stored (503 when the starting node is unreachable)."""
+    try:
+        result = phones.ping_one(phone_id)
+    except KeyError:
+        return jsonify({'error': 'no such phone'}), 404
+    if result.get('aborted'):
+        return jsonify({'error': gateway.unreachable_message(), **result}), 503
+    return jsonify(result)
+
+
+@app.route('/api/voip/phones/import', methods=['POST'])
+def api_voip_phones_import():
+    """Phones from pasted PBX output (pjsip show contacts / sip show peers / ext,name,ip lines)."""
+    return jsonify(phones.import_pbx((request.get_json(silent=True) or {}).get('text', '')))
+
+
+@app.route('/api/voip/phones/run', methods=['POST'])
+def api_voip_phones_run():
+    """Refresh the list and ping every phone now (503 when the starting node is unreachable)."""
+    result = phones.run()
+    for event in result['events']:
+        socketio.emit('new_event', event)
+    if result.get('aborted') and result['aborted'] != 'disabled':
+        return jsonify({'error': gateway.unreachable_message(), 'aborted': result['aborted']}), 503
+    return jsonify(result)
+
+
+@app.route('/api/voip/hosts')
+def api_voip_hosts():
+    """Mesh hosts not on the phone list yet (?q=), for adding one by hand."""
+    return jsonify({'hosts': phones.hosts(request.args.get('q', ''))})
+
+
 @app.route('/api/voip/call-quality/<source>/<target>', methods=['POST'])
 def api_voip_call_quality(source, target):
     """Run live end-to-end VOIP diagnostics between two endpoints."""
@@ -2697,6 +2959,7 @@ def cleanup_history_task():
     """Background task for cleaning up old history"""
     rf_stats.cleanup_old_history()
     capacity.cleanup()
+    phones.cleanup()
 
 
 def start_scheduler():
@@ -2755,6 +3018,8 @@ def start_scheduler():
     service_check.install(scheduler, run_service_check_task)
     db_care.install(scheduler)
     wifi_survey.install(scheduler)
+    # Round 4: extra node details from Prometheus (alarms after each snapshot).
+    prom_source.install(scheduler, run_prometheus_task)
 
     scheduler.start()
     logger.info("Scheduler started")

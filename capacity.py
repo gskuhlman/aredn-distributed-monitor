@@ -22,6 +22,10 @@ Capacity per key link direction:
     the last TRAFFIC_HOURS (LQM counters) x FRAME_BYTES, skipping intervals
     with an iPerf test; spare = capacity - median traffic (AREDN reports no
     channel busy, so this is an estimate);
+  - measured traffic (TODO #65), next to the estimate: Prometheus wlan bytes
+    of the radio, split by station packets (`_measured`), plus the busiest
+    radios; the estimate covers every RF link, the measurement only what
+    Prometheus scrapes, and together they show when the estimate is off;
   - nightly medians for a trend, flagged when last night is
     CAPACITY_DROP_PCT below the usual.
 """
@@ -38,6 +42,7 @@ import database
 import gateway
 import maintenance
 import path_view
+import prom_source
 
 logger = logging.getLogger(__name__)
 TS_FMT = '%Y-%m-%d %H:%M:%S'
@@ -319,6 +324,55 @@ def _traffic(conn, a, b, since, tests):
     return round(median(rates), 3), round(_pct(rates, 90), 3)
 
 
+def _measured(conn, a, b, since):
+    """(median, 90th percentile) Mbps a -> b measured by Prometheus (TODO #65):
+    each snapshot's wlan transmit bytes of radio a, split by a's stations'
+    transmit packet share (all of it for a radio with one station). None when
+    Prometheus has no samples of a hearing b."""
+    rows = conn.execute('''
+        SELECT s.timestamp, s.tx_pps, (SELECT SUM(x.tx_pps) FROM prom_station_samples x
+                                       WHERE x.node_name = s.node_name AND x.timestamp = s.timestamp) AS all_pps,
+               (SELECT SUM(i.tx_bps) FROM prom_iface_samples i
+                WHERE i.node_name = s.node_name AND i.timestamp = s.timestamp AND i.kind = 'rf') AS rf_bps
+        FROM prom_station_samples s
+        WHERE s.node_name = ? AND s.peer = ? AND s.timestamp >= ? AND s.tx_pps IS NOT NULL''', (a, b, since)).fetchall()
+    rates, pps = [], []
+    for r in rows:
+        pps.append(r['tx_pps'])
+        if r['rf_bps'] is None or not r['all_pps']:
+            continue
+        rates.append(r['rf_bps'] * (r['tx_pps'] / r['all_pps']) / 1e6)
+    if not rates:
+        return None, None, (round(median(pps), 1) if pps else None)
+    return round(median(rates), 3), round(_pct(rates, 90), 3), round(median(pps), 1)
+
+
+def busiest_radios(hours=TRAFFIC_HOURS):
+    """Radios ranked by measured RF traffic (Prometheus wlan bytes), with
+    drops and errors per second."""
+    prom_source.ensure_tables()
+    since = (_now() - timedelta(hours=hours)).strftime(TS_FMT)
+    with database.get_connection() as conn:
+        rows = conn.execute('''SELECT node_name, timestamp, SUM(rx_bps) AS rx, SUM(tx_bps) AS tx,
+                                       SUM(drops_ps) AS drops, SUM(errors_ps) AS errors
+                                FROM prom_iface_samples WHERE kind = 'rf' AND timestamp >= ?
+                                GROUP BY node_name, timestamp''', (since,)).fetchall()
+    per = defaultdict(list)
+    for r in rows:
+        per[r['node_name']].append(r)
+    out = []
+    for node, rs in per.items():
+        tot = [((r['rx'] or 0) + (r['tx'] or 0)) / 1e6 for r in rs]
+        out.append({'node': node, 'samples': len(rs),
+                    'rx_mbps': round(median((r['rx'] or 0) / 1e6 for r in rs), 3),
+                    'tx_mbps': round(median((r['tx'] or 0) / 1e6 for r in rs), 3),
+                    'total_mbps': round(median(tot), 3), 'peak_mbps': round(max(tot), 3),
+                    'drops_ps': round(median(r['drops'] or 0 for r in rs), 3),
+                    'errors_ps': round(median(r['errors'] or 0 for r in rs), 3)})
+    out.sort(key=lambda x: -x['total_mbps'])
+    return out
+
+
 def report(hours=168):
     ensure_tables()
     now = _now()
@@ -329,11 +383,14 @@ def report(hours=168):
     keys = key_links()
     key_set = {(a, b) for a, b, _ in keys}
     results = defaultdict(list)
+    prom_source.ensure_tables()
     with database.get_connection() as conn:
         for r in conn.execute('SELECT * FROM iperf_results WHERE timestamp >= ? ORDER BY timestamp',
                               (min(since, week),)):
             results[(r['source'], r['target'])].append(dict(r))
         rows_out = []
+        has_prom = conn.execute('SELECT 1 FROM prom_station_samples WHERE timestamp >= ? LIMIT 1',
+                                (traffic_since,)).fetchone() is not None
         pairs = set(key_set) | {k for k, v in results.items() if any(x['timestamp'] >= since for x in v)}
         for a, b in pairs:
             runs = results.get((a, b), [])
@@ -358,6 +415,8 @@ def report(hours=168):
             tests = [datetime.strptime(x['timestamp'][:19], TS_FMT)
                      for x in results.get((a, b), []) + results.get((b, a), []) if x['timestamp'] >= traffic_since]
             traffic, traffic_peak = _traffic(conn, a, b, traffic_since, tests)
+            measured, measured_peak, measured_pps = (_measured(conn, a, b, traffic_since)
+                                                     if has_prom else (None, None, None))
             eff = [x['mbps'] / x['tx_bitrate'] * 100 for x in ok if x['tx_bitrate']]
             flag = None
             if len(nightly) >= 3:
@@ -377,6 +436,9 @@ def report(hours=168):
                 'capacity': cap, 'capacity_basis': basis, 'phy_mbps': phy,
                 'efficiency_pct': round(median(eff)) if eff else None,
                 'traffic_mbps': traffic, 'traffic_peak_mbps': traffic_peak,
+                'measured_mbps': measured, 'measured_peak_mbps': measured_peak, 'measured_pps': measured_pps,
+                'estimate_off_pct': (round((traffic - measured) / measured * 100)
+                                     if traffic is not None and measured else None),
                 'spare_mbps': round(max(0.0, cap - traffic), 1) if cap is not None and traffic is not None else None,
                 'utilization_pct': round(traffic / cap * 100, 1) if cap and traffic is not None else None,
                 'nightly': nightly, 'flag': flag,
@@ -388,7 +450,8 @@ def report(hours=168):
                          'start': f'{sh:02d}:{sm:02d}', 'end': config.IPERF_SCHEDULE_END,
                          'rounds': config.IPERF_SCHEDULE_ROUNDS, 'key_links': len(keys),
                          'state': dict(schedule_state)},
-            'frame_bytes': FRAME_BYTES, 'drop_pct': config.CAPACITY_DROP_PCT}
+            'frame_bytes': FRAME_BYTES, 'drop_pct': config.CAPACITY_DROP_PCT,
+            'busiest': busiest_radios() if prom_source.enabled() else [], 'prometheus': prom_source.enabled()}
 
 
 def link_series(source, target, hours=168):

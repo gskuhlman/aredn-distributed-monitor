@@ -26,7 +26,8 @@ TS_FMT = '%Y-%m-%d %H:%M:%S'
 # Modules that create their tables once per process: reset per test database.
 TABLE_FLAGS = ('notes', 'rollout', 'change_verdict', 'service_check', 'welcome', 'wifi_survey', 'auth',
                'route_watch', 'weekly_report', 'capacity', 'link_watch', 'collector_health', 'link_budget',
-               'maintenance', 'notify', 'weather')
+               'maintenance', 'notify', 'weather', 'routing_errors', 'prom_source', 'prom_watch',
+               'link_alerts', 'phones')
 
 
 def ts(minutes_ago=0):

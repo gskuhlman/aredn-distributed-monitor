@@ -75,3 +75,60 @@ def test_hygiene_score():
     bare = hygiene.score_node(dict(n, lat=None, lon=None, description='', antenna_azimuth=None),
                               (4, 26, 7, 0), datetime.now(), {})
     assert bare['score'] < 70 and len(bare['fixes']) >= 4
+
+
+IW_WIDE = """BSS 32:74:c5:4f:5e:4d(on wlan0)
+	freq: 5680
+	signal: -81.00 dBm
+	SSID: Rackle5g
+	HT operation:
+		 * primary channel: 136
+		 * secondary channel offset: below
+	VHT operation:
+		 * channel width: 1 (80 MHz)
+		 * center freq segment 1: 138
+		 * center freq segment 2: 0
+BSS 58:c1:7a:cd:1c:41(on wlan0)
+	freq: 5640
+	signal: -78.00 dBm
+	SSID: DIRECTVAEP
+	HT operation:
+		 * secondary channel offset: above
+	VHT operation:
+		 * channel width: 0 (20 or 40 MHz)
+BSS aa:aa:aa:aa:aa:01(on wlan0)
+	freq: 5180
+	signal: -70.00 dBm
+"""
+
+
+def test_parse_iw_widths():
+    aps = {a['ssid']: (a['low'], a['high']) for a in wifi_survey.parse_iw(IW_WIDE)}
+    assert aps['Rackle5g'] == (5650, 5730)          # 80 MHz on 132-144
+    assert aps['DIRECTVAEP'] == (5630, 5670)        # 40 MHz, secondary above
+    assert aps[None] == (None, None)                # not stated: planner assumes 20 MHz
+
+
+IW_BAD_SEGMENT = """BSS 58:d6:1f:34:e7:5a(on wlan0)
+        freq: 5660.0
+        signal: -65.00 dBm
+        HT operation:
+                 * primary channel: 132
+                 * secondary channel offset: above
+        VHT operation:
+                 * channel width: 1 (80 MHz)
+                 * center freq segment 1: 58
+                 * center freq segment 2: 22
+"""
+
+
+def test_parse_iw_segment_outside_primary_falls_back_to_ht():
+    ap, = wifi_survey.parse_iw(IW_BAD_SEGMENT)
+    assert (ap['low'], ap['high']) == (5650, 5690)
+
+
+def test_health_reads_aredn_freememory():
+    import observations
+    h = observations.node_health_fields({'sysinfo': {'uptime': '0 days, 14:43', 'loads': [0.1, 0.0, 0.0],
+                                                     'freememory': '439568'}})
+    assert h['mem_free'] == 439568 and h['mem_total'] is None

@@ -12,7 +12,9 @@ Getting a scan:
                    tried in order) and parses it. A scan takes the radio off
                    its channel for a moment, so it only runs on request, or
                    nightly at WIFI_SURVEY_HOUR for infrastructure radios when
-                   WIFI_SURVEY_ENABLED. Which page a firmware offers varies;
+                   WIFI_SURVEY_ENABLED, plus radios an operator queued for
+                   tonight (`wifi_survey_queue`, Spectrum scan reminders).
+                   Which page a firmware offers varies;
                    when none answers, import the text instead;
   import_text()    parses pasted `iw dev wlan0 scan` output or the text of a
                    node's scan page (tables with signal / channel or
@@ -62,6 +64,12 @@ def ensure_tables():
             )
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_wifi_survey_node ON wifi_survey(node_name, taken_at)')
+        conn.execute('''CREATE TABLE IF NOT EXISTS wifi_survey_queue (
+                            node_name TEXT PRIMARY KEY, requested_at DATETIME, reason TEXT)''')
+        cols = {r[1] for r in conn.execute('PRAGMA table_info(wifi_survey)')}
+        for col in ('low_mhz', 'high_mhz'):        # occupied span, when the scan says (iw)
+            if col not in cols:
+                conn.execute(f'ALTER TABLE wifi_survey ADD COLUMN {col} REAL')
     _tables_ready = True
 
 
@@ -78,17 +86,59 @@ def channel_to_freq(ch):
 
 # ------------------------------------------------------------- parsers ---
 
+def _iw_span(ap):
+    """(low, high) MHz an AP occupies from its HT/VHT operation lines, or
+    (None, None) when the scan didn't say (then AP_WIDTH_MHZ is assumed)."""
+    f = ap.get('frequency')
+    if not f:
+        return None, None
+    width, seg1, seg2 = ap.pop('_vht_width', None), ap.pop('_seg1', None), ap.pop('_seg2', None)
+    offset = ap.pop('_ht_offset', None)
+    if width and seg1:
+        mhz, centre = 80, seg1
+        if width == 2:
+            mhz = 160
+        elif width == 1 and seg2 and abs(seg2 - seg1) == 8:     # 160 MHz signalled the newer way
+            mhz, centre = 160, seg2
+        c = 5000 + 5 * centre
+        if c - mhz / 2 < f < c + mhz / 2:
+            return c - mhz / 2, c + mhz / 2
+        # Some APs advertise segments that don't contain their own primary
+        # channel (seen: primary 132 with "segment 1: 58"); trust HT instead.
+    if offset == 'above':
+        return f - 10, f + 30
+    if offset == 'below':
+        return f - 30, f + 10
+    if offset:
+        return f - 10, f + 10
+    return None, None
+
+
 def parse_iw(text):
-    """`iw dev <if> scan` output -> [{bssid, ssid, frequency, signal}]."""
+    """`iw dev <if> scan` output -> [{bssid, ssid, frequency, signal, low, high}].
+    Only the BSS / freq / signal / SSID and HT/VHT operation lines are read,
+    so the full output (thousands of lines) or a grep of those lines works."""
     out, cur = [], None
     for line in text.splitlines():
-        s = line.strip()
+        s = line.strip().lstrip('* ').strip()
         m = re.match(r'^BSS ([0-9a-f:]{17})', s, re.I)
         if m:
             cur = {'bssid': m.group(1).lower(), 'ssid': None, 'frequency': None, 'signal': None}
             out.append(cur)
             continue
         if cur is None:
+            continue
+        m = re.match(r'secondary channel offset:\s*(above|below|no secondary)', s)
+        if m:
+            cur['_ht_offset'] = m.group(1)
+            continue
+        m = re.match(r'channel width:\s*(\d+)', s)
+        if m:
+            cur['_vht_width'] = int(m.group(1))
+            continue
+        m = re.match(r'center freq segment ([12]):\s*(\d+)', s)
+        if m:
+            cur['_seg' + m.group(1)] = int(m.group(2))
             continue
         if s.startswith('freq:'):
             try:
@@ -100,6 +150,8 @@ def parse_iw(text):
             cur['signal'] = float(m.group(1)) if m else None
         elif s.startswith('SSID:'):
             cur['ssid'] = s.split(':', 1)[1].strip()
+    for ap in out:
+        ap['low'], ap['high'] = _iw_span(ap)
     return [x for x in out if x['frequency']]
 
 
@@ -196,9 +248,10 @@ def store(node, aps, source):
             ssid = ap.get('ssid')
             is_mesh = bool(ssid and (ssid.lower() in mesh or ssid.lower().startswith('aredn')))
             rows.append((node, now, source, ap.get('bssid'), ssid, f,
-                         ia.freq_to_channel(f) if f else None, ap.get('signal'), int(is_mesh)))
+                         ia.freq_to_channel(f) if f else None, ap.get('signal'), int(is_mesh),
+                         ap.get('low'), ap.get('high')))
         conn.executemany('''INSERT INTO wifi_survey (node_name, taken_at, source, bssid, ssid, frequency, channel,
-                                signal, is_mesh) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', rows)
+                                signal, is_mesh, low_mhz, high_mhz) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', rows)
     return {'node': node, 'taken_at': now, 'source': source, 'aps': len(rows),
             'non_mesh': sum(1 for r in rows if not r[8])}
 
@@ -240,16 +293,19 @@ def scan_node(node):
 
 # ------------------------------------------------------------ queries ---
 
-def latest(conn=None, max_age_days=None, nodes=None):
-    """Newest scan per node within max_age_days: {node: [ap rows]}."""
+def latest(conn=None, max_age_days=None, nodes=None, at=None):
+    """Newest scan per node within max_age_days (of `at`, default now):
+    {node: [ap rows]}."""
     if conn is None:
         ensure_tables()
         with database.get_connection() as c:
-            return latest(c, max_age_days, nodes)
+            return latest(c, max_age_days, nodes, at)
     ensure_tables()
-    since = (datetime.now() - timedelta(days=max_age_days or config.WIFI_SURVEY_MAX_AGE_DAYS)).strftime(TS_FMT)
+    at = at or datetime.now()
+    since = (at - timedelta(days=max_age_days or config.WIFI_SURVEY_MAX_AGE_DAYS)).strftime(TS_FMT)
     newest = {r[0]: r[1] for r in conn.execute(
-        'SELECT node_name, MAX(taken_at) FROM wifi_survey WHERE taken_at >= ? GROUP BY node_name', (since,))}
+        'SELECT node_name, MAX(taken_at) FROM wifi_survey WHERE taken_at >= ? AND taken_at <= ? GROUP BY node_name',
+        (since, at.strftime(TS_FMT)))}
     out = {}
     for n, at in newest.items():
         if nodes is not None and n not in nodes:
@@ -257,6 +313,63 @@ def latest(conn=None, max_age_days=None, nodes=None):
         out[n] = [dict(r) for r in conn.execute(
             'SELECT * FROM wifi_survey WHERE node_name = ? AND taken_at = ? ORDER BY signal DESC', (n, at))]
     return out
+
+
+def previous(conn, node, before):
+    """The scan of `node` just before `before` (taken_at), or []."""
+    ensure_tables()
+    r = conn.execute('SELECT MAX(taken_at) FROM wifi_survey WHERE node_name = ? AND taken_at < ?',
+                     (node, before)).fetchone()
+    if not r or not r[0]:
+        return []
+    return [dict(x) for x in conn.execute('SELECT * FROM wifi_survey WHERE node_name = ? AND taken_at = ?',
+                                          (node, r[0]))]
+
+
+def last_scans(conn):
+    """{node: newest taken_at} over all time (scan reminders)."""
+    ensure_tables()
+    return {r[0]: r[1] for r in conn.execute('SELECT node_name, MAX(taken_at) FROM wifi_survey GROUP BY node_name')}
+
+
+def scan_times(conn, nodes=None):
+    """{node: [taken_at, ...]} newest first (Spectrum history picker)."""
+    ensure_tables()
+    out = {}
+    for r in conn.execute('SELECT DISTINCT node_name, taken_at FROM wifi_survey ORDER BY taken_at DESC'):
+        if nodes is None or r[0] in nodes:
+            out.setdefault(r[0], []).append(r[1])
+    return out
+
+
+# ------------------------------------------------- tonight's scan queue ---
+
+def queue_tonight(radios, reason=None):
+    """Ask for these radios to be scanned at the next WIFI_SURVEY_HOUR run
+    (an operator request; runs even when the nightly survey is off)."""
+    ensure_tables()
+    now = datetime.now().strftime(TS_FMT)
+    with database.get_connection() as conn:
+        known = {r[0] for r in conn.execute('SELECT name FROM nodes')}
+        names = [n.strip().lower() for n in radios if n and n.strip().lower() in known]
+        conn.executemany('INSERT OR REPLACE INTO wifi_survey_queue (node_name, requested_at, reason) VALUES (?, ?, ?)',
+                         [(n, now, reason) for n in names])
+    return names
+
+
+def unqueue(radios=None):
+    ensure_tables()
+    with database.get_connection() as conn:
+        if radios is None:
+            return conn.execute('DELETE FROM wifi_survey_queue').rowcount
+        return sum(conn.execute('DELETE FROM wifi_survey_queue WHERE node_name = ?', (n.lower(),)).rowcount
+                   for n in radios)
+
+
+def queued():
+    ensure_tables()
+    with database.get_connection() as conn:
+        return [dict(r) for r in conn.execute('SELECT * FROM wifi_survey_queue ORDER BY node_name')]
 
 
 def aps_for(radio_names, by_name):
@@ -283,7 +396,8 @@ def aps_for(radio_names, by_name):
                 continue
             key = ap['bssid'] or (ap['ssid'], ap['frequency'])
             if key not in aps or (ap['signal'] or -200) > (aps[key]['signal'] or -200):
-                aps[key] = dict(ap, low=ap['frequency'] - AP_WIDTH_MHZ / 2, high=ap['frequency'] + AP_WIDTH_MHZ / 2)
+                aps[key] = dict(ap, low=ap.get('low_mhz') or ap['frequency'] - AP_WIDTH_MHZ / 2,
+                                high=ap.get('high_mhz') or ap['frequency'] + AP_WIDTH_MHZ / 2)
     return list(aps.values())
 
 
@@ -315,17 +429,29 @@ def report():
                       'source': aps[0]['source'] if aps else None, 'aps': aps, 'non_mesh': len(non_mesh),
                       'by_channel': {str(k): len(v) for k, v in sorted(by_channel.items(), key=lambda x: float(x[0]))}})
     return {'generated_at': datetime.now().strftime(TS_FMT), 'nodes': nodes, 'scan_paths': list(WIFI_SCAN_PATHS),
-            'max_age_days': config.WIFI_SURVEY_MAX_AGE_DAYS, 'scheduled': config.WIFI_SURVEY_ENABLED}
+            'max_age_days': config.WIFI_SURVEY_MAX_AGE_DAYS, 'scheduled': config.WIFI_SURVEY_ENABLED,
+            'queued': queued(), 'hour': config.WIFI_SURVEY_HOUR}
+
+
+def nightly_job():
+    """Infrastructure radios when WIFI_SURVEY_ENABLED, plus every radio queued
+    for tonight; queued radios leave the queue once tried."""
+    names = set(r['node_name'] for r in queued())
+    if config.WIFI_SURVEY_ENABLED:
+        names |= set(database.get_infrastructure_nodes())
+    done = []
+    for n in sorted(names):
+        try:
+            scan_node(n)
+            done.append(n)
+        except Exception as exc:
+            logger.info('wifi survey of %s skipped: %s', n, exc)
+    unqueue(sorted(names))
+    return done
 
 
 def install(scheduler):
-    if not config.WIFI_SURVEY_ENABLED:
-        return
-
-    def job():
-        for n in sorted(database.get_infrastructure_nodes()):
-            try:
-                scan_node(n)
-            except Exception as exc:
-                logger.info('wifi survey of %s skipped: %s', n, exc)
-    scheduler.add_job(job, 'cron', hour=config.WIFI_SURVEY_HOUR, minute=15, id='wifi_survey', replace_existing=True)
+    # Always scheduled: with the survey off it only scans radios an operator
+    # queued for tonight (and does nothing when the queue is empty).
+    scheduler.add_job(nightly_job, 'cron', hour=config.WIFI_SURVEY_HOUR, minute=15, id='wifi_survey',
+                      replace_existing=True)

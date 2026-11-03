@@ -208,6 +208,8 @@ const NodesModule = {
         const infraSet = status === 'infrastructure-connected' ? this.withConnected(infraNames) : infraNames;
         const typeNames = typeFilter !== 'all' ? this.nodesWithLinkType(typeFilter) : null;
 
+        // The neighbours that report a link-only node are not searched: "w0gq"
+        // would otherwise list every node a w0gq radio can hear.
         this.filteredNodes = this.nodes.filter(node => {
             const name = (node.name || '').toLowerCase();
             const ip = (node.ip || '').toLowerCase();
@@ -217,7 +219,6 @@ const NodesModule = {
             const rfFreq = (node.rf_frequency || '').toLowerCase();
             const rfChannel = (node.rf_channel || '').toLowerCase();
             const services = (node.services_list || []).map(s => (s.name || '').toLowerCase()).join(' ');
-            const reporters = (node.reporters || []).join(' ').toLowerCase();
             const observedStatus = (node.observed_status || '').toLowerCase();
 
             const matchesSearch = !search ||
@@ -229,7 +230,6 @@ const NodesModule = {
                 rfFreq.includes(search) ||
                 rfChannel.includes(search) ||
                 services.includes(search) ||
-                reporters.includes(search) ||
                 observedStatus.includes(search);
 
             let matchesStatus = true;

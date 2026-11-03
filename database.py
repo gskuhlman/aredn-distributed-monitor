@@ -788,22 +788,24 @@ def mark_node_inactive(name):
         cursor.execute('UPDATE nodes SET is_active = 0 WHERE name = ?', (name,))
 
 
-def get_nodes_to_mark_inactive(timeout_seconds):
+def get_nodes_to_mark_inactive(timeout_seconds, hold=None):
     """Get nodes that will be marked as inactive (for notifications)"""
     cutoff_str = (datetime.now() - timedelta(seconds=timeout_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    hold_sql, hold_params = _not_in('name', hold)
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
             SELECT name, ip FROM nodes
             WHERE last_seen < ?
             AND is_active = 1
-        ''', (cutoff_str,))
+        ''' + hold_sql, (cutoff_str, *hold_params))
         return [{'name': row['name'], 'ip': row['ip']} for row in cursor.fetchall()]
 
 
-def mark_stale_nodes_inactive(timeout_seconds):
-    """Mark nodes not seen within timeout as inactive"""
+def mark_stale_nodes_inactive(timeout_seconds, hold=None):
+    """Mark nodes not seen within timeout as inactive (except ``hold``)"""
     cutoff_str = (datetime.now() - timedelta(seconds=timeout_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    hold_sql, hold_params = _not_in('name', hold)
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -811,7 +813,7 @@ def mark_stale_nodes_inactive(timeout_seconds):
             SET is_active = 0
             WHERE last_seen < ?
             AND is_active = 1
-        ''', (cutoff_str,))
+        ''' + hold_sql, (cutoff_str, *hold_params))
         return cursor.rowcount
 
 
@@ -983,16 +985,26 @@ def get_node_links(node_name):
         return [dict(row) for row in cursor.fetchall()]
 
 
-def get_links_to_drop(timeout_seconds):
-    """Get links that will be marked as dropped (for notifications)"""
+def _not_in(column, names):
+    """(' AND column NOT IN (...)', params) for an optional exclusion list."""
+    names = sorted(set(names or []))
+    if not names:
+        return '', []
+    return f" AND {column} NOT IN ({','.join('?' * len(names))})", names
+
+
+def get_links_to_drop(timeout_seconds, hold_sources=None):
+    """Get links that will be marked as dropped (for notifications).
+    Links from ``hold_sources`` are left alone (not observed this scan)."""
     cutoff_str = (datetime.now() - timedelta(seconds=timeout_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    hold_sql, hold_params = _not_in('source_node', hold_sources)
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
             SELECT source_node, target_node, link_type FROM links
             WHERE last_seen < ?
             AND status != 'dropped' AND status != 'removed'
-        ''', (cutoff_str,))
+        ''' + hold_sql, (cutoff_str, *hold_params))
         return [{'source': row['source_node'], 'target': row['target_node'],
                  'type': row['link_type']} for row in cursor.fetchall()]
 
@@ -1062,9 +1074,10 @@ def mark_link_dropped(source_node, target_node):
         return cursor.rowcount
 
 
-def mark_stale_links_dropped(timeout_seconds):
-    """Mark links not seen within timeout as dropped"""
+def mark_stale_links_dropped(timeout_seconds, hold_sources=None):
+    """Mark links not seen within timeout as dropped (except from ``hold_sources``)"""
     cutoff_str = (datetime.now() - timedelta(seconds=timeout_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    hold_sql, hold_params = _not_in('source_node', hold_sources)
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -1072,7 +1085,7 @@ def mark_stale_links_dropped(timeout_seconds):
             SET status = 'dropped'
             WHERE last_seen < ?
             AND status != 'dropped' AND status != 'removed'
-        ''', (cutoff_str,))
+        ''' + hold_sql, (cutoff_str, *hold_params))
         return cursor.rowcount
 
 
@@ -2070,6 +2083,17 @@ def get_recent_mesh_probes(within_seconds):
                 'timestamp': row['timestamp'],
             }
         return latest
+
+
+def get_recently_answered(within_seconds):
+    """Names that answered a scanner poll or a neighbor mesh probe within the window."""
+    cutoff = (datetime.now() - timedelta(seconds=within_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    with get_connection() as conn:
+        rows = conn.execute('''
+            SELECT DISTINCT node_name FROM node_health_history
+            WHERE reachable = 1 AND timestamp > ?
+        ''', (cutoff,)).fetchall()
+        return {row['node_name'] for row in rows}
 
 
 def get_via_mesh_candidates(cooldown_seconds, limit):

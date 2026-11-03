@@ -693,6 +693,7 @@ const NodePage = {
                 <td>${this.healthCell(ping.latency_avg, 'ms', ping.latency_rating)}</td>
                 <td>${this.healthCell(ping.jitter_avg, 'ms', ping.jitter_rating)}</td>
                 <td>${this.healthCell(ping.loss_avg, '%', ping.loss_rating)}</td>
+                <td>${this.lqmPingCell(h.lqm_ping)}</td>
                 <td>${this.healthCell(mos.score, mos.label ? ' ' + mos.label : '', mos.rating)}</td>
                 <td>${this.healthCell(snr.snr, ' dB', snr.rating)}</td>
                 <td>${this.healthCell(noise.noise_floor, ' dBm', noise.noise_rating)}${noise.interference_likely ? ' <span class="health-flag health-poor" title="Elevated noise floor suggests interference">!</span>' : ''}</td>
@@ -719,6 +720,7 @@ const NodePage = {
                             <th>Latency</th>
                             <th>Jitter</th>
                             <th>Loss</th>
+                            <th title="AREDN LQM's own pings to this neighbour: quality % (our scans, else Prometheus) and round trip">LQM Ping</th>
                             <th>VoIP MOS</th>
                             <th>SNR</th>
                             <th>Noise</th>
@@ -745,6 +747,15 @@ const NodePage = {
                 <p><strong>RF Stability</strong> is the standard deviation of link quality over the measurement window. Low stddev with no dips below 50% is rated good; high variance or frequent quality dips indicates an unstable RF environment.</p>
             </div>
         `;
+    },
+
+    lqmPingCell(p) {
+        if (!p) return '<span class="health-val health-unknown">-</span>';
+        const q = p.quality_avg ?? p.prom_quality;
+        const ms = p.rtt_avg ?? p.prom_ms;
+        const tip = `our scans: ${p.quality_avg ?? '-'}% avg, ${p.quality_min ?? '-'}% min, ${p.rtt_avg ?? '-'} ms (${p.samples ?? 0} samples)`
+            + (p.prom_quality != null ? ` · Prometheus now: ${p.prom_quality}%, ${p.prom_ms ?? '-'} ms` : '');
+        return `<span class="health-val health-${p.rating || 'unknown'}" title="${this.escapeHtml(tip)}">${q != null ? Math.round(q) + '%' : '-'}${ms != null ? ' · ' + ms + ' ms' : ''}</span>`;
     },
 
     healthCell(value, suffix, rating) {
