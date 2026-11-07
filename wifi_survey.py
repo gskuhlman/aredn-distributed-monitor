@@ -386,7 +386,7 @@ def aps_for(radio_names, by_name):
     for n, r in by_name.items():
         if n in scans and r.get('lat') is not None and any(
                 by_name.get(m, {}).get('lat') is not None and
-                (ld._haversine_m(r['lat'], r['lon'], by_name[m]['lat'], by_name[m]['lon']) or 1e9) <= SITE_METERS
+                ld.within_m(ld._haversine_m(r['lat'], r['lon'], by_name[m]['lat'], by_name[m]['lon']), SITE_METERS)
                 for m in radio_names):
             want.add(n)
     aps = {}
@@ -408,11 +408,81 @@ def ap_cost(lo, hi, aps, members):
         overlap = min(hi, ap['high']) - max(lo, ap['low'])
         if overlap <= 0:
             continue
-        sig = ap['signal'] if ap['signal'] is not None else -80.0
-        strength = min(1.5, max(0.1, (sig + 95.0) / 30.0))    # -95 dBm ~0, -65 dBm 1, louder up to 1.5
+        strength = ap_strength(ap['signal'])    # -95 dBm ~0, -65 dBm 1, louder up to 1.5
         cost += AP_COST * strength * overlap / (hi - lo) * members
         hits.append(ap)
     return cost, hits
+
+
+SLOT_MHZ = 5
+SLOT_LEVELS = ((0.0, 'free'), (1.5, 'light'), (5.0, 'moderate'))      # score up to -> level, else busy
+
+
+def ap_strength(signal):
+    """Weight of one AP by signal, as ap_cost (unknown = -80 dBm)."""
+    sig = signal if signal is not None else -80.0
+    return min(1.5, max(0.1, (sig + 95.0) / 30.0))
+
+
+def detail(node=None, site=None, low=5150.0, high=5925.0):
+    """One radio's newest scan, or the newest scans of every radio at a site
+    pooled (one row per BSSID, strongest signal), with a 5 MHz occupancy map:
+    per slot the non-mesh APs overlapping it, a signal-weighted score (the
+    planner's ap_cost weighting) and a level free / light / moderate / busy."""
+    import channel_map as cm
+    base = cm.build_map()
+    by_name = {r['name']: r for r in base['radios']}
+    if site:
+        code = site.strip().upper()
+        radios = {r['name'] for r in base['radios'] if r.get('site_code') == code}
+        for s in base['sites']:
+            if code in s['codes']:
+                radios.update(s['members'])
+        title = code
+    elif node:
+        radios, title, code = {node.strip().lower()}, node.strip().lower(), None
+    else:
+        raise ValueError('node or site is required')
+    scans = latest(max_age_days=90, nodes=radios)
+    if not scans:
+        raise ValueError(f'no WiFi scan for {title}')
+    pooled = {}
+    for n, aps in scans.items():
+        for ap in aps:
+            key = ap['bssid'] or (ap['ssid'], ap['frequency'], n)
+            if key not in pooled or (ap['signal'] or -200) > (pooled[key]['signal'] or -200):
+                pooled[key] = dict(ap, heard_by=n)
+    aps = sorted(pooled.values(), key=lambda a: (a['frequency'] or 0, -(a['signal'] or -200)))
+    for a in aps:
+        a['low'] = a.get('low_mhz') or (a['frequency'] - AP_WIDTH_MHZ / 2 if a['frequency'] else None)
+        a['high'] = a.get('high_mhz') or (a['frequency'] + AP_WIDTH_MHZ / 2 if a['frequency'] else None)
+        a['width_known'] = bool(a.get('low_mhz'))
+    slots = []
+    f = float(low)
+    while f < high:
+        lo, hi = f, f + SLOT_MHZ
+        here = [a for a in aps if not a['is_mesh'] and a['low'] is not None and min(hi, a['high']) > max(lo, a['low'])]
+        mesh = [a for a in aps if a['is_mesh'] and a['low'] is not None and min(hi, a['high']) > max(lo, a['low'])]
+        score = round(sum(ap_strength(a['signal']) for a in here), 2)
+        level = next((name for limit, name in SLOT_LEVELS if score <= limit), 'busy')
+        strongest = max((a['signal'] for a in here if a['signal'] is not None), default=None)
+        slots.append({'low': lo, 'high': hi, 'aps': len(here), 'mesh': len(mesh), 'score': score, 'level': level,
+                      'strongest': strongest, 'ssids': sorted({a['ssid'] for a in here if a['ssid']})[:8]})
+        f = hi
+    ours = []
+    for n in sorted(radios):
+        r = by_name.get(n)
+        if r and r.get('frequency'):
+            w = r.get('chanbw') or 20.0
+            ours.append({'name': n, 'frequency': r['frequency'], 'chanbw': w,
+                         'low': r['frequency'] - w / 2, 'high': r['frequency'] + w / 2,
+                         'scanned': n in scans})
+    return {'title': title, 'site': code, 'scans': [{'node': n, 'taken_at': a[0]['taken_at'], 'source': a[0]['source'],
+                                                     'aps': len(a)} for n, a in sorted(scans.items())],
+            'aps': aps, 'slots': slots, 'ours': ours, 'band': {'low': low, 'high': high},
+            'ham_band': list(cm.HAM_5GHZ), 'levels': [name for _, name in SLOT_LEVELS] + ['busy'],
+            'signal_known': sum(1 for a in aps if a['signal'] is not None and not a['is_mesh']),
+            'non_mesh': sum(1 for a in aps if not a['is_mesh'])}
 
 
 def report():

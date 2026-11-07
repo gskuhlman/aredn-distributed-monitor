@@ -703,6 +703,23 @@ def api_wifi_survey():
     return jsonify(wifi_survey.report())
 
 
+@app.route('/api/wifi-survey/detail')
+def api_wifi_survey_detail():
+    """One radio's (node=) or one site's pooled (site=) newest scan with a 5 MHz occupancy map."""
+    try:
+        low = float(request.args.get('low') or 5150)
+        high = float(request.args.get('high') or 5925)
+    except ValueError:
+        return _json_error('low and high are MHz')
+    if high - low < 10 or high - low > 2000:
+        return _json_error('low/high range is out of bounds')
+    try:
+        return jsonify(wifi_survey.detail(node=request.args.get('node'), site=request.args.get('site'),
+                                          low=low, high=high))
+    except ValueError as exc:
+        return _json_error(exc, 404)
+
+
 @app.route('/api/wifi-survey/scan', methods=['POST'])
 def api_wifi_survey_scan():
     node = ((request.get_json(silent=True) or {}).get('node') or '').strip().lower()
@@ -1541,7 +1558,7 @@ def api_channel_planner():
     Body: {site? | radios?: [...], band?: [low, high], widths?: [..] | {name: [..]},
     locked?: [...], move_clients?: bool, top?: N, compare?: "name freq width" lines,
     idle_off?: bool (default true: radios with no RF links are suggested off),
-    separate_sectors?: bool (one channel per radio on a mast, as AREDN recommends)}"""
+    separate_sectors?: bool (default true: one channel per radio on a mast, as AREDN recommends)}"""
     body = request.get_json(silent=True) or {}
     radios = body.get('radios')
     if isinstance(radios, str):
@@ -1567,7 +1584,7 @@ def api_channel_planner():
         site=body.get('site'), radios=radios, band=band, widths=body.get('widths'),
         locked=locked, move_clients=body.get('move_clients', True) is not False,
         top=top, compare=body.get('compare') or None, idle_off=body.get('idle_off', True) is not False,
-        separate_sectors=bool(body.get('separate_sectors')))
+        separate_sectors=body.get('separate_sectors', True) is not False)
     if result.get('error'):
         return jsonify(result), 400
     return jsonify(result)

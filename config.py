@@ -333,6 +333,10 @@ MCS_RATE_DROP_PCT = env_int("MCS_RATE_DROP_PCT", 40)
 MCS_SNR_HOLD_DB = env_int("MCS_SNR_HOLD_DB", 3)
 # Spectrum scan reminders (spectrum_view.py).
 SCAN_REMINDER_DAYS = env_int("SCAN_REMINDER_DAYS", 14)
+# A TDWR airport weather radar (5600-5650 MHz) within range of the mesh. The
+# nearest to Cedar Rapids are Chicago, Milwaukee and Minneapolis (300+ km), so
+# off: 5600-5650 is then only "below the ham band" and 5650-5660 is not penalised.
+TDWR_NEARBY = env_bool("TDWR_NEARBY", False)
 # Phone connectivity (phones.py): ping every listed phone after each committed scan.
 PHONE_PING_ENABLED = env_bool("PHONE_PING_ENABLED", True)
 PHONE_PING_COUNT = env_int("PHONE_PING_COUNT", 3)

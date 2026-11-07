@@ -14,9 +14,9 @@ inside the allowed band. A plan's cost adds:
 - same-channel reuse between groups that face each other. On one mast,
   sharing a channel is shared airtime: AREDN's channel-planning guide
   (Collocated Nodes) says it can cut site throughput by half or more and
-  recommends a different channel per sector, DtD-linked. Back-to-back sectors
-  sharing a channel are a warning; overlapping beams, or any sharing when
-  separate_sectors is on, are critical;
+  recommends a different channel per sector, DtD-linked, so any sharing on a
+  mast is critical (separate_sectors, the default). With separate_sectors off,
+  back-to-back sectors sharing a channel are only a warning;
 - infrastructure at another site aimed at the radio (either way): a backbone
   dish (narrow beam) aimed at it must not share its channel, and every such
   pair needs a 20 MHz guard band;
@@ -44,6 +44,7 @@ from datetime import datetime, timedelta
 from statistics import median
 
 import channel_map as cm
+import config
 import database
 import infra_audit as ia
 import link_diagnostics as ld
@@ -74,13 +75,24 @@ INFRA_COST = {'same_dish': SEVERITY_COST['critical'], 'same': SEVERITY_COST['war
               'overlap': SEVERITY_COST['critical'], 'adjacent': SEVERITY_COST['critical'],
               'near': SEVERITY_COST['warning']}
 INFRA_RULES = set(INFRA_COST)
-# Radios on one mast sharing a channel (see the module docstring).
-MAST_COST = {'shared_airtime': SEVERITY_COST['warning'], 'colocated_same': SEVERITY_COST['critical']}
+# Radios on one mast sharing a channel (see the module docstring). Above the
+# adjacent-channel cost so the planner doesn't escape a tight mast by sharing.
+MAST_COST = {'shared_airtime': SEVERITY_COST['warning'], 'colocated_same': 200.0}
+# Radios on one mast on different channels: a few metres apart, a neighbour's
+# transmitter lands tens of dB above any outside WiFi, so a guard band is worth
+# far more than avoiding a few weak access points. Overlap > under 10 MHz apart
+# > 10-20 MHz apart.
+MAST_GAP_COST = {'overlap': 250.0, 'adjacent': 150.0, 'near': SEVERITY_COST['warning']}
+
+
+def _severity_of(cost):
+    return 'critical' if cost >= SEVERITY_COST['critical'] else 'warning' if cost >= SEVERITY_COST['warning'] \
+        else 'info'
 AREDN_SECTOR_NOTE = ("AREDN's channel-planning guide recommends a different channel per sector "
                      "(shared channels on one mast can halve site throughput)")
 
 # One channel per radio on a mast for the plan being computed (plan(separate_sectors=...)).
-_separate_sectors = contextvars.ContextVar('separate_sectors', default=False)
+_separate_sectors = contextvars.ContextVar('separate_sectors', default=True)
 
 # Measured noise: dB above NOISE_REF_DBM (per 20 MHz) costs this much per radio.
 NOISE_HOURS = 72
@@ -89,9 +101,14 @@ NOISE_DB_COST = 3.0
 
 # Noise risk per radio for a channel fully inside the range (scaled by the
 # fraction of the channel that overlaps it).
+# 5600-5650 is below the amateur allocation either way; only with a TDWR in
+# range (config.TDWR_NEARBY) is it radar and the first 10 MHz above it a risk.
 NOISE_RANGES = [
-    {'low': 5600, 'high': 5650, 'label': 'TDWR weather radar (5600–5650)', 'cost': 200.0},
-    {'low': 5650, 'high': 5660, 'label': 'first 10 MHz above TDWR', 'cost': 4.0},
+    {'low': 5600, 'high': 5650, 'cost': 200.0, 'tdwr': True,
+     'label': ('TDWR weather radar (5600–5650)' if config.TDWR_NEARBY
+               else 'below the 5 GHz ham band (5600–5650, the Part 15 TDWR band)')},
+] + ([{'low': 5650, 'high': 5660, 'label': 'first 10 MHz above TDWR', 'cost': 4.0}]
+     if config.TDWR_NEARBY else []) + [
     {'low': 5490, 'high': 5730, 'label': 'WiFi ch 100–144 (DFS)', 'cost': 3.0, 'wifi': True},
     {'low': 5735, 'high': 5835, 'label': 'WiFi ch 149–165 (UNII-3, heavy)', 'cost': 20.0, 'wifi': True},
     {'low': 5835, 'high': 5895, 'label': 'WiFi 6E/7 UNII-4 (indoor, growing)', 'cost': 3.0, 'wifi': True},
@@ -179,6 +196,8 @@ def _base_pair_cost(rel, g):
             return 5.0
         return 1.0 if (g['a_sees'] or g['b_sees']) and km <= 15 else 0.0
     if rel in ('overlap', 'adjacent', 'near'):
+        if g['colocated']:
+            return MAST_GAP_COST[rel]
         sev = cm._severity(rel, g['colocated'], g['d'] / 1000, g['a_sees'], g['b_sees'])
         return SEVERITY_COST.get(sev, 0.0)
     return 0.0
@@ -215,7 +234,7 @@ def _noise_samples(radios):
             continue
         chan = (r['frequency'], r['chanbw'] or 20.0)
         if any(o is not r and _relation(chan, (o['frequency'], o['chanbw'] or 20.0)) in ('same', 'overlap', 'adjacent')
-               and (ld._haversine_m(r['lat'], r['lon'], o['lat'], o['lon']) or 1e9) <= cm.SITE_METERS
+               and ld.within_m(ld._haversine_m(r['lat'], r['lon'], o['lat'], o['lon']), cm.SITE_METERS)
                for o in live):
             continue
         noise = median(v for _, v, _ in samples)
@@ -283,7 +302,7 @@ def _candidates(band, widths):
 
 
 def plan(site=None, radios=None, band=None, widths=None, locked=None, move_clients=True,
-         top=3, compare=None, seed=1, idle_off=True, separate_sectors=False):
+         top=3, compare=None, seed=1, idle_off=True, separate_sectors=True):
     token = _separate_sectors.set(bool(separate_sectors))
     try:
         result = _plan(site, radios, band, widths, locked, move_clients, top, compare, seed, idle_off)
@@ -305,13 +324,23 @@ def _plan(site, radios, band, widths, locked, move_clients, top, compare, seed, 
     notes = []
 
     if site:
-        code = site.strip().upper()
-        planned = {r['name'] for r in base['radios'] if r.get('site_code') == code}
-        for s in base['sites']:
-            if code in s['codes']:
-                planned.update(s['members'])
+        # One site code, several ("COL,MMC,EOC"), or ALL = every infrastructure site.
+        codes = [c.upper() for c in (site if isinstance(site, (list, tuple)) else str(site).replace(',', ' ').split())
+                 if c and c.strip()]
+        if codes == ['ALL']:
+            codes = sorted({r['site_code'] for r in base['radios'] if r.get('is_infrastructure') and r.get('site_code')})
+        planned = set()
+        for code in codes:
+            here = {r['name'] for r in base['radios'] if r.get('site_code') == code}
+            for s in base['sites']:
+                if code in s['codes']:
+                    here.update(s['members'])
+            if not here:
+                notes.append(f'No located radios at site {code}')
+            planned |= here
         if not planned:
-            return {'error': f'No located radios at site {code}'}
+            return {'error': f"No located radios at site {', '.join(codes) or site}"}
+        site = ','.join(codes)
     else:
         planned = {n.strip().lower() for n in (radios or []) if n and n.strip()}
         missing = sorted(n for n in planned if n not in by_name)
@@ -384,7 +413,7 @@ def _plan(site, radios, band, widths, locked, move_clients, top, compare, seed, 
                     peers[b] = a
         g['link_peers'] = peers
         g['noise_refs'] = [smp for smp in noise if any(
-            (ld._haversine_m(by_name[n]['lat'], by_name[n]['lon'], smp['lat'], smp['lon']) or 1e9) <= cm.SITE_METERS
+            ld.within_m(ld._haversine_m(by_name[n]['lat'], by_name[n]['lon'], smp['lat'], smp['lon']), cm.SITE_METERS)
             for n in g['members'])]
         g['survey_aps'] = wifi_survey.aps_for(g['members'], by_name)
         g['cost'] = {c: _single_cost(g, c, by_name) for c in set(g['cands']) | {g['current']}}
@@ -479,7 +508,12 @@ def _plan(site, radios, band, widths, locked, move_clients, top, compare, seed, 
     def changes(assign):
         return sum(1 for i, g in enumerate(groups) for n in g['members']
                    if (by_name[n]['frequency'], by_name[n]['chanbw'] or 20.0) != assign[i])
-    ranked = sorted(seen.items(), key=lambda kv: (round(kv[1], 1), changes(kv[0])))[:max(1, int(top or 3))]
+    # Equal scores: fewer critical conflicts first, then fewer radios changed.
+    top_n = max(1, int(top or 3))
+    pool = sorted(seen.items(), key=lambda kv: (round(kv[1], 1), changes(kv[0])))[:top_n * 3]
+    crit = {k: _describe(list(k), groups, by_name, fixed, pair_w, v, idle=idle)['counts']['critical']
+            for k, v in pool}
+    ranked = sorted(pool, key=lambda kv: (round(kv[1], 1), crit[kv[0]], changes(kv[0])))[:top_n]
 
     current_cost = total(current)
     result = {
@@ -634,12 +668,12 @@ def _describe(assign, groups, by_name, fixed, pair_w, cost, current=False, idle=
             if iss['relation'] == 'same':
                 counts['same_channel'] += 1
                 if iss.get('rule'):
-                    iss['severity'] = next(s for s, v in SEVERITY_COST.items() if v == iss['cost'])
+                    iss['severity'] = _severity_of(iss['cost'])
                     counts[iss['severity']] += 1
             elif iss['relation'] == 'link_break':
                 counts['link_break'] += 1
             else:
-                sev = next((s for s, v in SEVERITY_COST.items() if v == iss['cost']), 'info')
+                sev = _severity_of(iss['cost'])
                 iss['severity'] = sev
                 counts[sev] += 1
         lo, hi = _span(*c)

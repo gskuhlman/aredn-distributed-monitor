@@ -1,27 +1,46 @@
 /**
- * Channel planner panel on the Channel Map tab: suggested channels for a
- * site or a list of radios from POST /api/channel-planner. All scoring lives
- * in channel_planner.py; this renders the ranked plans (old -> new per radio,
- * reasons, remaining issues, Channel Map what-if delta, spectrum before and
- * after) and hands a plan to the map's what-if. Nothing is saved unless the
- * operator asks for a maintenance window / change-log entries for a plan.
+ * Channel Planning page (Analysis menu): suggested channels for one or more
+ * sites, every infrastructure site at once, or a list of radios from
+ * POST /api/channel-planner. All scoring lives in channel_planner.py; this
+ * renders the ranked plans (old -> new per radio, reasons, remaining issues,
+ * Channel Map what-if delta, spectrum before and after) and hands a plan to
+ * the Channel Map's what-if. Nothing is saved unless the operator asks for a
+ * maintenance window / change-log entries / rollout for a plan.
  */
 const ChannelPlanner = {
     initialized: false,
     result: null,
 
+    hookTab() {
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const view = document.getElementById('planning-view');
+                if (!view) return;
+                if (btn.dataset.tab === 'planning') {
+                    view.classList.add('active');
+                    this.init();
+                } else {
+                    view.classList.remove('active');
+                }
+            });
+        });
+    },
+
     init() {
         if (this.initialized) return;
-        const box = document.getElementById('cp-box');
-        if (!box) return;
+        if (!document.getElementById('cp-run')) return;
         this.initialized = true;
-        box.addEventListener('toggle', () => {
-            document.querySelector('.cm-side')?.classList.toggle('cm-side-wide', box.open);
-            setTimeout(() => ChannelMap.map?.invalidateSize(), 50);
-            if (box.open) this.loadSites();
-        });
+        this.loadSites();
         document.getElementById('cp-run')?.addEventListener('click', () => this.run());
         document.getElementById('cp-target')?.addEventListener('change', () => this.syncTarget());
+        document.getElementById('cp-compare-clear')?.addEventListener('click', () => {
+            document.getElementById('cp-compare-text').value = '';
+        });
+        document.getElementById('cp-compare-from-map')?.addEventListener('click', () => {
+            const text = document.getElementById('cm-whatif-text')?.value.trim();
+            document.getElementById('cp-compare-text').value = text || '';
+            this.setStatus(text ? 'Copied the Channel Map what-if' : 'The Channel Map what-if box is empty');
+        });
         document.getElementById('cp-results')?.addEventListener('click', (event) => {
             const btn = event.target.closest('button[data-cp-action]');
             if (!btn) return;
@@ -34,29 +53,37 @@ const ChannelPlanner = {
         });
     },
 
+    /** One checkbox per infrastructure site (only sites that have nodes). */
     async loadSites() {
-        const select = document.getElementById('cp-site');
-        if (!select || select.options.length) return;
+        const box = document.getElementById('cp-sites');
+        if (!box || box.childElementCount) return;
         try {
             const data = await (await fetch('/api/nodes/infrastructure')).json();
-            const codes = new Set(Object.values(data.infrastructure_nodes || {}).filter(Boolean));
-            Object.keys(data.sites || {}).forEach(c => codes.add(c));
-            select.innerHTML = [...codes].sort().map(c =>
-                `<option value="${this.esc(c)}">${this.esc(c)}${data.sites?.[c] ? ' – ' + this.esc(data.sites[c]) : ''}</option>`).join('');
-            if (codes.has('COL')) select.value = 'COL';
+            const count = {};
+            Object.values(data.infrastructure_nodes || {}).filter(Boolean).forEach(c => { count[c] = (count[c] || 0) + 1; });
+            const codes = Object.keys(count).sort();
+            if (!codes.length) {
+                box.innerHTML = '<span class="form-hint">no infrastructure sites marked yet</span>';
+                return;
+            }
+            box.innerHTML = codes.map(c => `<label class="header-checkbox" title="${count[c]} infrastructure node(s)">
+                <input type="checkbox" class="cp-site" value="${this.esc(c)}" ${c === 'COL' ? 'checked' : ''}>
+                ${this.esc(c)}${data.sites?.[c] ? ` <small>${this.esc(data.sites[c])}</small>` : ''}</label>`).join('');
+            if (!box.querySelector('.cp-site:checked')) box.querySelector('.cp-site').checked = true;
         } catch (error) {
             console.error('Planner site list error:', error);
         }
     },
 
     syncTarget() {
-        const bySite = document.getElementById('cp-target').value === 'site';
-        document.getElementById('cp-site').hidden = !bySite;
-        document.getElementById('cp-radios').hidden = bySite;
+        const target = document.getElementById('cp-target').value;
+        document.getElementById('cp-sites').hidden = target !== 'sites';
+        document.getElementById('cp-radios').hidden = target !== 'radios';
+        document.getElementById('cp-infra-note').hidden = target !== 'infrastructure';
     },
 
     request() {
-        const bySite = document.getElementById('cp-target').value === 'site';
+        const target = document.getElementById('cp-target').value;
         const widths = [...document.querySelectorAll('.cp-width:checked')].map(el => Number(el.value));
         const low = Number(document.getElementById('cp-band-low').value);
         const high = Number(document.getElementById('cp-band-high').value);
@@ -66,13 +93,15 @@ const ChannelPlanner = {
             locked: document.getElementById('cp-locked').value,
             move_clients: document.getElementById('cp-move-clients').checked,
             idle_off: document.getElementById('cp-idle-off')?.checked !== false,
-            separate_sectors: document.getElementById('cp-separate')?.checked === true,
+            separate_sectors: document.getElementById('cp-separate')?.checked !== false,
             top: Number(document.getElementById('cp-top').value) || 3
         };
-        if (bySite) body.site = document.getElementById('cp-site').value;
-        else body.radios = document.getElementById('cp-radios').value;
-        const compare = document.getElementById('cm-whatif-text')?.value.trim();
-        if (compare && document.getElementById('cp-compare').checked) body.compare = compare;
+        if (target === 'infrastructure') body.site = 'ALL';
+        else if (target === 'sites') {
+            body.site = [...document.querySelectorAll('.cp-site:checked')].map(el => el.value).join(',');
+        } else body.radios = document.getElementById('cp-radios').value;
+        const compare = document.getElementById('cp-compare-text')?.value.trim();
+        if (compare) body.compare = compare;
         return body;
     },
 
@@ -82,6 +111,10 @@ const ChannelPlanner = {
         const body = this.request();
         if (Array.isArray(body.widths) && !body.widths.length) {
             el.innerHTML = '<p class="log-empty">Pick at least one width, or keep current widths.</p>';
+            return;
+        }
+        if (body.site === '' || (body.radios != null && !body.radios.trim())) {
+            el.innerHTML = '<p class="log-empty">Tick at least one site, or list some radios.</p>';
             return;
         }
         button.disabled = true;
@@ -98,7 +131,8 @@ const ChannelPlanner = {
             }
             this.result = data;
             this.render();
-            this.setStatus(`${data.plans.length} plan(s) from ${data.distinct_optima} candidates · ${data.elapsed_ms} ms`);
+            this.setStatus(`${data.site ? data.site + ': ' : ''}${data.plans.length} plan(s) from ` +
+                `${data.distinct_optima} candidates · ${data.elapsed_ms} ms`);
         } catch (error) {
             console.error('Channel planner error:', error);
             el.innerHTML = '<p class="log-empty">Planning failed.</p>';
@@ -128,7 +162,7 @@ const ChannelPlanner = {
                 · ${this.esc(d.turn_off[0].reason)}.</p>` : ''}
             ${this.renderPlan(d.current, 'Current channels', null)}
             ${d.plans.map((p, i) => this.renderPlan(p, `Plan ${i + 1}`, String(i))).join('')}
-            ${d.compare ? this.renderPlan(d.compare, 'Your what-if plan', 'compare') : ''}`;
+            ${d.compare ? this.renderPlan(d.compare, 'Your plan', 'compare') : ''}`;
     },
 
     renderPlan(p, title, key) {
@@ -240,14 +274,21 @@ const ChannelPlanner = {
         return `<div class="spec-wrap"><svg viewBox="0 0 ${W} ${H}" class="spec-chart" role="img"
             aria-label="Planned spectrum per radio">${band}${wifi}${ticks}${bars}</svg>
             <p class="form-hint">Thin grey bar = current channel, colored bar = planned (same color = one group sharing a channel).
-            Shaded: allowed band; orange tint: heavy WiFi (ch 149–165).</p></div>`;
+            Shaded: allowed band${wifi ? '; orange tint: heavy WiFi (ch 149–165)' : ''}. How busy each frequency is at a site:
+            WiFi scan results below.</p></div>`;
     },
 
+    /** Load the plan into the Channel Map what-if and switch to that tab. */
     showOnMap(plan) {
         const box = document.getElementById('cm-whatif-text');
+        if (!box) return;
         box.value = this.planText(plan);
         document.getElementById('cm-whatif-box').open = true;
-        ChannelMap.runWhatIf();
+        const loaded = Boolean(ChannelMap.data);
+        // Not loaded yet: ChannelMap.load() runs the what-if when whatIf is set.
+        if (!loaded) ChannelMap.whatIf = ChannelMap.whatIf || { pending: true };
+        document.querySelector('.tab-btn[data-tab="channel-map"]')?.click();
+        if (loaded) ChannelMap.runWhatIf();
     },
 
     planText(plan) {
@@ -262,7 +303,7 @@ const ChannelPlanner = {
         } catch (error) {
             document.getElementById('cm-whatif-text').value = text;
             document.getElementById('cm-whatif-box').open = true;
-            this.setStatus('Copied into the what-if box');
+            this.setStatus('Copied into the Channel Map what-if box');
         }
     },
 
@@ -335,14 +376,10 @@ const ChannelPlanner = {
     }
 };
 
-document.addEventListener('DOMContentLoaded', () => ChannelPlanner.init());
-
-// Toolbar shortcut: the planner sits at the bottom of the side panel.
 document.addEventListener('DOMContentLoaded', () => {
+    ChannelPlanner.hookTab();
+    // Channel Map toolbar shortcut: open the Channel Planning page.
     document.getElementById('cm-plan-open')?.addEventListener('click', () => {
-        const box = document.getElementById('cp-box');
-        if (!box) return;
-        box.open = true;
-        box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.querySelector('.tab-btn[data-tab="planning"]')?.click();
     });
 });

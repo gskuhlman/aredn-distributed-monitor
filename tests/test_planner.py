@@ -70,3 +70,27 @@ def test_separate_sectors_gives_each_sector_its_own_channel(mesh):
     new = {x['name']: x['new'].get('frequency') for x in p['radios']}
     for name, _, _, sector in CLIENTS:
         assert new.get(name, chans[sector]) == chans[sector]
+
+
+def test_mast_costs_rank_overlap_adjacent_same_near():
+    # On one mast: overlapping > the same channel (so the planner can't escape a
+    # tight mast by sharing) > under 10 MHz apart > 10-20 MHz apart > clear.
+    import channel_planner as cp
+    g = {'d': 0, 'colocated': True, 'a_sees': True, 'b_sees': True, 'back_to_back': False,
+         'infra_watch': False, 'dish_watch': False}
+    cost = {rel: cp._pair_cost(rel, g) for rel in ('overlap', 'adjacent', 'same', 'near', 'clear')}
+    assert cost['overlap'] > cost['same'] > cost['adjacent'] > cost['near'] > cost['clear'] == 0
+    assert cp._severity_of(cost['adjacent']) == 'critical' and cp._severity_of(cost['near']) == 'warning'
+
+
+def test_plan_several_sites_and_all_infrastructure(mesh):
+    build(mesh)
+    mesh.node('w0aa-two-omni', lat=42.3, lon=-91.2, rf_frequency='5680', rf_chanbw=20, rf_status='on',
+              rf_mode='adhoc', antenna_beamwidth=360)
+    mesh.infra('w0aa-two-omni', 'TWO')
+    import channel_planner
+    both = channel_planner.plan(site='TST, two', top=1)
+    names = {x['name'] for x in both['plans'][0]['radios']}
+    assert {'t0st-tst-n', 'w0aa-two-omni'} <= names
+    every = channel_planner.plan(site='ALL', top=1)
+    assert {x['name'] for x in every['plans'][0]['radios']} == names

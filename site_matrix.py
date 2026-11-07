@@ -56,7 +56,7 @@ def _site_members(code, radios):
     for r in radios.values():
         if r['lat'] is None or r['name'] in members:
             continue
-        if any((ld._haversine_m(r['lat'], r['lon'], c['lat'], c['lon']) or 1e9) <= cm.SITE_METERS for c in located):
+        if any(ld.within_m(ld._haversine_m(r['lat'], r['lon'], c['lat'], c['lon']), cm.SITE_METERS) for c in located):
             members.add(r['name'])
     return members
 
@@ -396,8 +396,8 @@ def build(site=None, radios=None, hours=24, overrides=None, now=None):
                 same = c['relation'] == 'same'
                 add('info' if same else 'warning', 'colocated',
                     f'Radios on the same mast hear each other: {a} ↔ {b}',
-                    ('Same channel, so they share airtime. Expected when they are meant to share it (back-to-back '
-                     'sectors, two access radios); routing should prefer the cable between them.') if same else
+                    ('Same channel, so they share airtime and take turns. AREDN recommends a different channel '
+                     'per sector on a mast, DtD-linked; routing should prefer the cable between them.') if same else
                     (f"Channel relation is {c['relation']}: they decode each other although their channels "
                      'differ, which points to too little guard band on the mast.'),
                     [f"SNR {c['snr']} / {c['their_snr']} dB", f"distance {c['distance_m']} m"]

@@ -57,7 +57,7 @@ def build(code, hours=24):
         site_radios = [radios.get(n) or {'name': n} for n in members]
         anchor = next((r for r in site_radios if r.get('lat') is not None), None)
         others = [r for r in radios.values() if r['name'] not in members and anchor
-                  and infra_audit._rf_on(r) and (infra_audit._dist(anchor, r) or 1e9) <= infra_audit.SITE_METERS]
+                  and infra_audit._rf_on(r) and infra_audit.within(anchor, r, infra_audit.SITE_METERS)]
         at_site = {r['name'] for r in site_radios} | {r['name'] for r in others}
 
         health = {}

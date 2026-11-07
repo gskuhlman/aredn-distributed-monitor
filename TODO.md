@@ -268,23 +268,32 @@ captured); the metrics page has everything else, at ~60 KB a poll. Our own polli
 
 ## Pending radio work (outside the app)
 
-Channel plan for Collins + MMC + EOC together (Channel Map → Plan channels, Radios = the 12
-infrastructure radios, "One channel per sector" on), 2026-10-20. Replaces the 2026-10-19 Collins-only
-plan, which shared channels between opposite sectors. Today: 9 critical / 24 warning; with this plan
-0 critical / 2 warning (Collins W shares 5875 with the MMC omni 6.2 km away, Collins E shares 5660 with
-the EOC omni 13 km away). Each Collins sector gets its own channel, as AREDN's channel-planning guide
-recommends. The critical left on the Channel Map is kf0jcl-qth vs kj0dx-qth-sq (not infrastructure).
+Channel plan for Collins + MMC + EOC, 2026-11-06, from WiFi scans (pasted /a/scan tables of col-rkt-n,
+col-rkt-e, col-rkt-s, col-rkt-w, col-sq-2mmc, eoc-rkt-o13, eoc-pb5ac-2mmc; mmc-rkt-o13 returned
+nothing). Replaces the 2026-10-20 plan, whose COL S on 5775 sits on ch 153/157, among the busiest WiFi
+the Collins scans heard (75 APs on ch 136, 64 on 149, 47 on 157; nothing at all on 5855–5925). One
+channel per sector, as AREDN's channel-planning guide recommends; no TDWR within range of Cedar Rapids.
+Collins has about 90 MHz of clean spectrum (5835–5925), not enough for four 20 MHz sectors with 20 MHz
+guards, so three sectors sit there (W–S 20 MHz apart, the back-to-back N–S pair 10 MHz) and COL E
+takes 5650–5670 (14 weak APs, -77 dBm). This is the planner's top plan since it weighs guard bands on
+a mast above weak WiFi (before, its top plan packed all four sectors edge to edge).
+Scores: today 7 critical / 19 warning; this plan 0 critical / 3 warning (N–S 10 MHz apart; same
+channel at other sites: COL W with the EOC omni 13 km away, COL E with the MMC omni 6.2 km away).
+Today two radios are partly outside the 5650–5925 ham band: COL W 5920/20 (to 5930) and the
+COL ↔ MMC backbone 5660/40 (from 5640).
 
 - [ ] Start a maintenance window for COL, MMC and EOC (Diagnostics → Maintenance, RF peers
       included) so alarms and reports ignore the change.
 - [ ] COL N on ch 183 (5915/20): w0gq-col-rkt-n with kf0jcl-qth-litebeam5ac.
+- [ ] COL S on ch 177 (5885/20): w0gq-col-rkt-s with kf9mt-home-litebeam.
+- [ ] COL W on ch 169 (5845/20): w0gq-col-rkt-w with ka0ies-square-one.
 - [ ] COL E on ch 132 (5660/20): w0gq-col-rkt-e with kj0dx-qth-ub.
-- [ ] COL S on ch 155 (5775/20): w0gq-col-rkt-s with kf9mt-home-litebeam.
-- [ ] COL W on ch 175 (5875/20): w0gq-col-rkt-w with ka0ies-square-one.
 - [ ] COL ↔ MMC backbone on ch 142 (5710/40): w0gq-col-sq-2mmc and w0gq-mmc-sq-2col together
-      (also gets it off TDWR: today 5640–5680).
-- [ ] MMC ↔ EOC backbone stays on ch 165 (5825/40).
-- [ ] EOC omni w0gq-eoc-rkt-o13 to ch 132 (5660/20); MMC omni w0gq-mmc-rkt-o13 to ch 175 (5875/20).
+      (also brings it back inside the band: today 5640–5680).
+- [ ] MMC ↔ EOC backbone on ch 159 (5795/40): w0gq-mmc-pb5ac-2eoc and w0gq-eoc-pb5ac-2mmc together
+      (30 MHz down from 5825, 20 MHz clear of COL W, which the EOC dish looks toward past MMC; the
+      EOC dish itself heard almost no WiFi).
+- [ ] EOC omni w0gq-eoc-rkt-o13 to ch 169 (5845/20); MMC omni w0gq-mmc-rkt-o13 to ch 132 (5660/20).
 - [ ] Turn off w0gq-col-sq-2bldg112 and w0gq-col-sq-2hiwt until their far ends exist.
 - [ ] Move each client before (or with) its sector, so no link is stranded.
 - [ ] Lower kf9mt-home-litebeam's TX power (near-far at Collins). Never Collins's.
@@ -297,6 +306,8 @@ recommends. The critical left on the Channel Map is kf0jcl-qth vs kj0dx-qth-sq (
 - [ ] Check w0gq-mmc-rkt-o13 and w0gq-eoc-rkt-o13 (omnis hearing nothing): channel and SSID.
 - [ ] Afterwards: check RF Stats for an rkt-n ↔ rkt-s link or clients linked to the opposite
       sector, and compare before/after on the Changes tab.
-- [ ] Trade-offs to watch: COL S (5765–5785) is in busy UNII-3 WiFi, COL E and the EOC omni
-      (5650–5670) touch the first 10 MHz above TDWR, COL N (5905–5925) is in the C-V2X band.
-      Check Link Watch noise for those radios after the change.
+- [ ] Trade-offs to watch: COL N and COL S are 10 MHz apart (back to back), COL E and the MMC omni
+      share 5650–5670 with weak WiFi, COL N (5905–5925) is in the C-V2X band. Check Link Watch noise and
+      the Site Matrix for Collins after the change.
+- [ ] Rescan mmc-rkt-o13 (empty scan) and import all scans on the Diagnostics tab
+      (WiFi survey → Import) so the app keeps them.

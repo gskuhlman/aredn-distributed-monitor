@@ -102,6 +102,12 @@ def _haversine_m(lat1, lon1, lat2, lon2):
     return 2 * r * math.asin(math.sqrt(h))
 
 
+def within_m(d, meters):
+    """A distance from _haversine_m is known and at most `meters` (0 m, the
+    same coordinates, counts: `(d or 1e9)` would treat it as unknown)."""
+    return d is not None and d <= meters
+
+
 def _bearing(lat1, lon1, lat2, lon2):
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dl = math.radians(lon2 - lon1)
@@ -1049,8 +1055,10 @@ def _check_noise_band(ctx, f):
             "moving the link." if impaired else "Its reception looks fine now.")
          + (f" Current noise estimate: {max(noise):.0f} dBm." if noise else ''),
          [f"{r['label']}: {ov:.0f} MHz of the channel" for r, ov in hits],
-         (f"Keep the whole channel above 5650 MHz: TDWR airport weather radar (5600–5650) is strong and "
-          f"pulsed, and AREDN radios don't avoid it. At {a['chanbw'] or 20:.0f} MHz wide that means a "
+         ("Keep the whole channel above 5650 MHz: "
+          + ("TDWR airport weather radar (5600–5650) is strong and pulsed, and AREDN radios don't avoid it."
+             if config.TDWR_NEARBY else "below it is outside the 5 GHz amateur allocation.")
+          + f" At {a['chanbw'] or 20:.0f} MHz wide that means a "
           f"centre of {5650 + (a['chanbw'] or 20) / 2 + 5:.0f} MHz or higher (or a narrower channel)."
           if tdwr else ("Prefer channels away from UNII-3 Wi-Fi (5735–5835) if noise is high."
                         if heavy and impaired else None)))

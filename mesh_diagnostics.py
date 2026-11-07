@@ -824,8 +824,10 @@ def _check_channels(f, scope, weak_peer):
               + '. Outside users there never show up as mesh neighbours; they only raise the noise floor '
                 'or hit in bursts.'
               + (f" Struggling: {', '.join(hurt)}." if hurt else ''),
-              ('Keep the whole channel above 5650 MHz (TDWR airport weather radar is strong and pulsed, '
-               'and AREDN radios do not avoid it).' if rng is tdwr else
+              (('Keep the whole channel above 5650 MHz (TDWR airport weather radar is strong and pulsed, '
+                'and AREDN radios do not avoid it).' if config.TDWR_NEARBY else
+                'Keep the whole channel above 5650 MHz: below it is outside the 5 GHz amateur allocation.')
+               if rng is tdwr else
                'Prefer channels away from UNII-3 WiFi (5735–5835 MHz) where noise is high.'),
               {'radios': [r['name'] for r in group],
                'diagnose': [[n, weak_peer[n]] for n in hurt]})

@@ -566,12 +566,9 @@ def _mast_findings(site, pairs, groups, cross, wrong, members, f):
                for p in ps] + ([f'measured: {len(heard)} pair(s) already hear each other'] if heard else [])
               + [f"{m}: estimated airtime {members[m]['airtime_pct'] if members[m]['airtime_pct'] is not None else '?'}% "
                  f"({loads[m]})" for m in g['members']],
-              'AREDN recommends a separate channel per colocated sector with DtD links between them; where the '
-              'band has no room for that, sharing is acceptable while the sectors are lightly loaded. Give a '
-              'sector its own channel as soon as it gets busy. Expect the radios to form an RF link with each '
-              'other (harmless: routing prefers their cable).'
-              if not overlap else 'Neighbouring sectors whose beams overlap should not share a channel: put '
-              'opposite sectors together instead (Channel Map → Plan channels).',
+              'Give each sector its own channel, at least 20 MHz from the others on the mast, with DtD links '
+              'between them, as AREDN recommends (Channel Map → Plan channels). Facing apart does not make '
+              'sharing safe: on one mast they still hear each other and take turns.',
               g['members'])
     for p in pairs:
         if p['relation'] in ('overlap', 'adjacent'):
@@ -583,8 +580,8 @@ def _mast_findings(site, pairs, groups, cross, wrong, members, f):
                   'receiver as noise and can overload it.',
                   [f"{abs(p['gap_mhz']):g} MHz {'overlap' if p['gap_mhz'] < 0 else 'gap'}"
                    + (f", antennas {p['angle_apart']}° apart" if p['angle_apart'] is not None else '')],
-                  'Use the same channel (if they face apart) or at least 20 MHz between them '
-                  '(Channel Map → Plan channels).',
+                  'Put at least 20 MHz between them (a different channel per sector, as AREDN '
+                  'recommends; Channel Map → Plan channels).',
                   [p['a'], p['b']])
     in_beam = [c for c in cross if c['in_beam']]
     lobe = [c for c in cross if not c['in_beam']]

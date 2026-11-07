@@ -194,6 +194,11 @@ def _dist(a, b):
     return ld._haversine_m(a['lat'], a['lon'], b['lat'], b['lon'])
 
 
+def within(a, b, meters):
+    """a and b are located and at most `meters` apart (the same spot counts)."""
+    return ld.within_m(_dist(a, b), meters)
+
+
 def _role(mode):
     return ld.RF_MODE_ROLES.get((mode or '').lower())
 
@@ -209,7 +214,7 @@ def _check_sites(ctx, f):
         anchor = next((r for r in members if r.get('lat') is not None), None)
         if anchor:
             for r in ctx['radios'].values():
-                if r['name'] not in ctx['infra'] and _rf_on(r) and (_dist(anchor, r) or 1e9) <= SITE_METERS:
+                if r['name'] not in ctx['infra'] and _rf_on(r) and within(anchor, r, SITE_METERS):
                     radios.append(r)
         pairs = []
         for i, a in enumerate(radios):
@@ -486,7 +491,7 @@ def run_review(refresh=False, link_hours=24):
         names = {m['name'] for m in members}
         anchor = next((m for m in members if m.get('lat') is not None), None)
         others = [r for r in radios.values() if r['name'] not in names and anchor and _rf_on(r)
-                  and (_dist(anchor, r) or 1e9) <= SITE_METERS]
+                  and within(anchor, r, SITE_METERS)]
         site_out.append({
             'code': code, 'name': ctx['site_names'].get(code, code),
             'radios': sorted(members + [dict(r, not_infrastructure=True) for r in others],

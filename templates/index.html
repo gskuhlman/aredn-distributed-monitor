@@ -50,6 +50,7 @@
                             <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
                             <button class="tab-btn" data-tab="reports">Reports</button>
                             <button class="tab-btn" data-tab="changes">Changes</button>
+                            <button class="tab-btn" data-tab="planning" title="Channel planner and WiFi scan results">Channel Planning</button>
                         </div>
                         <div class="nav-group">
                             <div class="nav-group-title">More</div>
@@ -1243,7 +1244,7 @@
                             <label>to <input type="number" id="cm-fmax" class="form-input cm-num" value="5950" step="5"></label>
                         </span>
                         <button id="cm-reload" class="btn btn-secondary">Reload</button>
-                        <button id="cm-plan-open" class="btn btn-primary" title="Channel planner: suggest channels for a site or a list of radios">Plan channels</button>
+                        <button id="cm-plan-open" class="btn btn-primary" title="Open the Channel Planning page (Analysis menu)">Plan channels</button>
                         <span id="cm-status" class="nodes-count"></span>
                     </div>
                     <div class="cm-body">
@@ -1267,51 +1268,88 @@
                                 </div>
                                 <div id="cm-whatif-result"></div>
                             </details>
-                            <!-- Channel planner (#4, channel-planner.js) -->
-                            <details class="diag-details" id="cp-box">
-                                <summary>Plan channels</summary>
-                                <p class="form-hint">Suggests channels for a site or a list of radios: whole channel inside the band,
-                                    sectors keep their clients, clear of mast neighbours and radios in the beams, away from busy WiFi.
-                                    Only frequency and width are changed; nothing is saved.</p>
-                                <div class="cp-form">
-                                    <label>Plan for
-                                        <select id="cp-target" class="form-input">
-                                            <option value="site" selected>Site</option>
-                                            <option value="radios">Radios</option>
-                                        </select>
-                                    </label>
-                                    <select id="cp-site" class="form-input" title="Site code"></select>
-                                    <input type="text" id="cp-radios" class="form-input" hidden placeholder="radio names, comma separated">
-                                    <label>Band <input type="number" id="cp-band-low" class="form-input cm-num" value="5650" step="5">
-                                        – <input type="number" id="cp-band-high" class="form-input cm-num" value="5925" step="5"> MHz</label>
-                                    <span class="cp-widths">Widths:
-                                        <label class="header-checkbox"><input type="checkbox" id="cp-keep-width" checked> keep current</label>
-                                        <label class="header-checkbox"><input type="checkbox" class="cp-width" value="10"> 10</label>
-                                        <label class="header-checkbox"><input type="checkbox" class="cp-width" value="20" checked> 20</label>
-                                        <label class="header-checkbox"><input type="checkbox" class="cp-width" value="40"> 40</label>
-                                    </span>
-                                    <label class="header-checkbox" title="Sectors and the RF-linked radios they serve (and both ends of a PtP link) get one channel">
-                                        <input type="checkbox" id="cp-move-clients" checked> Move clients with their sector</label>
-                                    <label class="header-checkbox" title="Point-to-point dishes with no RF links are suggested off instead of getting a channel">
-                                        <input type="checkbox" id="cp-idle-off" checked> Turn off idle dishes</label>
-                                    <label class="header-checkbox" title="AREDN recommends a different channel per sector: radios on one mast sharing a channel can halve site throughput">
-                                        <input type="checkbox" id="cp-separate"> One channel per sector</label>
-                                    <input type="text" id="cp-locked" class="form-input" placeholder="locked radios (keep as is)">
-                                    <label class="header-checkbox" title="Also score the plan in the what-if box above">
-                                        <input type="checkbox" id="cp-compare" checked> Compare with what-if box</label>
-                                    <label>Plans <select id="cp-top" class="form-input">
-                                        <option>1</option><option selected>3</option><option>5</option></select></label>
-                                    <label title="Length of the maintenance window created by Schedule">Window
-                                        <select id="cp-maint-hours" class="form-input">
-                                            <option value="1">1 h</option><option value="2" selected>2 h</option>
-                                            <option value="4">4 h</option><option value="8">8 h</option></select></label>
-                                    <button id="cp-run" class="btn btn-primary btn-small">Suggest channels</button>
-                                    <span id="cp-status" class="form-hint"></span>
-                                </div>
-                                <div id="cp-results"></div>
-                            </details>
                         </aside>
                     </div>
+                </div>
+            </div>
+
+            <!-- Channel Planning View (channel-planner.js, wifi-scans.js) -->
+            <div id="planning-view" class="view-container">
+                <div class="diag-scroll plan-page">
+                    <section class="diag-section">
+                        <h3>Channel planner <small class="form-hint">suggests channels; nothing is saved and no radio is touched</small></h3>
+                        <p class="form-hint">Whole channel inside the band, sectors keep their clients, one channel per radio on a mast with
+                            guard bands between them, clear of radios in the beams, away from the WiFi the scans below heard.
+                            Only frequency and width are changed.</p>
+                        <div class="cp-form">
+                            <label>Plan for
+                                <select id="cp-target" class="form-input">
+                                    <option value="sites" selected>Sites</option>
+                                    <option value="infrastructure">All infrastructure</option>
+                                    <option value="radios">Radios</option>
+                                </select>
+                            </label>
+                            <span id="cp-sites" class="cp-sites" title="Tick one site, or several to plan them together"></span>
+                            <input type="text" id="cp-radios" class="form-input cp-radios" hidden placeholder="radio names, comma separated">
+                            <span id="cp-infra-note" class="form-hint" hidden>every infrastructure site together, with the clients of each sector</span>
+                        </div>
+                        <div class="cp-form">
+                            <label>Band <input type="number" id="cp-band-low" class="form-input cm-num" value="5650" step="5">
+                                &ndash; <input type="number" id="cp-band-high" class="form-input cm-num" value="5925" step="5"> MHz</label>
+                            <span class="cp-widths">Widths:
+                                <label class="header-checkbox"><input type="checkbox" id="cp-keep-width" checked> keep current</label>
+                                <label class="header-checkbox"><input type="checkbox" class="cp-width" value="10"> 10</label>
+                                <label class="header-checkbox"><input type="checkbox" class="cp-width" value="20" checked> 20</label>
+                                <label class="header-checkbox"><input type="checkbox" class="cp-width" value="40"> 40</label>
+                            </span>
+                        </div>
+                        <div class="cp-form">
+                            <label class="header-checkbox" title="Sectors and the RF-linked radios they serve (and both ends of a PtP link) get one channel">
+                                <input type="checkbox" id="cp-move-clients" checked> Move clients with their sector</label>
+                            <label class="header-checkbox" title="Point-to-point dishes with no RF links are suggested off instead of getting a channel">
+                                <input type="checkbox" id="cp-idle-off" checked> Turn off idle dishes</label>
+                            <label class="header-checkbox" title="AREDN recommends a different channel per sector: radios on one mast sharing a channel can halve site throughput">
+                                <input type="checkbox" id="cp-separate" checked> One channel per sector</label>
+                            <input type="text" id="cp-locked" class="form-input" placeholder="locked radios (keep as is)">
+                            <label>Plans <select id="cp-top" class="form-input">
+                                <option>1</option><option selected>3</option><option>5</option></select></label>
+                            <label title="Length of the maintenance window created by Schedule">Window
+                                <select id="cp-maint-hours" class="form-input">
+                                    <option value="1">1 h</option><option value="2" selected>2 h</option>
+                                    <option value="4">4 h</option><option value="8">8 h</option></select></label>
+                        </div>
+                        <details class="diag-details" id="cp-compare-box">
+                            <summary>Score my own plan too (optional)</summary>
+                            <p class="form-hint">One radio per line: <code>name frequency [width]</code> or <code>name off</code>.
+                                It is scored the same way as the suggested plans.</p>
+                            <textarea id="cp-compare-text" class="form-input cm-whatif-text" rows="6" placeholder="w0gq-col-rkt-n 5915 20"></textarea>
+                            <div class="cm-whatif-actions">
+                                <button id="cp-compare-from-map" class="btn btn-secondary btn-small" title="Copy the Channel Map's what-if box here">Use Channel Map what-if</button>
+                                <button id="cp-compare-clear" class="btn btn-secondary btn-small">Clear</button>
+                            </div>
+                        </details>
+                        <div class="cp-form">
+                            <button id="cp-run" class="btn btn-primary">Suggest channels</button>
+                            <span id="cp-status" class="form-hint"></span>
+                        </div>
+                        <div id="cp-results"></div>
+                    </section>
+                    <section class="diag-section">
+                        <h3>WiFi scan results <small class="form-hint">what each radio heard, and how busy each frequency is</small></h3>
+                        <div class="cp-form">
+                            <label>Scan <select id="ws-pick" class="form-input"></select></label>
+                            <label>Range <select id="ws-range" class="form-input">
+                                <option value="5640-5930" selected>Ham band (5650&ndash;5925)</option>
+                                <option value="5150-5930">All 5 GHz</option>
+                            </select></label>
+                            <label class="header-checkbox"><input type="checkbox" id="ws-mesh"> List mesh radios too</label>
+                            <button id="ws-reload" class="btn btn-secondary btn-small">Reload</button>
+                            <span id="ws-status" class="form-hint"></span>
+                        </div>
+                        <div id="ws-chart"></div>
+                        <div id="ws-slot" class="ws-slot-detail"></div>
+                        <div id="ws-table"></div>
+                    </section>
                 </div>
             </div>
 
@@ -1691,6 +1729,7 @@
     <script src="{{ url_for('static', filename='js/geo-map.js') }}"></script>
     <script src="{{ url_for('static', filename='js/nav-menu.js') }}"></script>
     <script src="{{ url_for('static', filename='js/channel-planner.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/wifi-scans.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rollouts.js') }}"></script>
     <script src="{{ url_for('static', filename='js/ghost-trackers.js') }}"></script>
     <script src="{{ url_for('static', filename='js/babel-view.js') }}"></script>
