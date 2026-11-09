@@ -304,6 +304,8 @@ def _direction(cur, src, dst, dst_macs, start, now, stale_after):
         return round(fn(vals), 1) if vals else None
 
     avg = lambda v: sum(v) / len(v)
+    tx_rows = [h for h in hist if h.get('tx_quality') is not None and h.get('quality') is not None]
+    masked = sum(1 for h in tx_rows if link_health.lqm_masked(h))
     routable_vals = [h['routable'] for h in lqm_rows if h.get('routable') is not None]
     d['window'] = {
         'samples': len(hist),
@@ -311,6 +313,8 @@ def _direction(cur, src, dst, dst_macs, start, now, stale_after):
         'quality_avg': stat('quality', avg), 'quality_min': stat('quality', min),
         'lq_avg': stat('lq', avg), 'tx_quality_avg': stat('tx_quality', avg),
         'ping_quality_avg': stat('ping_quality', avg),
+        'masked_samples': masked, 'masked_pct': _pct(masked, len(tx_rows)),
+        'effective_quality_avg': round(avg([link_health.effective_quality(h) for h in tx_rows]), 1) if tx_rows else None,
         'snr_avg': stat('snr', avg), 'snr_min': stat('snr', min), 'snr_max': stat('snr', max),
         'signal_avg': stat('signal', avg), 'signal_min': stat('signal', min),
         'signal_max': stat('signal', max),
@@ -717,6 +721,37 @@ def _check_rates(ctx, f):
                  [f"{len(tests)} iPerf test(s) in window"])
 
 
+def _check_masked_quality(ctx, f):
+    """A high LQM quality that hides heavy retries: once retries reach the
+    frames sent AREDN shows ping quality alone (link_health.lqm_masked)."""
+    for d in ctx['directions']:
+        if not d['found'] or not d['fresh']:
+            continue
+        w = d.get('window') or {}
+        now = link_health.lqm_masked(d)
+        pct = w.get('masked_pct')
+        if not now and (pct is None or pct < link_health.MASKED_MARGINAL_PCT):
+            continue
+        src, dst = d['source'], d['target']
+        retry = w.get('tx_retry_pct') if w.get('tx_retry_pct') is not None else d.get('tx_retry_pct_recent')
+        evidence = [f"{src} tx_quality {d['tx_quality']:.0f}% now, quality shown {d['quality']:.0f}%" if now
+                    else f"{src} quality shown {d['quality']:.0f}% now" if d.get('quality') is not None else None]
+        if pct is not None:
+            evidence.append(f"{pct:.0f}% of {src}'s samples in the window hid retries "
+                            f"(quality {w.get('quality_avg')}% shown, {w.get('effective_quality_avg')}% "
+                            f"counting transmit quality)")
+        if retry is not None:
+            evidence.append(f"{src} TX retries {retry}% of frames")
+        sev = 'warning' if now or (pct or 0) >= link_health.MASKED_POOR_PCT else 'info'
+        _add(f, sev, 'quality', f"{src}'s link quality to {dst} hides heavy retries",
+             f"AREDN's quality is the average of transmit quality (frames sent without a retry) and ping "
+             f"quality. When {src}'s retries reach the frames it sends, transmit quality is 0 and AREDN "
+             f"skips it, so quality shows ping quality alone (usually 100%). A 100% here is the worst "
+             f"transmit state, not a perfect link.", [e for e in evidence if e],
+             f"Judge this direction by its retries (node page Radio Details), not its quality; check the "
+             f"ACK window, interference at {dst} and each radio's chains.")
+
+
 def _check_quality_breakdown(ctx, f):
     for d in ctx['directions']:
         if not d['found'] or not d['fresh'] or d.get('quality') is None or d['quality'] >= 70:
@@ -1032,7 +1067,7 @@ def _check_noise_band(ctx, f):
         return
     impaired = any(_receive_impaired(ctx, e) for e in ctx['pair'])
     hits = []
-    for rng in cp.NOISE_RANGES:
+    for rng in cp.noise_ranges():
         ov = min(a['high'], rng['high']) - max(a['low'], rng['low'])
         if ov > 0:
             hits.append((rng, ov))
@@ -1057,7 +1092,7 @@ def _check_noise_band(ctx, f):
          [f"{r['label']}: {ov:.0f} MHz of the channel" for r, ov in hits],
          ("Keep the whole channel above 5650 MHz: "
           + ("TDWR airport weather radar (5600–5650) is strong and pulsed, and AREDN radios don't avoid it."
-             if config.TDWR_NEARBY else "below it is outside the 5 GHz amateur allocation.")
+             if cp.tdwr_nearby() else "below it is outside the 5 GHz amateur allocation.")
           + f" At {a['chanbw'] or 20:.0f} MHz wide that means a "
           f"centre of {5650 + (a['chanbw'] or 20) / 2 + 5:.0f} MHz or higher (or a narrower channel)."
           if tdwr else ("Prefer channels away from UNII-3 Wi-Fi (5735–5835) if noise is high."
@@ -1180,7 +1215,7 @@ def _check_watch(ctx, f):
 
 
 CHECKS = (_check_visibility, _check_delivery, _check_receivers, _check_rf, _check_near_far,
-          _check_routing, _check_rates, _check_quality_breakdown, _check_flaps, _check_config,
+          _check_routing, _check_rates, _check_masked_quality, _check_quality_breakdown, _check_flaps, _check_config,
           _check_interference, _check_noise_band, _check_nodes, _check_ping, _check_watch)
 
 

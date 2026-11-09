@@ -14,7 +14,8 @@
             <div class="header-left">
                 <h1 id="node-page-title">{{ node_name }}</h1>
                 <nav class="header-tabs">
-                    <a class="tab-btn active" href="/">Topology</a>
+                    <a class="tab-btn active" href="/">&larr; Monitor</a>
+                    <a class="tab-btn" href="/#/network">Topology</a>
                 </nav>
             </div>
             <div class="header-controls">
@@ -48,24 +49,33 @@
         <div id="node-welcome" class="node-welcome" hidden></div>
 
         <main class="node-page-content">
-            <section class="node-page-section">
+            <!-- Section groups (node-tabs.js); "All" shows the whole page -->
+            <nav class="node-group-tabs" id="node-group-tabs" aria-label="Node page sections">
+                <button type="button" class="node-group-btn" data-group="overview">Overview</button>
+                <button type="button" class="node-group-btn" data-group="radio">Radio</button>
+                <button type="button" class="node-group-btn" data-group="links">Links</button>
+                <button type="button" class="node-group-btn" data-group="history">History</button>
+                <button type="button" class="node-group-btn" data-group="tools">Tools</button>
+                <button type="button" class="node-group-btn" data-group="all">All</button>
+            </nav>
+            <section class="node-page-section" data-group="overview">
                 <h2>Node Information</h2>
                 <div id="node-summary"></div>
             </section>
 
-            <section class="node-page-section">
+            <section class="node-page-section" data-group="overview">
                 <h2>Setup Checklist <a id="node-align-link" class="btn btn-small btn-secondary" href="/field/align"
                     title="Live SNR to a chosen neighbour for tower work (phone-friendly)">Alignment mode</a></h2>
                 <div id="node-setup"><p class="loading">Loading...</p></div>
             </section>
 
-            <section class="node-page-section">
+            <section class="node-page-section" data-group="overview">
                 <h2>Services</h2>
                 <div id="node-services"></div>
                 <div id="node-service-checks"></div>
             </section>
 
-            <section class="node-page-section">
+            <section class="node-page-section" data-group="overview">
                 <h2>Node Health</h2>
                 <div id="node-health-summary"></div>
                 <div class="node-page-charts">
@@ -81,13 +91,19 @@
             </section>
 
             <!-- Prometheus details (TODO #63/#64/#68, node-prom.js) -->
-            <section class="node-page-section">
+            <section class="node-page-section" data-group="radio">
                 <h2>Prometheus Details</h2>
                 <div id="node-prom"><p class="loading">Loading...</p></div>
                 <p id="node-embed-links" class="form-hint"></p>
             </section>
 
-            <section class="node-page-section">
+            <!-- Radio details over SSH (ssh_collect.py, node-ssh.js) -->
+            <section class="node-page-section" data-group="radio">
+                <h2>Radio Details (SSH)</h2>
+                <div id="node-ssh"><p class="loading">Loading...</p></div>
+            </section>
+
+            <section class="node-page-section" data-group="links">
                 <h2>Recent Link Metrics <label class="header-checkbox wx-inline" title="Overlay NWS rain, temperature and wind on the quality and SNR charts">
                     <input type="checkbox" id="np-weather-toggle"> Weather</label></h2>
                 <div class="node-page-charts">
@@ -110,7 +126,7 @@
                 </div>
             </section>
 
-            <section class="node-page-section">
+            <section class="node-page-section" data-group="links">
                 <h2>Connected Nodes</h2>
                 <div id="node-links"></div>
                 <h3 class="subsection-heading">Link Health</h3>
@@ -118,7 +134,7 @@
             </section>
 
             <!-- Changes (TODO #1) -->
-            <section class="node-page-section">
+            <section class="node-page-section" data-group="history">
                 <h2>Changes <button id="node-chg-add" class="btn btn-small btn-primary">Add change</button></h2>
                 <div id="node-chg-form" class="chg-form" hidden>
                     <div class="chg-form-grid">
@@ -144,13 +160,13 @@
                 <div id="node-changes"><p class="loading">Loading...</p></div>
             </section>
 
-            <!-- Power advisor (TODO #11, power-advisor.js) -->
-            <section class="node-page-section">
+            <!-- Babel costs (babel_view.py, node-extras.js) -->
+            <section class="node-page-section" data-group="links">
                 <h2>Babel Costs</h2>
                 <div id="node-babel"><p class="form-hint">Loading...</p></div>
             </section>
 
-            <section class="node-page-section" id="power-advisor">
+            <section class="node-page-section" data-group="radio" id="power-advisor">
                 <h2>Power Advisor</h2>
                 <p class="health-footnote">Predicts what every RF neighbour would hear from this radio after a TX power cut
                     (its SNR drops by the cut; noise doesn't change). Nothing is sent to the radio. Infrastructure radios are never cut.</p>
@@ -158,19 +174,19 @@
             </section>
 
             <!-- Notes (TODO #23, notes.js) -->
-            <section class="node-page-section">
+            <section class="node-page-section" data-group="overview">
                 <h2>Notes</h2>
                 <p class="health-footnote">Notes on this node, its links and its site. Pinned notes also show in the Nodes table, the network side panel, link diagnoses and the Channel Map; notes with a time appear as amber dotted markers on charts.</p>
                 <div id="node-notes"><p class="loading">Loading...</p></div>
             </section>
 
-            <section class="node-page-section">
+            <section class="node-page-section" data-group="tools">
                 <h2>Incident Probes</h2>
                 <p class="health-footnote">High-rate bidirectional pings captured automatically while a watched link is dropped, LQM-blocked, or marginal. Forward and reverse rows isolate which direction is failing.</p>
                 <div id="node-incident-probes"></div>
             </section>
 
-            <section class="node-page-section">
+            <section class="node-page-section" data-group="tools">
                 <h2>Problem Report &amp; Troubleshooting</h2>
                 <p class="health-footnote"><strong>Report Problems</strong> lists every detected problem with the node and explains it (read-only; adds an AI narrative when enabled). <strong>Troubleshoot</strong> actively probes each problem &mdash; live pings, a traceroute, and neighbor-relayed pings &mdash; to localize and confirm it.</p>
                 <div class="report-actions">
@@ -181,7 +197,7 @@
                 <div id="node-troubleshoot"></div>
             </section>
 
-            <section class="node-page-section">
+            <section class="node-page-section" data-group="tools">
                 <h2>Test Results</h2>
                 <div class="traceroute-tool">
                     <h3 class="subsection-heading-inline">Traceroute</h3>
@@ -205,7 +221,7 @@
                 </div>
             </section>
 
-            <section class="node-page-section">
+            <section class="node-page-section" data-group="history">
                 <h2>Node Log</h2>
                 <input type="text" id="node-log-search" class="form-input" placeholder="Search this node log...">
                 <div id="node-log" class="connectivity-log"></div>
@@ -232,5 +248,7 @@
     <script src="{{ url_for('static', filename='js/new-nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/node-extras.js') }}"></script>
     <script src="{{ url_for('static', filename='js/node-prom.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/node-ssh.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/node-tabs.js') }}"></script>
 </body>
 </html>

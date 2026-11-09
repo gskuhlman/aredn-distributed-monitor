@@ -175,6 +175,7 @@ const NodesModule = {
     linkTypeBucket(linkType) {
         const t = String(linkType || '').toUpperCase();
         if (t === 'RF') return 'rf';
+        if (t === 'DTD') return 'dtd';
         if (t === 'WIREGUARD' || t === 'WG') return 'wireguard';
         if (t === 'TUN' || t === 'TUNNEL' || t === 'VTUN') return 'tunnel';
         return null;
@@ -194,6 +195,9 @@ const NodesModule = {
 
     filterNodes() {
         const search = (document.getElementById('nodes-search')?.value || '').toLowerCase();
+        // Which nodes comes from the shared filter bar (global-filter.js writes
+        // #nodes-scope); the page's own select is node status only.
+        const scope = document.getElementById('nodes-scope')?.value || 'all';
         const status = document.getElementById('nodes-status-filter')?.value || 'all';
         const typeFilter = document.getElementById('nodes-type-filter')?.value || 'all';
         const sortBy = document.getElementById('nodes-sort')?.value || 'alpha';
@@ -202,10 +206,10 @@ const NodesModule = {
         const now = Date.now();
         const ms24h = 24 * 60 * 60 * 1000;
         const ms7d = 7 * ms24h;
-        const selectedNames = status === 'selected' ? this.getSelectedNodeNames() : null;
-        const selectedConnectedNames = status === 'selected-connected' ? this.getSelectedConnectedNodeNames() : null;
-        const infraNames = status.startsWith('infrastructure') ? this.getInfrastructureNodeNames() : null;
-        const infraSet = status === 'infrastructure-connected' ? this.withConnected(infraNames) : infraNames;
+        const selectedNames = scope === 'selected' ? this.getSelectedNodeNames() : null;
+        const selectedConnectedNames = scope === 'selected-connected' ? this.getSelectedConnectedNodeNames() : null;
+        const infraNames = scope.startsWith('infrastructure') ? this.getInfrastructureNodeNames() : null;
+        const infraSet = scope === 'infrastructure-connected' ? this.withConnected(infraNames) : infraNames;
         const typeNames = typeFilter !== 'all' ? this.nodesWithLinkType(typeFilter) : null;
 
         // The neighbours that report a link-only node are not searched: "w0gq"
@@ -232,14 +236,17 @@ const NodesModule = {
                 services.includes(search) ||
                 observedStatus.includes(search);
 
-            let matchesStatus = true;
-            if (status === 'selected') {
-                matchesStatus = selectedNames.has(node.name);
-            } else if (status === 'selected-connected') {
-                matchesStatus = selectedConnectedNames.has(node.name);
+            let matchesScope = true;
+            if (scope === 'selected') {
+                matchesScope = selectedNames.has(node.name);
+            } else if (scope === 'selected-connected') {
+                matchesScope = selectedConnectedNames.has(node.name);
             } else if (infraSet) {
-                matchesStatus = infraSet.has(node.name);
-            } else if (status === 'active') {
+                matchesScope = infraSet.has(node.name);
+            }
+
+            let matchesStatus = true;
+            if (status === 'active') {
                 matchesStatus = node.is_active === 1 && !node.is_link_only;
             } else if (status === 'link-only') {
                 matchesStatus = !!node.is_link_only;
@@ -257,7 +264,7 @@ const NodesModule = {
 
             const matchesInfra = InfraFilter.matchesNode(node, infra);
 
-            return matchesSearch && matchesStatus && matchesType && matchesInfra;
+            return matchesSearch && matchesScope && matchesStatus && matchesType && matchesInfra;
         });
 
         // Sort

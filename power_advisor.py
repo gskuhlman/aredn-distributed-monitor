@@ -253,17 +253,25 @@ def advise(node_name, cut_db=None, hours=24):
         if latest and (now - latest).total_seconds() > stale_after:
             now = latest
         neighbours = _neighbours(cur, name, hours, now, stale_after)
+        tx_power = node.get('rf_txpower')
+        if tx_power is None:
+            try:
+                import ssh_health
+                tx_power = ssh_health.tx_power(name)
+            except Exception:  # SSH tables missing: relative cuts only
+                tx_power = None
         base = {
             'node': name, 'generated_at': datetime.now().strftime(ld.TS_FMT), 'as_of': now.strftime(ld.TS_FMT),
             'hours': hours,
             'is_infrastructure': name in infra,
-            'tx_power_dbm': node.get('rf_txpower'),
+            'tx_power_dbm': tx_power,
             'thresholds': {'min_snr': min_snr, 'margin_db': margin, 'hot_snr': ld.HOT_SNR,
                            'hot_signal_dbm': ld.HOT_SIGNAL_DBM, 'target_snr': ld.TARGET_SNR,
                            'max_cut_db': MAX_CUT_DB},
             'notes': ['Cuts are relative dB: AREDN sysinfo does not report TX power.'
-                      if node.get('rf_txpower') is None else
-                      f"Current TX power {node['rf_txpower']:g} dBm (as reported)."],
+                      if tx_power is None else
+                      f"Current TX power {tx_power:g} dBm (as reported"
+                      + (' over SSH' if node.get('rf_txpower') is None else '') + ').'],
         }
         if name in infra:
             # What this radio hears from each non-infrastructure neighbour:

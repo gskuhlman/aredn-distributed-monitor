@@ -333,6 +333,32 @@ MCS_RATE_DROP_PCT = env_int("MCS_RATE_DROP_PCT", 40)
 MCS_SNR_HOLD_DB = env_int("MCS_SNR_HOLD_DB", 3)
 # Spectrum scan reminders (spectrum_view.py).
 SCAN_REMINDER_DAYS = env_int("SCAN_REMINDER_DAYS", 14)
+# Hourly watch: infrastructure RF links far below their potential (link_potential.py).
+LINK_POTENTIAL_WATCH_ENABLED = env_bool("LINK_POTENTIAL_WATCH_ENABLED", True)
+# Radio details over SSH (ssh_collect.py): key login only, runs once the key file exists.
+SSH_COLLECT_ENABLED = env_bool("SSH_COLLECT_ENABLED", True)
+SSH_EXE = os.environ.get("SSH_EXE", "")                  # empty = Windows OpenSSH, else ssh on PATH
+SSH_KEYGEN_EXE = os.environ.get("SSH_KEYGEN_EXE", "")
+SSH_KEY_PATH = os.environ.get("SSH_KEY_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ssh", "aredn_monitor_ed25519"))
+SSH_KNOWN_HOSTS = os.environ.get("SSH_KNOWN_HOSTS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ssh", "known_hosts"))
+SSH_PORT = env_int("SSH_PORT", 2222)
+SSH_USER = os.environ.get("SSH_USER", "root")
+SSH_NODES = os.environ.get("SSH_NODES", "")              # extra nodes besides infrastructure, comma separated
+SSH_TIMEOUT_SECONDS = env_int("SSH_TIMEOUT_SECONDS", 60)
+SSH_CONNECT_TIMEOUT_SECONDS = env_int("SSH_CONNECT_TIMEOUT_SECONDS", 10)
+SSH_INTERVAL_MINUTES = env_int("SSH_INTERVAL_MINUTES", 15)
+SSH_SLOW_HOURS = env_int("SSH_SLOW_HOURS", 24)
+SSH_RETRY_HOURS = env_int("SSH_RETRY_HOURS", 6)
+SSH_SNAPSHOT_KEEP = env_int("SSH_SNAPSHOT_KEEP", 7)
+SSH_CHAIN_IMBALANCE_DB = env_int("SSH_CHAIN_IMBALANCE_DB", 10)
+# ssh_health.py alarms
+SSH_RETRY_RATIO = float(os.environ.get("SSH_RETRY_RATIO", "0.5"))   # tx retries per tx packet
+SSH_RETRY_MIN_PPS = env_int("SSH_RETRY_MIN_PPS", 20)                # ...with at least this much traffic
+SSH_RECONNECTS_PER_DAY = env_int("SSH_RECONNECTS_PER_DAY", 3)
+SSH_EXT_BUSY_PCT = env_int("SSH_EXT_BUSY_PCT", 20)                  # airtime busy with energy the radio cannot decode
+SSH_RX_ERROR_PCT = env_int("SSH_RX_ERROR_PCT", 20)                  # received MPDUs failing FCS / MIC / decrypt
+SSH_ETH_FLAPS_PER_HOUR = env_int("SSH_ETH_FLAPS_PER_HOUR", 2)
+SSH_CLOCK_SKEW_SECONDS = env_int("SSH_CLOCK_SKEW_SECONDS", 120)
 # A TDWR airport weather radar (5600-5650 MHz) within range of the mesh. The
 # nearest to Cedar Rapids are Chicago, Milwaukee and Minneapolis (300+ km), so
 # off: 5600-5650 is then only "below the ham band" and 5650-5660 is not penalised.

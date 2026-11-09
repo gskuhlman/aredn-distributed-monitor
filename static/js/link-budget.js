@@ -34,7 +34,7 @@ const LinkBudget = {
         status.textContent = 'Computing (first run looks up ground elevations)...';
         el.innerHTML = '<p class="log-empty">Loading...</p>';
         try {
-            const d = await fetch('/api/reports/link-budget?hours=24').then(r => r.json());
+            const d = await fetch(`/api/reports/link-budget?hours=${((typeof GlobalFilter !== 'undefined') ? GlobalFilter.hours() : 24)}`).then(r => r.json());
             status.textContent = `${d.links.length} RF link(s) with an infrastructure end`;
             if (!d.links.length) {
                 el.innerHTML = '<p class="log-empty">No current RF links touch infrastructure.</p>';

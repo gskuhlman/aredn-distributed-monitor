@@ -16,9 +16,9 @@ const Rollouts = {
         document.getElementById('ro-check')?.addEventListener('click', () => this.check());
         document.getElementById('ro-create')?.addEventListener('click', () => this.createFromText());
         document.getElementById('ro-list').addEventListener('click', (event) => this.onClick(event));
-        // Follow the scans while the Changes tab is open.
+        // Follow the scans while the Planning page is open.
         setInterval(() => {
-            if (document.getElementById('changes-view')?.classList.contains('active')) this.load();
+            if (document.getElementById('planning-view')?.classList.contains('active')) this.load();
         }, 60000);
     },
 
@@ -101,7 +101,8 @@ const Rollouts = {
                     <td>${this.chan(s.old_frequency, s.old_chanbw, s.old_channel)}</td>
                     <td>${s.turn_off ? 'radio off' : this.chan(s.new_frequency, s.new_chanbw, s.new_channel)}</td>
                     <td>${this.stepBadge(s)}${s.id === ro.next_step ? ' <small>next</small>' : ''}</td>
-                    <td class="form-hint">${this.esc(s.detail || (s.peers.length ? 'peers: ' + s.peers.join(', ') : ''))}</td>
+                    <td class="form-hint">${this.esc(s.detail || (s.peers.length ? 'peers: ' + s.peers.join(', ') : ''))}${s.instructions
+                        ? `${s.detail || s.peers.length ? '<br>' : ''}<strong>${this.esc(s.instructions)}</strong>` : ''}</td>
                     <td>${ro.status === 'active' ? (s.status === 'pending'
                         ? `<button class="btn btn-small btn-secondary" data-ro="skipped" data-step="${s.id}">Skip</button>
                            <button class="btn btn-small btn-secondary" data-ro="changed" data-step="${s.id}" title="The scanner can't read this radio: mark it changed by hand">Done by hand</button>`

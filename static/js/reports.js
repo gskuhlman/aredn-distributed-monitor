@@ -37,7 +37,7 @@ const ReportsModule = {
         $('rpt-scrub')?.addEventListener('input', () => this.onScrub());
         $('rpt-detail-close')?.addEventListener('click', () => this.closeDetail());
         $('rpt-search')?.addEventListener('input', () => this.scheduleLoad(350));
-        for (const id of ['rpt-scope', 'rpt-link-type', 'rpt-sample-type', 'rpt-severity']) {
+        for (const id of ['rpt-scope', 'rpt-node-status', 'rpt-link-type', 'rpt-sample-type', 'rpt-severity']) {
             $(id)?.addEventListener('change', () => this.load());
         }
         document.querySelectorAll('.rpt-event-cat').forEach(cb =>
@@ -210,7 +210,10 @@ const ReportsModule = {
         const params = new URLSearchParams({
             start: document.getElementById('rpt-start').value,
             end: document.getElementById('rpt-end').value,
-            scope: document.getElementById('rpt-scope').value,
+            // A node status (RF-only / active / inactive) replaces the Nodes filter.
+            scope: (document.getElementById('rpt-node-status')?.value || 'any') !== 'any'
+                ? document.getElementById('rpt-node-status').value
+                : document.getElementById('rpt-scope').value,
             link_type: document.getElementById('rpt-link-type').value,
             sample_type: document.getElementById('rpt-sample-type').value,
             severity: document.getElementById('rpt-severity').value,
@@ -274,6 +277,7 @@ const ReportsModule = {
         const nodeRows = showExplained ? d.nodes : d.nodes.filter(n => !n.explained);
         this.renderTable('rpt-nodes', nodeRows, [
             ['name', 'Node'], ['ip', 'IP'], ['model', 'Model'],
+            ['uptime_pct', 'Uptime %', 2], ['down_minutes', 'Down (min)', 0],
             ['polls', 'Polls'], ['reachable_pct', 'Reachable %', 1], ['unreachable', 'Unreachable'],
             ['cause_label', 'Unreachable Cause'],
             ['degraded', 'Degraded'], ['avg_response_ms', 'Avg Resp (ms)', 0],
@@ -372,7 +376,7 @@ const ReportsModule = {
 
     async excludeNode(name, button) {
         if (!confirm(`Stop scanning ${name}? It will never be polled (scan boundary "exclude"). ` +
-                     'You can clear this on the Diagnostics tab.')) return;
+                     'You can clear this on the Setup page (Cleanup).')) return;
         button.disabled = true;
         try {
             const resp = await fetch(`/api/scan-boundaries/${encodeURIComponent(name)}`, {
@@ -395,11 +399,15 @@ const ReportsModule = {
 
     renderSummary() {
         const s = this.data.summary;
+        // Average uptime % of the nodes the monitor can judge (uptime.py).
+        const ups = (this.data.nodes || []).map(n => n.uptime_pct).filter(v => v !== null && v !== undefined);
+        const avgUptime = ups.length ? (ups.reduce((a, b) => a + b, 0) / ups.length).toFixed(2) : null;
         const tiles = [
             ['Nodes', s.nodes],
             ['Links', s.links],
             ['Node Polls', s.polls],
             ['Reachable', s.reachable_pct === null ? '-' : `${s.reachable_pct}%`],
+            ['Avg Uptime', avgUptime === null ? '-' : `${avgUptime}%`],
             ['Down / Intermittent', `${s.really_down_nodes ?? 0} / ${s.intermittent_nodes ?? 0}`],
             ['Explained Unreachable', `${s.explained_unreachable_nodes ?? 0} nodes`],
             ['Link Samples', s.link_samples],

@@ -33,6 +33,8 @@ function getGraphFilters() {
         rfOnly: document.getElementById('filter-rf-only')?.checked || false,
         selectedOnly: document.getElementById('scan-selected-only')?.checked || false,
         infraOnly: document.getElementById('filter-infra-only')?.checked || false,
+        selectedView: document.getElementById('filter-selected-view')?.checked || false,
+        neighbours: document.getElementById('filter-neighbours')?.checked || false,
         infra: document.getElementById('filter-infra')?.value || 'all'
     };
 }
@@ -52,10 +54,22 @@ function filterNetworkData(data) {
         edges = edges.filter(edge => selectedIds.has(edge.from) && selectedIds.has(edge.to));
     }
 
-    if (filters.infraOnly) {
-        const infraIds = new Set(nodes.filter(node => node.is_infrastructure).map(node => node.id));
-        nodes = nodes.filter(node => infraIds.has(node.id));
-        edges = edges.filter(edge => infraIds.has(edge.from) && infraIds.has(edge.to));
+    // Infrastructure / selected nodes, plus (with + neighbours) every node one
+    // RF or DtD hop from them, like the `-connected` scopes on the server.
+    if (filters.infraOnly || filters.selectedView) {
+        const keep = new Set(nodes.filter(node =>
+            (filters.infraOnly && node.is_infrastructure) || (filters.selectedView && node.is_selected)).map(node => node.id));
+        if (filters.neighbours) {
+            const base = new Set(keep);
+            for (const edge of edges) {
+                const type = String(edge.link_type || '').toUpperCase();
+                if (type !== 'RF' && type !== 'DTD') continue;
+                if (base.has(edge.from)) keep.add(edge.to);
+                if (base.has(edge.to)) keep.add(edge.from);
+            }
+        }
+        nodes = nodes.filter(node => keep.has(node.id));
+        edges = edges.filter(edge => keep.has(edge.from) && keep.has(edge.to));
     }
 
     if (filters.infra !== 'all') {
@@ -1547,6 +1561,7 @@ async function loadSettings() {
         document.getElementById('link-remove-after').value = settings.link_remove_after_minutes || 60;
         document.getElementById('new-node-days').value = settings.new_node_days || 30;
         document.getElementById('database-retention-days').value = settings.database_retention_days || 90;
+        document.getElementById('tdwr-nearby').checked = settings.tdwr_nearby === 'true';
         loadScanBoundaries();
 
         // Update poll interval for countdown
@@ -1585,7 +1600,8 @@ async function saveSettings() {
                 poll_interval: newPollInterval,
                 link_remove_after_minutes: linkRemoveAfter,
                 new_node_days: newNodeDays,
-                database_retention_days: databaseRetentionDays
+                database_retention_days: databaseRetentionDays,
+                tdwr_nearby: document.getElementById('tdwr-nearby').checked
             })
         });
 
@@ -1674,6 +1690,27 @@ const EVENT_ICONS = {
     'mcs_restored': { icon: '&#128246;', label: 'MCS Back to Usual', class: 'event-success' },
     'link_alert': { icon: '&#128276;', label: 'Link Alert', class: 'event-warning' },
     'link_alert_cleared': { icon: '&#128277;', label: 'Link Alert Cleared', class: 'event-success' },
+    // Infrastructure links far below their potential (link_potential.py)
+    'link_underperforming': { icon: '&#128201;', label: 'Link Below Potential', class: 'event-warning' },
+    'link_underperforming_cleared': { icon: '&#128200;', label: 'Link Back Near Potential', class: 'event-success' },
+    // Antenna chain / stream alarms (ssh_collect.py)
+    'radio_chain_alarm': { icon: '&#128225;', label: 'Antenna Chain / Stream', class: 'event-warning' },
+    'radio_chain_cleared': { icon: '&#128225;', label: 'Antenna Chains OK', class: 'event-success' },
+    // More SSH radio health alarms (ssh_health.py)
+    'radio_retries_high': { icon: '&#128257;', label: 'Heavy Retries', class: 'event-warning' },
+    'radio_retries_cleared': { icon: '&#128257;', label: 'Retries Normal', class: 'event-success' },
+    'radio_reconnects': { icon: '&#128279;', label: 'Link Reconnects', class: 'event-warning' },
+    'radio_reconnects_cleared': { icon: '&#128279;', label: 'Reconnects Stopped', class: 'event-success' },
+    'radio_interference': { icon: '&#128246;', label: 'Airtime Used by Others', class: 'event-warning' },
+    'radio_interference_cleared': { icon: '&#128246;', label: 'Airtime Normal', class: 'event-success' },
+    'radio_rx_errors': { icon: '&#9888;', label: 'Receive Errors', class: 'event-warning' },
+    'radio_rx_errors_cleared': { icon: '&#9888;', label: 'Receive Errors Normal', class: 'event-success' },
+    'ethernet_problem': { icon: '&#128268;', label: 'Ethernet Port Problem', class: 'event-warning' },
+    'ethernet_cleared': { icon: '&#128268;', label: 'Ethernet Port OK', class: 'event-success' },
+    'radio_distance_short': { icon: '&#128207;', label: 'ACK Window Too Short', class: 'event-warning' },
+    'radio_distance_ok': { icon: '&#128207;', label: 'ACK Window OK', class: 'event-success' },
+    'node_clock_skew': { icon: '&#128339;', label: 'Node Clock Off', class: 'event-warning' },
+    'node_clock_ok': { icon: '&#128339;', label: 'Node Clock OK', class: 'event-success' },
     // Phone connectivity (phones.py)
     'phone_unreachable': { icon: '&#128222;', label: 'Phone Not Answering', class: 'event-warning' },
     'phone_restored': { icon: '&#128222;', label: 'Phone Answering', class: 'event-success' }
@@ -1707,6 +1744,24 @@ async function loadEventLog() {
     }
 }
 
+// Event categories as the Reports tab groups them (/api/events/categories);
+// these few are known before it loads, anything uncategorized is System.
+let eventCategories = {
+    node_discovered: 'node', node_offline: 'node', node_online: 'node',
+    link_new: 'link', link_dropped: 'link', link_removed: 'link', link_restored: 'link',
+    frequency_change: 'freq',
+};
+fetch('/api/events/categories').then(r => r.json()).then(data => {
+    const map = {};
+    for (const [cat, types] of Object.entries(data.categories || {})) types.forEach(t => { map[t] = cat; });
+    eventCategories = map;
+    if (eventLog.length) renderEventLog();
+}).catch(() => { /* keep the built-in few */ });
+
+function eventCategory(type) {
+    return eventCategories[type] || 'system';
+}
+
 /**
  * Render event log with filters
  */
@@ -1714,16 +1769,12 @@ function renderEventLog() {
     const showNodes = document.getElementById('filter-nodes').checked;
     const showLinks = document.getElementById('filter-links').checked;
     const showFreq = document.getElementById('filter-freq').checked;
+    const showSystem = document.getElementById('filter-system')?.checked ?? true;
     const nodeSearch = (document.getElementById('log-node-search')?.value || '').toLowerCase();
-
-    const nodeEvents = ['node_discovered', 'node_offline', 'node_online'];
-    const linkEvents = ['link_new', 'link_dropped', 'link_removed', 'link_restored'];
-    const freqEvents = ['frequency_change'];
+    const shown = { node: showNodes, link: showLinks, freq: showFreq, system: showSystem };
 
     const filtered = eventLog.filter(event => {
-        if (nodeEvents.includes(event.event_type) && !showNodes) return false;
-        if (linkEvents.includes(event.event_type) && !showLinks) return false;
-        if (freqEvents.includes(event.event_type) && !showFreq) return false;
+        if (!shown[eventCategory(event.event_type)]) return false;
         if (nodeSearch) {
             const haystack = `${event.node_name || ''} ${event.details || ''} ${event.event_type || ''}`.toLowerCase();
             if (!haystack.includes(nodeSearch)) return false;
@@ -1836,9 +1887,11 @@ function initEventListeners() {
         renderCurrentNetwork({ notifyChanges: false });
     });
 
-    document.getElementById('filter-infra-only')?.addEventListener('change', () => {
-        renderCurrentNetwork({ notifyChanges: false });
-    });
+    for (const id of ['filter-infra-only', 'filter-selected-view', 'filter-neighbours']) {
+        document.getElementById(id)?.addEventListener('change', () => {
+            renderCurrentNetwork({ notifyChanges: false });
+        });
+    }
 
     document.getElementById('filter-infra').addEventListener('change', () => {
         renderCurrentNetwork({ notifyChanges: false });
@@ -1871,6 +1924,7 @@ function initEventListeners() {
     document.getElementById('filter-nodes').addEventListener('change', renderEventLog);
     document.getElementById('filter-links').addEventListener('change', renderEventLog);
     document.getElementById('filter-freq').addEventListener('change', renderEventLog);
+    document.getElementById('filter-system')?.addEventListener('change', renderEventLog);
     document.getElementById('log-node-search').addEventListener('input', renderEventLog);
 
     // Clear log button

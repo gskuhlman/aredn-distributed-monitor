@@ -31,6 +31,8 @@ const ChannelPlanner = {
         if (!document.getElementById('cp-run')) return;
         this.initialized = true;
         this.loadSites();
+        this.loadProtected();
+        document.getElementById('cp-protected-save')?.addEventListener('click', () => this.saveProtected());
         document.getElementById('cp-run')?.addEventListener('click', () => this.run());
         document.getElementById('cp-target')?.addEventListener('change', () => this.syncTarget());
         document.getElementById('cp-compare-clear')?.addEventListener('click', () => {
@@ -75,6 +77,35 @@ const ChannelPlanner = {
         }
     },
 
+    /** Saved default protected radios (kept by the server for every planner user). */
+    async loadProtected() {
+        const input = document.getElementById('cp-protected');
+        if (!input) return;
+        try {
+            const data = await (await fetch('/api/channel-planner/protected')).json();
+            input.value = (data.radios || []).join(', ');
+        } catch (error) {
+            console.error('Planner protected list error:', error);
+        }
+    },
+
+    async saveProtected() {
+        const input = document.getElementById('cp-protected');
+        try {
+            const resp = await fetch('/api/channel-planner/protected', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ radios: input.value })
+            });
+            const data = await resp.json();
+            if (!resp.ok) { this.setStatus(data.error || 'Saving failed'); return; }
+            input.value = (data.radios || []).join(', ');
+            this.setStatus(data.radios.length ? `Saved: ${data.radios.length} protected radio(s) by default`
+                                              : 'Saved: no protected radios');
+        } catch (error) {
+            this.setStatus('Saving failed');
+        }
+    },
+
     syncTarget() {
         const target = document.getElementById('cp-target').value;
         document.getElementById('cp-sites').hidden = target !== 'sites';
@@ -91,6 +122,7 @@ const ChannelPlanner = {
             band: [low, high],
             widths: document.getElementById('cp-keep-width').checked ? null : widths,
             locked: document.getElementById('cp-locked').value,
+            protected: document.getElementById('cp-protected')?.value ?? null,
             move_clients: document.getElementById('cp-move-clients').checked,
             idle_off: document.getElementById('cp-idle-off')?.checked !== false,
             separate_sectors: document.getElementById('cp-separate')?.checked !== false,
@@ -155,7 +187,9 @@ const ChannelPlanner = {
         el.innerHTML = `
             <p class="form-hint">${groups} channel group(s) in ${d.band.low}–${d.band.high} MHz.
                 Radios in a group share one channel${d.move_clients ? ' (sectors with their RF-linked clients, PtP ends together)' : ''}.
-                Lower score is better.${d.separate_sectors ? ' One channel per radio on each mast.' : ''}</p>
+                Lower score is better.${d.separate_sectors ? ' One channel per radio on each mast.' : ''}
+                ${d.protected?.length ? `Protected (keep their channel, nothing in range may share or overlap it):
+                    <strong>${this.esc(d.protected.join(', '))}</strong>.` : ''}</p>
             ${notes ? `<ul class="diag-evidence">${notes}</ul>` : ''}
             ${d.turn_off?.length ? `<p class="node-warning">Suggested off (every plan below includes this):
                 ${d.turn_off.map(t => `<strong>${this.esc(t.name)}</strong> (now ${t.frequency}/${t.chanbw || '20?'})`).join(', ')}
@@ -206,11 +240,15 @@ const ChannelPlanner = {
                 return `<tr class="cp-changed"><td>${this.esc(r.name)}${r.is_infrastructure ? ' <small>(infra)</small>' : ''}</td>
                     <td>${oldText}</td><td>→</td><td><strong>off</strong></td><td><small>no RF links</small></td></tr>`;
             }
+            const mode = { ptp: 'PtP', ptmp: 'PtMP', sta: 'Station' }[String(r.mode || '').toLowerCase()];
+            const ssid = o.ssid && n.ssid && o.ssid !== n.ssid
+                ? `<br><small title="The PtP/PtMP SSID carries the channel: stations need the new channel">SSID ${this.esc(o.ssid)} → ${this.esc(n.ssid)}</small>`
+                : o.ssid ? `<br><small>SSID ${this.esc(o.ssid)}</small>` : '';
             return `<tr class="${r.changed ? 'cp-changed' : ''}">
-                <td>${this.esc(r.name)}${r.is_infrastructure ? ' <small>(infra)</small>' : ''}</td>
+                <td>${this.esc(r.name)}${r.is_infrastructure ? ' <small>(infra)</small>' : ''}${mode ? ` <small>${mode}</small>` : ''}${r.protected ? ' <small class="hs-infra">protected</small>' : ''}</td>
                 <td>${oldText}</td>
                 <td>${r.changed ? '→' : '='}</td>
-                <td><strong>${n.frequency}/${n.chanbw}</strong> <small>ch ${n.channel}</small></td>
+                <td><strong>${n.frequency}/${n.chanbw}</strong> <small>ch ${n.channel}</small>${ssid}</td>
                 <td><small>${n.low}–${n.high} MHz · ch ${n.low_channel}–${n.high_channel}</small></td></tr>`;
         }).join('');
         return `<div class="table-scroll-wrapper"><table class="info-table diag-table cp-table">
@@ -221,12 +259,18 @@ const ChannelPlanner = {
     renderGroups(p) {
         return `<details class="diag-details"><summary>Why these channels</summary>${p.groups.map(g => {
             const issues = g.issues.slice(0, 6).map(i => {
-                const label = i.rule === 'same_dish' ? 'same channel as a backbone dish aimed here'
+                const facing = i.rule && !['protected', 'shared_airtime', 'colocated_same'].includes(i.rule)
+                    ? (i.mutual ? ' (aimed at each other)' : ' (one aimed at the other: side/back lobe)') : '';
+                const label = (i.rule === 'protected' ? `${i.relation === 'same' ? 'same channel as' : i.relation === 'overlap' ? 'overlaps' : 'next to'} a protected radio`
+                    : i.rule === 'same_dish' ? 'same channel as a backbone dish aimed here'
                     : i.rule === 'shared_airtime' ? 'shared airtime on the mast (back-to-back)'
                     : i.rule === 'colocated_same' ? 'same channel on the mast'
+                    : i.rule === 'same' ? 'same channel as infrastructure at another site'
                     : i.rule ? 'under 20 MHz from infrastructure at another site'
                     : i.relation === 'link_break' ? 'link breaks'
-                    : i.relation === 'same' ? 'shares channel' : (i.severity || i.relation);
+                    : i.relation === 'same' ? 'shares channel' : (i.severity || i.relation)) + facing
+                    + (i.relation === 'same' && i.link === 'mesh' ? ' · both Mesh: they link if they hear each other'
+                       : i.relation === 'same' && i.link === 'none' ? ' · PtP/PtMP/Station: airtime only, no link' : '');
                 const where = i.colocated ? 'same mast' : i.distance_m != null ? `${(i.distance_m / 1000).toFixed(1)} km` : '';
                 const gap = i.gap_mhz == null || i.relation === 'same' ? ''
                     : i.gap_mhz < 0 ? `${-i.gap_mhz} MHz overlap` : `${i.gap_mhz} MHz gap`;

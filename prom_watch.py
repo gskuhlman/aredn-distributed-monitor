@@ -30,10 +30,11 @@ route_count_restored, mcs_drop / mcs_restored (`RF link to <peer>: ...`).
 
 import logging
 from datetime import datetime, timedelta
-from statistics import median
+from statistics import median, median_low
 
 import config
 import database
+import link_potential
 import maintenance
 import prom_source
 
@@ -274,37 +275,88 @@ def active(node=None):
 
 
 # AREDN radios report HT MCS indexes (0-7 one stream, 8-15 two); the SNR each
-# per-stream MCS needs, roughly (802.11n receiver sensitivity steps).
+# per-stream MCS needs, roughly (802.11n receiver sensitivity steps). 802.11ac
+# radios often report no MCS: link_potential estimates it from the rate.
 MCS_SNR = [2, 5, 9, 11, 15, 18, 20, 25]
+MIN_SAMPLES = 3
+
+
+def _low(m, s):
+    """Only the plain case: a low modulation (MCS 0-3 per stream) with SNR to
+    spare; above that, rates short of the table are normal on real paths."""
+    supports = link_potential.supported_mcs(s) or 0
+    return m <= 3 and s >= max(25, link_potential.VHT_SNR[m] + 15) and supports - m >= 3, supports
 
 
 def low_mcs_for_snr(conn, now=None, hours=6):
     """RF stations stuck at a low MCS (0-3 per stream) over `hours` although
     their SNR (25 dB or more, 15 dB above what that MCS needs) supports far
-    more: a standing interference or hidden-node problem, as on COL <-> MMC.
-    [{node, peer, mcs, snr, supports}]."""
+    more: a standing interference or hidden-node problem, as on COL <-> MMC,
+    or a 2x2 link down to one stream (one polarisation off), as on EOC <-> MMC
+    before its realignment. The MCS is the exporter's when it reports one,
+    else estimated from the transmit rate and channel width (`basis` 'rate',
+    or 'nearest' when no 802.11n/ac rate matches, e.g. legacy 802.11a frames;
+    `fits` = the (streams, MCS) pairs that rate matches; the highest MCS is
+    judged). Pairs Prometheus doesn't cover use the scans' LQM transmit rate
+    and how the peer hears the sender (`source` 'lqm').
+    [{node, peer, mcs, streams, basis, fits, snr, supports, rate_mbps, chanbw, source}]."""
     now = now or datetime.now()
     since = (now - timedelta(hours=hours)).strftime(TS_FMT)
-    mcs = {}
+    prom_source.ensure_tables()
+    widths = {r['name']: r['rf_chanbw'] for r in conn.execute('SELECT name, rf_chanbw FROM nodes')}
+    samples = {}
     for r in conn.execute('''SELECT node_name, peer, tx_mcs, tx_rate FROM prom_station_samples
-                             WHERE timestamp >= ? AND peer IS NOT NULL AND tx_mcs IS NOT NULL''', (since,)):
-        mcs.setdefault((r['node_name'], r['peer']), []).append((r['tx_mcs'], r['tx_rate']))
+                             WHERE timestamp >= ? AND peer IS NOT NULL''', (since,)):
+        samples.setdefault((r['node_name'], r['peer']), []).append((r['tx_mcs'], r['tx_rate'] and r['tx_rate'] / 1e6))
     snr = {}
     for r in conn.execute('''SELECT node_name, peer, snr FROM prom_lqm_samples
                              WHERE timestamp >= ? AND snr IS NOT NULL''', (since,)):
         snr.setdefault((r['node_name'], r['peer']), []).append(r['snr'])
+    source = dict.fromkeys(samples, 'prometheus')
+    lqm, heard = {}, {}
+    for r in conn.execute('''SELECT source_node, target_node, snr, tx_bitrate FROM link_history
+                             WHERE timestamp >= ? AND UPPER(link_type) = 'RF' ''', (since,)):
+        key = (r['source_node'], r['target_node'])
+        if r['tx_bitrate']:
+            lqm.setdefault(key, []).append((None, r['tx_bitrate']))
+        if r['snr'] is not None:
+            heard.setdefault((r['target_node'], r['source_node']), []).append(r['snr'])
+    for key, vals in lqm.items():
+        if key not in samples and key in heard:
+            samples[key], snr[key], source[key] = vals, heard[key], 'lqm'
     out = []
-    for key, vals in mcs.items():
-        if len(vals) < 3 or key not in snr:
+    for key, vals in samples.items():
+        if len(vals) < MIN_SAMPLES or key not in snr:
             continue
-        m = median(v[0] for v in vals)
         s = median(snr[key])
-        per_stream = int(m) % 8
-        supports = max(i for i, need in enumerate(MCS_SNR) if s >= need) if s >= MCS_SNR[0] else 0
-        # Only the plain case: a low modulation (MCS 0-3 per stream) with SNR to
-        # spare; above that, rates short of the table are normal on real paths.
-        if per_stream <= 3 and s >= max(25, MCS_SNR[per_stream] + 15) and supports - per_stream >= 3:
-            rates = [v[1] for v in vals if v[1]]
-            out.append({'node': key[0], 'peer': key[1], 'mcs': int(m), 'snr': round(s),
-                        'supports': supports, 'rate_mbps': round(median(rates) / 1e6, 1) if rates else None})
+        reported = [v[0] for v in vals if v[0] is not None]
+        rates = [v[1] for v in vals if v[1]]
+        rate = round(median_low(rates), 1) if rates else None
+        bw = widths.get(key[0]) or 20
+        if len(reported) >= MIN_SAMPLES:
+            m = int(median_low(reported))
+            fits, basis = [(m // 8 + 1, m % 8)], 'reported'
+        elif rate:
+            exact = link_potential.mcs_from_rate(rate, bw, nearest=False)
+            fits, basis = exact or link_potential.mcs_from_rate(rate, bw), 'rate' if exact else 'nearest'
+        else:
+            continue
+        nss, per_stream = max(fits, key=lambda f: f[1])
+        low, supports = _low(per_stream, s)
+        if low:
+            out.append({'node': key[0], 'peer': key[1], 'mcs': per_stream if basis == 'rate' else m,
+                        'per_stream': per_stream, 'streams': nss, 'basis': basis, 'fits': fits,
+                        'snr': round(s), 'supports': supports, 'rate_mbps': rate, 'chanbw': bw,
+                        'source': source[key]})
     return out
+
+
+def describe_low_mcs(m):
+    """'MCS 3 (54 Mbps at 40 MHz: MCS 3 on 1 stream or MCS 1 on 2)'."""
+    if m['basis'] == 'reported':
+        return f"MCS {m['mcs']}" + (f" ({m['rate_mbps']:g} Mbps)" if m.get('rate_mbps') else '')
+    fits = ' or '.join(f"MCS {mcs} on {nss} stream{'s' if nss > 1 else ''}" for nss, mcs in m['fits'])
+    if m['basis'] == 'nearest':
+        return (f"about MCS {m['per_stream']} ({m['rate_mbps']:g} Mbps at {m['chanbw']:g} MHz matches no "
+                f"802.11n/ac rate, probably legacy 802.11a frames; nearest {fits})")
+    return f"about MCS {m['per_stream']} ({m['rate_mbps']:g} Mbps at {m['chanbw']:g} MHz: {fits})"

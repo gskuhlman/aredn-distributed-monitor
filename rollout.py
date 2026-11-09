@@ -8,6 +8,8 @@ turned into an ordered checklist, one step per radio:
   radios with non-infrastructure RF peers), then backbones (infrastructure
   radios whose RF peers are all infrastructure) last, so the radios that are
   reached through a link are moved before the radio at the near end of it.
+  A PtP/PtMP station comes before its access point, with instructions: the
+  SSID carries the channel, so the station must list the new channel first.
 Each step records the radio's RF peers when the rollout was created.
 
 After every committed scan `check()` reads each pending radio's stored
@@ -82,6 +84,9 @@ def ensure_tables():
             )
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_rollout_steps ON rollout_steps(rollout_id, seq)')
+        cols = {r[1] for r in conn.execute('PRAGMA table_info(rollout_steps)')}
+        if 'instructions' not in cols:
+            conn.execute('ALTER TABLE rollout_steps ADD COLUMN instructions TEXT')
     _tables_ready = True
 
 
@@ -119,6 +124,49 @@ def _role(name, peers, infra):
     return 'sector' if any(p not in infra for p in peers) else 'backbone'
 
 
+MODE_NAMES = {'ptp': 'PtP', 'ptmp': 'PtMP', 'sta': 'Station'}
+
+
+def _mode(node):
+    return (node.get('rf_mode') or '').lower()
+
+
+def _infra_mode_steps(steps, nodes):
+    """PtP / PtMP / Station radios: the SSID carries the channel, so a
+    station must be given the new channel before its access point moves.
+    Adds `mode` and `instructions` to each such step."""
+    import channel_planner
+    in_plan = {s['node_name'] for s in steps}
+    for s in steps:
+        node = nodes.get(s['node_name'].lower()) or {}
+        mode = _mode(node)
+        s['mode'] = mode
+        if mode not in MODE_NAMES or s['turn_off'] or not s['new_frequency']:
+            continue
+        width = s['new_chanbw'] or _num(node.get('rf_chanbw')) or 20.0
+        ssid = node.get('rf_ssid') or ''
+        new = channel_planner.new_ssid(ssid, s['new_frequency'], width) or '?'
+        ch = ia.freq_to_channel(s['new_frequency'])
+        old_ch = ia.freq_to_channel(s['old_frequency']) if s['old_frequency'] else None
+        same_ssid = [n['name'] for n in nodes.values() if ssid and (n.get('rf_ssid') or '').lower() == ssid.lower()]
+        if mode == 'sta':
+            aps = [p for p in s['peers'] if _mode(nodes.get(p.lower(), {})) in ('ptp', 'ptmp')] or                 sorted(n for n in same_ssid if _mode(nodes[n.lower()]) in ('ptp', 'ptmp'))
+            ap = ', '.join(aps) or 'its access point'
+            s['instructions'] = (f"Station: before {ap} moves, add channel {ch} to this station's channel list "
+                                 f"(new SSID {new})" + (f"; keep {old_ch} until the access point has moved, then "
+                                                        f"remove it" if old_ch else '') + '.')
+        else:
+            stations = sorted({n for n in same_ssid if _mode(nodes[n.lower()]) == 'sta'}
+                              | {p for p in s['peers'] if _mode(nodes.get(p.lower(), {})) == 'sta'})
+            outside = [n for n in stations if n not in in_plan]
+            text = (f"{MODE_NAMES[mode]} access point: the SSID changes {ssid or '?'} → {new}. Move it only after "
+                    + (f"its station(s) list channel {ch}: {', '.join(stations)}" if stations
+                       else f"every station that uses it lists channel {ch}") + '.')
+            if outside:
+                text += f" Not in this rollout (tell their operators): {', '.join(outside)}."
+            s['instructions'] = text
+
+
 def create(plan, name=None, note=None, author=None):
     """plan: what-if text, {name: spec} dict, or a list of planner radios
     ({name, new: {frequency, chanbw, off}} or {name, frequency, chanbw, off})."""
@@ -140,7 +188,7 @@ def create(plan, name=None, note=None, author=None):
     now = _now().strftime(TS_FMT)
     with database.get_connection() as conn:
         nodes = {r['name'].lower(): dict(r) for r in conn.execute(
-            'SELECT name, rf_frequency, rf_chanbw, rf_status FROM nodes')}
+            'SELECT name, rf_frequency, rf_chanbw, rf_status, rf_mode, rf_ssid FROM nodes')}
         steps = []
         for key, spec in overrides.items():
             node = nodes.get(key)
@@ -155,9 +203,11 @@ def create(plan, name=None, note=None, author=None):
                 'new_frequency': spec.get('frequency'), 'new_chanbw': spec.get('chanbw'),
                 'turn_off': 1 if spec.get('off') else 0, 'peers': peers,
             })
+        _infra_mode_steps(steps, nodes)
         # Clients before the sector that serves them, backbones last; turned-off
-        # radios first (nothing depends on them).
-        steps.sort(key=lambda s: (0 if s['turn_off'] else 1, ROLE_ORDER.get(s['role'], 9), s['site'], s['node_name']))
+        # radios first (nothing depends on them); a station before its access point.
+        steps.sort(key=lambda s: (0 if s['turn_off'] else 1, ROLE_ORDER.get(s['role'], 9),
+                                  0 if s.get('mode') == 'sta' else 1, s['site'], s['node_name']))
         lines = [f"{s['node_name']} off" if s['turn_off'] else
                  f"{s['node_name']} {s['new_frequency']:g} {s['new_chanbw']:g}" if s['new_chanbw'] else
                  f"{s['node_name']} {s['new_frequency']:g}" for s in steps]
@@ -168,10 +218,12 @@ def create(plan, name=None, note=None, author=None):
         rid = cur.lastrowid
         for i, s in enumerate(steps, 1):
             conn.execute('''INSERT INTO rollout_steps (rollout_id, seq, node_name, role, site, old_frequency,
-                                old_chanbw, new_frequency, new_chanbw, turn_off, peers, status, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)''',
+                                old_chanbw, new_frequency, new_chanbw, turn_off, peers, status, updated_at,
+                                instructions)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)''',
                          (rid, i, s['node_name'], s['role'], s['site'], s['old_frequency'], s['old_chanbw'],
-                          s['new_frequency'], s['new_chanbw'], s['turn_off'], json.dumps(s['peers']), now))
+                          s['new_frequency'], s['new_chanbw'], s['turn_off'], json.dumps(s['peers']), now,
+                          s.get('instructions')))
     database.log_event('rollout_created', None,
                        f"Rollout #{rid}: {len(steps)} radio(s) — " + ', '.join(lines)[:400], 'info')
     return get(rid)

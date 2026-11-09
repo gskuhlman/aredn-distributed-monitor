@@ -172,14 +172,27 @@ const RFStats = {
         }
     },
 
+    /** Chart window in hours (from the shared filter bar's Time). */
+    setHours(hours) {
+        hours = Number(hours) || 24;
+        if (hours === this.timeRangeHours) return;
+        this.timeRangeHours = hours;
+        document.querySelectorAll('#rf-stats-view .time-btn').forEach(b =>
+            b.classList.toggle('active', Number(b.dataset.hours) === hours));
+        if (this.selectedLink) {
+            this.loadLinkHistory(this.selectedLink.source, this.selectedLink.target);
+            LinkDiagnosis.load(this.selectedLink.source, this.selectedLink.target, this.timeRangeHours);
+        }
+    },
+
     /**
      * Initialize event listeners
      */
     initEventListeners() {
-        // Time range buttons
-        document.querySelectorAll('.time-btn').forEach(btn => {
+        // Time range buttons (this page's own; the Nodes detail panel has its own set)
+        document.querySelectorAll('#rf-stats-view .time-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('#rf-stats-view .time-btn').forEach(b => b.classList.remove('active'));
                 e.target.classList.add('active');
                 this.timeRangeHours = parseInt(e.target.dataset.hours);
 
@@ -809,11 +822,13 @@ function initTabSwitching() {
     const networkView = document.getElementById('network-view');
     const rfStatsView = document.getElementById('rf-stats-view');
     const nodesView = document.getElementById('nodes-view');
-    const diagnosticsView = document.getElementById('diagnostics-view');
     const voipView = document.getElementById('voip-view');
     const reportsView = document.getElementById('reports-view');
     const legend = document.querySelector('.legend');
-    const allViews = [networkView, rfStatsView, nodesView, diagnosticsView, voipView, reportsView];
+    const allViews = [networkView, rfStatsView, nodesView, voipView, reportsView];
+    // Pages that only need their view shown (plus the start-up below).
+    const simpleViews = ['status', 'radio', 'routing', 'setup', 'maintenance', 'notifications', 'sites'];
+    let graphShown = false;
 
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -828,8 +843,40 @@ function initTabSwitching() {
             document.querySelectorAll('.view-container.active').forEach(v => v.classList.remove('active'));
             if (legend) legend.style.display = (tab === 'network' || tab === 'geo-map') ? 'block' : 'none';
 
+            if (simpleViews.includes(tab)) {
+                document.getElementById(`${tab}-view`)?.classList.add('active');
+            }
+            if (tab === 'status' || tab === 'rf-stats') {
+                // Status: Mesh Health; Links: the Link Stability tables at its bottom.
+                if (typeof DiagnosticsModule !== 'undefined') {
+                    DiagnosticsModule.init();
+                    DiagnosticsModule.load({ health: tab === 'status' });
+                }
+            }
+            if (tab === 'status') {
+                if (typeof LinkWatch !== 'undefined') LinkWatch.init();
+                if (typeof NewNodes !== 'undefined' && !NewNodes.loaded) { NewNodes.loaded = true; NewNodes.load(); }
+                if (typeof ServiceChecks !== 'undefined' && !ServiceChecks.data) ServiceChecks.load();
+            } else if (tab === 'setup') {
+                if (typeof InfraReview !== 'undefined') InfraReview.init();
+            } else if (tab === 'maintenance') {
+                if (typeof Maintenance !== 'undefined' && !Maintenance.loaded) Maintenance.load();
+            } else if (tab === 'notifications') {
+                if (typeof Notifications !== 'undefined' && !Notifications.loaded) Notifications.load();
+            } else if (tab === 'sites') {
+                if (typeof SitesList !== 'undefined' && !SitesList.loaded) SitesList.load();
+            } else if (tab === 'planning') {
+                if (typeof Rollouts !== 'undefined') Rollouts.load();
+            }
+
             if (tab === 'network') {
                 networkView.classList.add('active');
+                // The graph starts in a hidden view (Status is the home page):
+                // size it to the view and fit it the first time it is shown.
+                if (typeof network !== 'undefined' && network && !graphShown) {
+                    graphShown = true;
+                    setTimeout(() => { network.redraw(); network.fit(); }, 50);
+                }
             } else if (tab === 'geo-map') {
                 document.getElementById('geo-map-view')?.classList.add('active');
                 if (typeof GeoMap !== 'undefined') GeoMap.open();
@@ -843,16 +890,6 @@ function initTabSwitching() {
                     NodesModule.init();
                     NodesModule.loadNodes();
                 }
-            } else if (tab === 'diagnostics') {
-                if (diagnosticsView) diagnosticsView.classList.add('active');
-                if (typeof DiagnosticsModule !== 'undefined') {
-                    DiagnosticsModule.init();
-                    DiagnosticsModule.load();
-                }
-                if (typeof InfraReview !== 'undefined') InfraReview.init();
-                if (typeof LinkWatch !== 'undefined') LinkWatch.init();
-                if (typeof NewNodes !== 'undefined' && !NewNodes.loaded) { NewNodes.loaded = true; NewNodes.load(); }
-                if (typeof ServiceChecks !== 'undefined' && !ServiceChecks.data) ServiceChecks.load();
             } else if (tab === 'voip') {
                 if (voipView) voipView.classList.add('active');
                 if (typeof VOIPModule !== 'undefined') {

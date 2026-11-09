@@ -107,6 +107,16 @@ CATEGORY_LABELS = {
     'routing': 'Routing error',
     'resources': 'Node resources (Prometheus)',
     'mcs': 'MCS below what SNR supports',
+    'potential': 'Link far below its potential',
+    'chains': 'Antenna chain / stream (SSH)',
+    'radio_log': 'Kernel / radio log errors (SSH)',
+    'retries': 'Retries / missing ACKs (SSH)',
+    'reconnects': '802.11 reconnects (SSH)',
+    'airtime': 'Airtime used by others (SSH)',
+    'rx_errors': 'Receive errors (SSH)',
+    'ethernet': 'Ethernet port (SSH)',
+    'radio_settings': 'Radio settings (SSH)',
+    'clock': 'Node clock (SSH)',
 }
 
 # AREDN LQM block reasons -> what to do about them.
@@ -802,8 +812,9 @@ def _check_channels(f, scope, weak_peer):
               {'conflicts': [c['summary'] for c in rest]})
 
 
-    tdwr = next(r for r in cp.NOISE_RANGES if r['low'] == 5600)
-    heavy = next(r for r in cp.NOISE_RANGES if 'heavy' in r['label'])
+    ranges = cp.noise_ranges()
+    tdwr = next(r for r in ranges if r['low'] == 5600)
+    heavy = next(r for r in ranges if 'heavy' in r['label'])
     in_tdwr, in_heavy = [], []
     for r in radios.values():
         if r['name'] not in scope or r.get('low') is None or not r['recent'] \
@@ -825,7 +836,7 @@ def _check_channels(f, scope, weak_peer):
                 'or hit in bursts.'
               + (f" Struggling: {', '.join(hurt)}." if hurt else ''),
               (('Keep the whole channel above 5650 MHz (TDWR airport weather radar is strong and pulsed, '
-                'and AREDN radios do not avoid it).' if config.TDWR_NEARBY else
+                'and AREDN radios do not avoid it).' if cp.tdwr_nearby() else
                 'Keep the whole channel above 5650 MHz: below it is outside the 5 GHz amateur allocation.')
                if rng is tdwr else
                'Prefer channels away from UNII-3 WiFi (5735–5835 MHz) where noise is high.'),
@@ -933,10 +944,10 @@ def _check_routing(f, scope):
 
 
 def _check_resources(f, scope):
-    """Memory, flash, /tmp, CPU, Babel routes, interface errors and MCS vs SNR
-    from the Prometheus samples (prom_source.py); open prom_watch alarms
-    (leaks, route drops, MCS drops) are listed too. Nothing when Prometheus
-    isn't configured or has no recent samples."""
+    """Memory, flash, /tmp, CPU, Babel routes and interface errors from the
+    Prometheus samples (prom_source.py); open prom_watch alarms (leaks, route
+    drops, MCS drops) are listed too (MCS vs SNR: _check_rate_vs_snr).
+    Nothing when Prometheus isn't configured or has no recent samples."""
     if not prom_source.enabled():
         return
     import prom_watch
@@ -973,24 +984,84 @@ def _check_resources(f, scope):
                       f"{round(err, 1)}% of packets on {r['iface']} ({r['kind']}) had errors in the last hour.",
                       'For an Ethernet port: check the cable, connectors and PoE; for a radio: look for interference.',
                       {'iface': r['iface'], 'errors_ps': round(r['err'], 2), 'source': 'prometheus'})
-        for m in prom_watch.low_mcs_for_snr(conn, now):
-            if m['node'] not in scope:
-                continue
-            f.add('warning', 'mcs', f"MCS {m['mcs']} at {m['snr']} dB SNR: {m['node']} → {m['peer']}",
-                  [m['node'], m['peer']],
-                  f"{m['node']} sends to {m['peer']} at MCS {m['mcs']}"
-                  + (f" ({m['rate_mbps']} Mbps)" if m['rate_mbps'] else '')
-                  + f" although {m['snr']} dB SNR supports about MCS {m['supports']} per stream. "
-                    "Signal is fine; retries are holding the rate down.",
-                  'Look for interference on the channel (Spectrum tab, WiFi survey) or a hidden node; '
-                  'a channel move usually helps more than re-aiming.',
-                  {'diagnose': [[m['node'], m['peer']]], 'source': 'prometheus', **m})
     for a in prom_watch.active():
         if a['kind'] == 'mcs_drop' and a['node_name'] in scope:
             f.add('warning', 'mcs', f"MCS drop with steady SNR: {a['node_name']} → {a['peer']}",
                   [a['node_name'], a['peer']], a['detail'] + f" (since {a['since']}).",
                   'Something new on the channel: check the Spectrum tab and any recent WiFi survey.',
                   {'diagnose': [[a['node_name'], a['peer']]], 'source': 'prometheus'})
+
+
+def _check_rate_vs_snr(f, scope):
+    """Links sending at a low MCS although their SNR supports far more
+    (prom_watch.low_mcs_for_snr: the Prometheus MCS, else estimated from the
+    rate; the scans' LQM rate where Prometheus doesn't reach), and
+    infrastructure links far below their link-budget potential
+    (link_potential.underperforming) not already flagged that way."""
+    import link_potential
+    import prom_watch
+    flagged = set()
+    with database.get_connection() as conn:
+        low = prom_watch.low_mcs_for_snr(conn, datetime.now())
+    for m in low:
+        if m['node'] not in scope:
+            continue
+        flagged.add((m['node'], m['peer']))
+        maybe_one = m['basis'] != 'nearest' and any(nss == 1 for nss, _ in m['fits'])
+        f.add('warning', 'mcs', f"MCS {m['per_stream']} at {m['snr']} dB SNR: {m['node']} → {m['peer']}",
+              [m['node'], m['peer']],
+              f"{m['node']} sends to {m['peer']} at {prom_watch.describe_low_mcs(m)}"
+              f" although {m['snr']} dB SNR supports about MCS {m['supports']} per stream"
+              + (" (from the scans' LQM rate)" if m['source'] == 'lqm' else '') + '. '
+              + ('A 2x2 link on one stream at a good SNR usually means one polarisation is off.'
+                 if maybe_one else 'Signal is fine; retries are holding the rate down.'),
+              ('Check the aim at both ends and each chain (connectors, cables, water) first; '
+               'if both chains are fine, look for interference (Spectrum tab, WiFi survey).'
+               if maybe_one else
+               'Look for interference on the channel (Spectrum tab, WiFi survey) or a hidden node; '
+               'a channel move usually helps more than re-aiming.'),
+              {'diagnose': [[m['node'], m['peer']]], 'source': m['source'], **m})
+    for p in link_potential.underperforming():
+        if (p['from'], p['to']) in flagged or not ({p['from'], p['to']} & scope):
+            continue
+        f.add('warning', 'potential', f"Far below its potential: {p['from']} → {p['to']}",
+              [p['from'], p['to']],
+              f"Over the last {link_potential.UNDER_HOURS} h and still now: " + '; '.join(p['reasons']) + '.',
+              link_potential.recommendation(p),
+              {'diagnose': [[p['from'], p['to']]], 'source': 'link_potential',
+               **{k: p[k] for k in ('rate_mbps', 'expected_mbps', 'ratio', 'snr', 'predicted_snr',
+                                    'snr_gap_db', 'chanbw', 'distance_km', 'gain_assumed')}})
+
+
+def _check_ssh(f, scope, hours):
+    """From the SSH radio details (ssh_collect.py): open chain alarms (one
+    chain much weaker, or one stream at a good SNR) and kernel / radio
+    firmware errors in the newest logread within `hours`."""
+    import ssh_collect
+    import ssh_health
+    titles = {'chain': 'Chain / stream problem', 'retries': 'Heavy retries', 'reconnects': 'Link reconnects',
+              'interference': 'Airtime used by others', 'rx_errors': 'Receive errors', 'ethernet': 'Ethernet port',
+              'coverage': 'ACK window shorter than the link', 'clock': 'Node clock off', 'memory': 'Memory low'}
+    for a in ssh_collect.active_alarms():
+        kind = a['kind']
+        if a['node_name'] not in scope or kind not in ssh_health.KINDS:
+            continue
+        link = kind in ssh_health.LINK_KINDS
+        sev = a.get('severity') or 'warning'
+        f.add(sev, ssh_health.CATEGORY[kind],
+              f"{titles[kind]}: {a['node_name']}" + (f" ↔ {a['peer']}" if link else ''),
+              [a['node_name'], a['peer']] if link else [a['node_name']], a['detail'] + f" (since {a['since']}).",
+              ssh_health.ADVICE[kind],
+              {'diagnose': [[a['node_name'], a['peer']]], 'source': 'ssh'} if link else {'source': 'ssh'})
+    for x in ssh_collect.log_findings(hours, scope):
+        f.add(x['severity'], 'radio_log', f"{x['label'].capitalize()} on {x['node']} ({x['count']}x)", [x['node']],
+              f"{x['count']} log line(s) in the last {hours} h; latest: {x['last']}",
+              {'radio firmware crash': 'Note the firmware and these lines; repeated crashes are worth a report '
+                                       'to the AREDN team and a reboot or firmware change.',
+               'out of memory': 'Reboot to recover; look for a leaking package or too many services.',
+               'kernel oops': 'Note the firmware and these lines for a bug report; watch for reboots.',
+               }.get(x['label'], 'Watch whether it repeats; the node page shows the full log.'),
+              {'lines': x['lines'], 'source': 'ssh'})
 
 
 def run_health_check(hours=24):
@@ -1076,6 +1147,14 @@ def run_health_check(hours=24):
         _check_resources(f, scope)
     except Exception as exc:
         logger.warning("Mesh health resource check failed: %s", exc)
+    try:
+        _check_ssh(f, scope, hours)
+    except Exception as exc:
+        logger.warning("Mesh health SSH check failed: %s", exc)
+    try:
+        _check_rate_vs_snr(f, scope)
+    except Exception as exc:
+        logger.warning("Mesh health rate check failed: %s", exc)
     try:
         _check_channels(f, scope, weak_peer)
     except Exception as exc:  # never lose the whole report to this check

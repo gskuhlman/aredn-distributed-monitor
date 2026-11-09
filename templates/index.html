@@ -28,34 +28,51 @@
                 <nav class="header-tabs nav-menu">
                     <button id="nav-toggle" class="nav-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="nav-panel">
                         <span class="nav-icon" aria-hidden="true">&#9776;</span>
-                        <span id="nav-current">Topology</span>
+                        <span id="nav-current">Status</span>
                         <span class="nav-caret" aria-hidden="true">&#9662;</span>
                     </button>
                     <div id="nav-panel" class="nav-panel" hidden>
                         <div class="nav-group">
+                            <div class="nav-group-title">Overview</div>
+                            <button class="tab-btn active" data-tab="status">Status</button>
+                        </div>
+                        <div class="nav-group">
                             <div class="nav-group-title">Network</div>
-                            <button class="tab-btn active" data-tab="network">Topology</button>
+                            <button class="tab-btn" data-tab="network">Topology</button>
                             <button class="tab-btn" data-tab="geo-map">Map</button>
                             <button class="tab-btn" data-tab="channel-map">Channel Map</button>
                             <button class="tab-btn" data-tab="spectrum" title="Frequency across, locations down: what is free where">Spectrum</button>
+                            <button class="tab-btn" data-tab="sites">Sites</button>
                         </div>
                         <div class="nav-group">
-                            <div class="nav-group-title">Links &amp; nodes</div>
-                            <button class="tab-btn" data-tab="rf-stats">RF Stats</button>
+                            <div class="nav-group-title">Nodes &amp; links</div>
                             <button class="tab-btn" data-tab="nodes">Nodes</button>
-                            <button class="tab-btn" data-tab="voip">VOIP</button>
+                            <button class="tab-btn" data-tab="rf-stats" title="RF links, pair diagnosis, and Link Stability (flapping and asymmetric links) at the bottom">Links</button>
+                            <button class="tab-btn" data-tab="voip">VoIP &amp; Phones</button>
                         </div>
                         <div class="nav-group">
-                            <div class="nav-group-title">Analysis</div>
-                            <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
+                            <div class="nav-group-title">Checks</div>
+                            <button class="tab-btn" data-tab="radio" title="Sectors, site matrix, aim, link budget, ghost trackers, link alerts">Radio &amp; RF</button>
+                            <button class="tab-btn" data-tab="routing" title="Route Watch, Path View, single points of failure, Babel costs">Routing</button>
+                            <button class="tab-btn" data-tab="setup" title="Infrastructure review, settings drift, node hygiene, cleanup">Setup</button>
+                        </div>
+                        <div class="nav-group">
+                            <div class="nav-group-title">Planning</div>
+                            <button class="tab-btn" data-tab="planning" title="Channel planner, WiFi surveys, rollouts">Channel Planning</button>
+                        </div>
+                        <div class="nav-group">
+                            <div class="nav-group-title">History</div>
                             <button class="tab-btn" data-tab="reports">Reports</button>
                             <button class="tab-btn" data-tab="changes">Changes</button>
-                            <button class="tab-btn" data-tab="planning" title="Channel planner and WiFi scan results">Channel Planning</button>
+                            <a class="nav-link" href="#/reports/weekly">Weekly report</a>
+                            <a class="nav-link" href="/report/club" target="_blank" rel="noopener">Club report</a>
                         </div>
                         <div class="nav-group">
-                            <div class="nav-group-title">More</div>
-                            <a class="nav-link" href="/admin">Admin</a>
-                            <a class="nav-link" href="/report/club" target="_blank" rel="noopener">Club report</a>
+                            <div class="nav-group-title">Admin</div>
+                            <button class="tab-btn" data-tab="maintenance">Maintenance</button>
+                            <button class="tab-btn" data-tab="notifications">Notifications</button>
+                            <button type="button" class="nav-link nav-action" data-click="settings-btn">Scanning settings</button>
+                            <a class="nav-link" href="/admin">Login, database, SSH, collectors</a>
                             <a class="nav-link" href="/field/">Field mode</a>
                         </div>
                     </div>
@@ -72,6 +89,14 @@
                     <input type="checkbox" id="filter-infra-only">
                     Infrastructure only
                 </label>
+                <label class="header-checkbox" title="Show only selected nodes on the graph">
+                    <input type="checkbox" id="filter-selected-view">
+                    Selected only
+                </label>
+                <label class="header-checkbox" title="Also show nodes one RF or DtD hop from the infrastructure / selected nodes">
+                    <input type="checkbox" id="filter-neighbours">
+                    + neighbours
+                </label>
                 <select id="filter-infra" class="form-input" title="Infrastructure filter">
                     <option value="all">All Infrastructure</option>
                     <option value="permanent">Permanent</option>
@@ -79,26 +104,70 @@
                     <option value="permanent-event">Permanent + Event</option>
                     <option value="untagged">Untagged</option>
                 </select>
-                <label class="header-checkbox">
-                    <input type="checkbox" id="scan-selected-only">
-                    Only selected nodes
-                </label>
                 </span>
                 <span id="selected-scan-badge" class="selected-scan-badge" hidden
-                      title="Scans are limited to the selected nodes. Change it on the Topology or Map page.">Scanning selected nodes only</span>
+                      title="Scans are limited to the selected nodes. Change it in Admin, Scanning settings.">Scanning selected nodes only</span>
                 <span id="status-indicator" class="status-indicator"></span>
                 <span id="status-text">Connecting...</span>
-                <button id="scan-btn" class="btn btn-primary">Scan Now</button>
+                <button id="scan-btn" class="btn btn-primary">Scan now</button>
                 <button id="log-btn" class="btn btn-secondary">Event Log</button>
                 <button id="settings-btn" class="btn btn-secondary">Settings</button>
             </div>
         </header>
+        <!-- Shared filter bar (global-filter.js): one set of filters for every page -->
+        <div id="global-filters" class="global-filters" role="toolbar" aria-label="Filters for this page">
+            <span class="gf-group" data-gf="nodes">
+                <span class="gf-label">Nodes</span>
+                <span class="gf-chips">
+                    <button type="button" class="gf-chip" data-nodes="all">All</button>
+                    <button type="button" class="gf-chip" data-nodes="selected">Selected</button>
+                    <button type="button" class="gf-chip" data-nodes="infrastructure">Infrastructure</button>
+                </span>
+                <label class="gf-check" data-gf="neighbours" title="Also include nodes one RF or DtD hop away"><input type="checkbox" id="gf-neighbours"> + neighbours</label>
+            </span>
+            <span class="gf-group" data-gf="tag">
+                <label class="gf-label" for="gf-tag">Tag</label>
+                <select id="gf-tag" class="form-input">
+                    <option value="all">Any</option>
+                    <option value="permanent">Permanent</option>
+                    <option value="event">Event</option>
+                    <option value="permanent-event">Permanent + Event</option>
+                    <option value="untagged">Untagged</option>
+                </select>
+            </span>
+            <span class="gf-group" data-gf="links">
+                <label class="gf-label" for="gf-links">Links</label>
+                <select id="gf-links" class="form-input">
+                    <option value="all">All</option>
+                    <option value="rf">RF</option>
+                    <option value="dtd">DtD</option>
+                    <option value="wireguard">Wireguard</option>
+                    <option value="tunnel">Tunnel</option>
+                </select>
+            </span>
+            <span class="gf-group" data-gf="time">
+                <span class="gf-label">Time</span>
+                <span class="gf-chips">
+                    <button type="button" class="gf-chip" data-hours="1">1 h</button>
+                    <button type="button" class="gf-chip" data-hours="6">6 h</button>
+                    <button type="button" class="gf-chip" data-hours="24">24 h</button>
+                    <button type="button" class="gf-chip" data-hours="72">3 d</button>
+                    <button type="button" class="gf-chip" data-hours="168">7 d</button>
+                    <button type="button" class="gf-chip" data-hours="720">30 d</button>
+                </span>
+            </span>
+            <span class="gf-group" data-gf="search">
+                <input type="search" id="gf-search" class="form-input" placeholder="Search nodes..." aria-label="Search nodes">
+            </span>
+            <button type="button" id="gf-reset" class="btn btn-secondary btn-small" title="Back to infrastructure + neighbours, any tag, all links, 24 hours">Reset</button>
+            <span id="gf-note" class="gf-note"></span>
+        </div>
         <div id="maint-banner" class="maint-banner" hidden></div>
 
         <!-- Main content -->
         <main class="main-content">
             <!-- Network View -->
-            <div id="network-view" class="view-container active">
+            <div id="network-view" class="view-container">
                 <!-- Network graph container -->
                 <div id="network-container" class="network-container"></div>
             </div>
@@ -111,7 +180,7 @@
                         <!-- Header with time range and back button -->
                         <div class="rf-charts-header">
                             <div class="rf-header-left">
-                                <button id="rf-back-btn" class="btn btn-secondary hidden">Back to Overview</button>
+                                <button id="rf-back-btn" class="btn btn-secondary hidden">Back to overview</button>
                                 <div class="time-range-selector">
                                     <button class="time-btn" data-hours="1">1H</button>
                                     <button class="time-btn" data-hours="6">6H</button>
@@ -119,7 +188,7 @@
                                     <button class="time-btn active" data-hours="24">24H</button>
                                     <button class="time-btn" data-hours="168">7D</button>
                                 </div>
-                                <button id="rf-ping-all" class="btn btn-secondary">Ping All</button>
+                                <button id="rf-ping-all" class="btn btn-secondary">Ping all</button>
                                 <label class="header-checkbox" title="Overlay NWS rain, temperature and wind on the quality and SNR charts">
                                     <input type="checkbox" id="rf-weather-toggle"> Weather</label>
                             </div>
@@ -161,9 +230,9 @@
                         <div id="selected-link-info" class="selected-link-info hidden">
                             <h2 id="selected-link-title"></h2>
                             <div class="selected-link-actions">
-                                <button id="chart-ping-btn" class="btn btn-secondary">Run Ping Test</button>
-                                <button id="chart-iperf-btn" class="btn btn-secondary">Run iPerf Test</button>
-                                <button id="chart-live-btn" class="btn btn-secondary" title="Ping and traceroute between the two nodes from the nodes themselves">Live Path Check</button>
+                                <button id="chart-ping-btn" class="btn btn-secondary">Run ping test</button>
+                                <button id="chart-iperf-btn" class="btn btn-secondary">Run iPerf test</button>
+                                <button id="chart-live-btn" class="btn btn-secondary" title="Ping and traceroute between the two nodes from the nodes themselves">Check live path</button>
                             </div>
                         </div>
 
@@ -214,6 +283,102 @@
                                 </tbody>
                             </table>
                         </div>
+                        <!-- Link Stability (diagnostics.js): flapping and asymmetric links, below the overview -->
+                        <section id="rf-stability" class="rf-stability">
+                            <h2 class="page-title">Link Stability <small class="form-hint">flapping and asymmetric links</small></h2>
+                            <div class="nodes-header">
+                                            <div class="nodes-header-left">
+                                                <input type="text" id="diag-node-filter" class="form-input" placeholder="Search nodes...">
+                                                <select id="diag-scope" class="form-input" hidden><option value="all">All</option><option value="selected">Selected</option><option value="selected-connected">Selected + neighbours</option><option value="infrastructure">Infrastructure</option><option value="infrastructure-connected">Infrastructure + neighbours</option></select>
+                                                <select id="diag-status-filter" class="form-input" title="Node status">
+                                                    <option value="all">Any status</option>
+                                                    <option value="active">Currently Active</option>
+                                                    <option value="link-only">Link-only</option>
+                                                    <option value="24h">Seen in 24 hours</option>
+                                                    <option value="7d">Seen in 7 days</option>
+                                                    <option value="inactive">Inactive</option>
+                                                </select>
+                                                <select id="diag-infra-filter" class="form-input" title="Infrastructure filter">
+                                                    <option value="all">All Infrastructure</option>
+                                                    <option value="permanent">Permanent</option>
+                                                    <option value="event">Event</option>
+                                                    <option value="permanent-event">Permanent + Event</option>
+                                                    <option value="untagged">Untagged</option>
+                                                </select>
+                                                <select id="diag-type-filter" class="form-input">
+                                                    <option value="all">All Types</option>
+                                                    <option value="rf">RF</option>
+                                                    <option value="dtd">DtD</option>
+                                                    <option value="wireguard">Wireguard</option>
+                                                    <option value="tunnel">Tunnel</option>
+                                                </select>
+                                                <select id="diag-sort" class="form-input">
+                                                    <option value="relevance">Sort: Relevance</option>
+                                                    <option value="alpha">Sort: Alpha</option>
+                                                    <option value="last-seen">Sort: Last Seen</option>
+                                                    <option value="firmware">Sort: Firmware</option>
+                                                    <option value="model">Sort: Model</option>
+                                                </select>
+                                                <select id="diag-hours" class="form-input">
+                                                    <option value="1">Last 1 Hour</option>
+                                                    <option value="6">Last 6 Hours</option>
+                                                    <option value="24" selected>Last 24 Hours</option>
+                                                    <option value="72">Last 3 Days</option>
+                                                    <option value="168">Last 7 Days</option>
+                                                </select>
+                                                <button id="diag-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                            </div>
+                                            <div class="nodes-count">
+                                                <span id="diag-status">Idle</span>
+                                            </div>
+                                        </div>
+                    <div class="diag-scroll">
+                        <div class="diag-section">
+                            <h3>Flapping Links <small class="form-hint">drops/blocks per link, flappiest first</small></h3>
+                            <div class="table-scroll-wrapper">
+                                <table class="info-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Source</th><th>Peer</th><th>Type</th>
+                                            <th>Transitions</th><th>Node-reported flaps/hr</th><th>Scanner-to-node</th>
+                                            <th>Blocks</th><th>Top Block Reason</th><th>Last Change</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="diag-flaps-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="diag-section">
+                            <h3>Asymmetric Links <small class="form-hint">SNR direction gap, largest first</small></h3>
+                            <div class="table-scroll-wrapper">
+                                <table class="info-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Source</th><th>Peer</th>
+                                            <th>SNR</th><th>Rev SNR</th>
+                                            <th>Within-row Δ</th><th>Cross-dir Δ</th><th>Max Δ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="diag-asym-body"></tbody>
+                                </table>
+                            </div>
+                            <div class="health-footnote">
+                                <p><strong>What this shows.</strong> An RF link should be roughly equal in both directions. This section lists links where the two directions disagree on signal quality (largest gap first). Δ values are in dB; a gap of <strong>3&ndash;6 dB is marginal</strong> and <strong>&gt;6 dB is poor</strong>.</p>
+                                <ul>
+                                    <li><strong>SNR</strong> &mdash; the signal-to-noise ratio the <em>source</em> node hears from the peer (how well we receive them).</li>
+                                    <li><strong>Rev SNR</strong> &mdash; the reverse direction: the SNR the <em>peer</em> hears from the source (how well they receive us), as reported in the source's LQM.</li>
+                                    <li><strong>Within-row Δ</strong> &mdash; |SNR &minus; Rev SNR| from one node's own LQM (the two directions of the link as that node sees them).</li>
+                                    <li><strong>Cross-dir Δ</strong> &mdash; the gap between each node's <em>own</em> received SNR of the other, available only when both ends were polled (an independent cross-check).</li>
+                                    <li><strong>Max Δ</strong> &mdash; the larger of the two; the headline asymmetry used for ranking.</li>
+                                </ul>
+                                <p><strong>The problem &amp; likely causes.</strong> A large gap means one direction is much weaker &mdash; classically "we hear them fine but they can't hear us" (or vice-versa). Common causes: mismatched transmit power between the ends, different antenna gain or aiming, a one-sided obstruction or interference source, a degraded radio/feedline on one end, or a hidden-node / near-far situation.</p>
+                                <p><strong>Potential fixes.</strong> Re-aim or upgrade the antenna on the <em>weaker</em> end; equalize TX power between the two radios; clear or work around an obstruction and hunt one-sided interference (check the noise floor on the weak side); verify the distance setting and both radios' health. If it persists, reposition the weaker end.</p>
+                                <p><strong>Impact on throughput &amp; latency.</strong> A radio link is only as good as its <em>worse</em> direction: the modulation/data rate is negotiated down to what the weak path supports, driving retransmits, higher latency and jitter, and lower throughput. Because TCP ACKs travel the reverse path, a weak return direction caps end-to-end TCP speed even if the forward path is strong. Severe asymmetry also makes LQM penalize or block the link, which shows up as flapping &mdash; and it degrades VOIP into one-way audio or choppy calls.</p>
+                            </div>
+                        </div>
+                    </div>
+                        </section>
                     </main>
                 </div>
             </div>
@@ -224,16 +389,13 @@
                     <div class="nodes-header">
                         <div class="nodes-header-left">
                             <input type="text" id="nodes-search" class="form-input" placeholder="Search nodes...">
-                            <select id="nodes-status-filter" class="form-input">
-                                <option value="all">All Nodes</option>
-                                <option value="selected">Selected Nodes</option>
-                                <option value="selected-connected" selected>Selected Nodes + Connected</option>
-                                <option value="infrastructure">Infrastructure Nodes</option>
-                                <option value="infrastructure-connected">Infrastructure + Connected</option>
+                            <select id="nodes-scope" class="form-input" hidden><option value="all">All</option><option value="selected">Selected</option><option value="selected-connected">Selected + neighbours</option><option value="infrastructure">Infrastructure</option><option value="infrastructure-connected">Infrastructure + neighbours</option></select>
+                            <select id="nodes-status-filter" class="form-input" title="Node status">
+                                <option value="all">Any status</option>
                                 <option value="active">Currently Active</option>
                                 <option value="link-only">Link-only</option>
-                                <option value="24h">Last 24 Hours</option>
-                                <option value="7d">Last 7 Days</option>
+                                <option value="24h">Seen in 24 hours</option>
+                                <option value="7d">Seen in 7 days</option>
                                 <option value="inactive">Inactive</option>
                             </select>
                             <select id="nodes-infra-filter" class="form-input" title="Infrastructure filter">
@@ -246,6 +408,7 @@
                             <select id="nodes-type-filter" class="form-input">
                                 <option value="all">All Link Types</option>
                                 <option value="rf">RF</option>
+                                <option value="dtd">DtD</option>
                                 <option value="wireguard">Wireguard</option>
                                 <option value="tunnel">Tunnel</option>
                             </select>
@@ -345,392 +508,15 @@
                 </div>
             </div>
 
-            <!-- Diagnostics View -->
-            <div id="diagnostics-view" class="view-container">
+            <!-- Status View (home: Mesh Health, Link Watch, New Nodes, Service Checks) -->
+            <div id="status-view" class="view-container active">
                 <div class="nodes-container">
-                    <div class="nodes-header">
-                        <div class="nodes-header-left">
-                            <input type="text" id="diag-node-filter" class="form-input" placeholder="Search nodes...">
-                            <select id="diag-status-filter" class="form-input">
-                                <option value="all">All Nodes</option>
-                                <option value="selected">Selected Nodes</option>
-                                <option value="selected-connected">Selected Nodes + Connected</option>
-                                <option value="infrastructure">Infrastructure Nodes</option>
-                                <option value="infrastructure-connected">Infrastructure + Connected</option>
-                                <option value="active">Currently Active</option>
-                                <option value="link-only">Link-only</option>
-                                <option value="24h">Last 24 Hours</option>
-                                <option value="7d">Last 7 Days</option>
-                                <option value="inactive">Inactive</option>
-                            </select>
-                            <select id="diag-infra-filter" class="form-input" title="Infrastructure filter">
-                                <option value="all">All Infrastructure</option>
-                                <option value="permanent">Permanent</option>
-                                <option value="event">Event</option>
-                                <option value="permanent-event">Permanent + Event</option>
-                                <option value="untagged">Untagged</option>
-                            </select>
-                            <select id="diag-type-filter" class="form-input">
-                                <option value="all">All Types</option>
-                                <option value="rf">RF</option>
-                                <option value="wireguard">Wireguard</option>
-                                <option value="tunnel">Tunnel</option>
-                            </select>
-                            <select id="diag-sort" class="form-input">
-                                <option value="relevance">Sort: Relevance</option>
-                                <option value="alpha">Sort: Alpha</option>
-                                <option value="last-seen">Sort: Last Seen</option>
-                                <option value="firmware">Sort: Firmware</option>
-                                <option value="model">Sort: Model</option>
-                            </select>
-                            <select id="diag-hours" class="form-input">
-                                <option value="1">Last 1 Hour</option>
-                                <option value="6">Last 6 Hours</option>
-                                <option value="24" selected>Last 24 Hours</option>
-                                <option value="72">Last 3 Days</option>
-                                <option value="168">Last 7 Days</option>
-                            </select>
-                            <button id="diag-refresh" class="btn btn-secondary">Refresh</button>
-                        </div>
-                        <div class="nodes-count">
-                            <span id="diag-status">Idle</span>
-                        </div>
+                    <div class="nodes-header page-header">
+                        <div class="nodes-header-left"><h2 class="page-title">Status</h2><span class="form-hint">what needs attention now</span></div>
                     </div>
-
                     <div class="diag-scroll">
-                        <!-- Link Watch (link-watch.js) -->
-                        <div class="diag-section">
-                            <h3>Link Watch <small class="form-hint">continuous one-way link alarm and noise-floor watch, checked after every scan</small></h3>
-                            <div class="mh-controls">
-                                <button id="lw-refresh" class="btn btn-secondary">Refresh</button>
-                                <label class="checkbox-label"><input type="checkbox" id="lw-all-radios"> Show all radios</label>
-                                <span id="lw-status" class="form-hint"></span>
-                            </div>
-                            <h4>One-way links</h4>
-                            <div id="lw-one-way"><p class="log-empty">Not loaded yet.</p></div>
-                            <h4>Noise floor</h4>
-                            <div id="lw-noise"><p class="log-empty">Not loaded yet.</p></div>
-                            <div id="lw-noise-detail" class="hidden">
-                                <h4 id="lw-noise-title"></h4>
-                                <div class="lw-charts">
-                                    <div class="lw-chart"><canvas id="lw-noise-series"></canvas></div>
-                                    <div class="lw-chart"><canvas id="lw-noise-profile"></canvas></div>
-                                </div>
-                            </div>
-                        </div>
-                        <!-- end Link Watch -->
-
-                        <!-- New nodes (#45, new-nodes.js) -->
-                        <div class="diag-section">
-                            <h3>New Nodes <small class="form-hint">nodes discovered recently: setup checklist, links and a suggested channel, watched for a week</small></h3>
-                            <div class="mh-controls">
-                                <button id="nn-refresh" class="btn btn-secondary">Refresh</button>
-                                <label class="checkbox-label"><input type="checkbox" id="nn-all"> Include past</label>
-                                <span id="nn-status" class="form-hint"></span>
-                            </div>
-                            <div id="nn-report"><p class="log-empty">Not loaded yet.</p></div>
-                        </div>
-
-                        <!-- Service checks (#36, service-checks.js) -->
-                        <div class="diag-section">
-                            <h3>Service Checks <small class="form-hint">advertised services (web, phones, cameras, Winlink) that stop answering while their node is up</small></h3>
-                            <div class="mh-controls">
-                                <button id="sc-refresh" class="btn btn-secondary">Refresh</button>
-                                <button id="sc-run" class="btn btn-primary">Check now</button>
-                                <label class="checkbox-label"><input type="checkbox" id="sc-all"> Show all services</label>
-                                <span id="sc-status" class="form-hint"></span>
-                            </div>
-                            <div id="sc-report"><p class="log-empty">Not loaded yet.</p></div>
-                        </div>
-
-                        <!-- Ghost trackers (#33, ghost-trackers.js) -->
-                        <div class="diag-section">
-                            <h3>Ghost Trackers <small class="form-hint">RF trackers that can't be what they claim (radio off, cabled pair, channels apart, wrong distance, one MAC under two names)</small></h3>
-                            <div class="mh-controls">
-                                <button id="gt-run" class="btn btn-primary">Check</button>
-                                <span id="gt-status" class="form-hint"></span>
-                            </div>
-                            <div id="gt-report"><p class="log-empty">Press Check.</p></div>
-                        </div>
-
-                        <!-- Link potential (#69, link-potential.js) -->
-                        <div class="diag-section">
-                            <h3>Link Potential <small class="form-hint">every RF link: distance vs measured SNR or rate against what its antennas should give; links far below the curve are the ones to re-aim or re-channel</small></h3>
-                            <div class="mh-controls">
-                                <button id="lpot-run" class="btn btn-primary">Plot</button>
-                                <select id="lpot-metric" class="form-input">
-                                    <option value="snr">Measured SNR</option>
-                                    <option value="rate">Measured rate</option>
-                                </select>
-                                <span id="lpot-status" class="form-hint"></span>
-                            </div>
-                            <div class="lpot-chart-wrap"><canvas id="lpot-chart"></canvas></div>
-                            <div id="lpot-report"><p class="log-empty">Press Plot.</p></div>
-                        </div>
-
-                        <!-- Per-link alerts (#73, link-alerts.js) -->
-                        <div class="diag-section">
-                            <h3>Link Alerts <small class="form-hint">alert on one client link of a sector (SNR, LQ, rate, drops), not just the whole radio</small></h3>
-                            <div class="mh-controls">
-                                <button id="la-run" class="btn btn-primary">Show rules</button>
-                                <span id="la-status" class="form-hint"></span>
-                            </div>
-                            <div id="la-report"><p class="log-empty">Press Show rules.</p></div>
-                            <div class="mh-controls la-form">
-                                <select id="la-sector" class="form-input"><option value="">Sector radio…</option></select>
-                                <input id="la-sector-name" class="form-input" placeholder="or any radio name">
-                                <button id="la-sector-load" class="btn btn-small btn-secondary">List clients</button>
-                                <label>SNR below <input id="la-snr" type="number" class="form-input lp-num" placeholder="dB"></label>
-                                <label>LQ below <input id="la-lq" type="number" class="form-input lp-num" placeholder="%"></label>
-                                <label>Rate below <input id="la-rate" type="number" class="form-input lp-num" placeholder="Mbps"></label>
-                                <label>More than <input id="la-flaps" type="number" class="form-input lp-num" placeholder="n"> drops/h</label>
-                                <label><input id="la-missing" type="checkbox" checked> when missing</label>
-                                <select id="la-sev" class="form-input"><option value="warning">warning</option><option value="critical">critical</option><option value="info">info</option></select>
-                                <button id="la-sector-add" class="btn btn-small btn-primary">Add for checked clients</button>
-                            </div>
-                            <div id="la-clients" class="la-clients"></div>
-                        </div>
-
-                        <!-- Babel costs (#35, babel-view.js) -->
-                        <div class="diag-section">
-                            <h3>Babel Costs <small class="form-hint">where routing doesn't follow the RF links: unroutable good links, detours, tunnels cheaper than RF</small></h3>
-                            <div class="mh-controls">
-                                <button id="bv-run" class="btn btn-primary">Check</button>
-                                <select id="bv-node" class="form-input"><option value="">Neighbour costs for a node…</option></select>
-                                <span id="bv-status" class="form-hint"></span>
-                            </div>
-                            <div id="bv-report"><p class="log-empty">Press Check.</p></div>
-                            <div id="bv-detail"></div>
-                        </div>
-
-                        <!-- Node hygiene (#37, hygiene.js) -->
-                        <div class="diag-section">
-                            <h3>Node Hygiene <small class="form-hint">setup score per node and what each owner should fix</small></h3>
-                            <div class="mh-controls">
-                                <button id="hy-run" class="btn btn-primary">Score</button>
-                                <select id="hy-owner" class="form-input"><option value="">All owners</option></select>
-                                <span id="hy-status" class="form-hint"></span>
-                            </div>
-                            <div id="hy-report"><p class="log-empty">Press Score.</p></div>
-                        </div>
-
-                        <!-- WiFi survey (#34, wifi-survey.js) -->
-                        <div class="diag-section">
-                            <h3>WiFi Survey <small class="form-hint">non-mesh access points heard at each radio; the channel planner uses them instead of fixed WiFi guesses</small></h3>
-                            <div class="mh-controls">
-                                <button id="ws-refresh" class="btn btn-secondary">Refresh</button>
-                                <input type="text" id="ws-node" class="form-input" placeholder="radio name, e.g. w0gq-col-rkt-n" list="chg-node-names">
-                                <button id="ws-scan" class="btn btn-primary" title="Asks the radio for a WiFi scan; its links blip for a few seconds">Scan now…</button>
-                                <span id="ws-status" class="form-hint"></span>
-                            </div>
-                            <details class="diag-details">
-                                <summary>Import scan text</summary>
-                                <textarea id="ws-text" class="form-input cm-whatif-text" rows="6" placeholder="Paste `iw dev wlan0 scan` output or the node's WiFi scan page"></textarea>
-                                <button id="ws-import" class="btn btn-secondary btn-small">Import for this radio</button>
-                            </details>
-                            <div id="ws-report"><p class="log-empty">Not loaded yet.</p></div>
-                        </div>
-
-                        <!-- Site Matrix (#16, site-matrix.js) -->
-                        <div class="diag-section">
-                            <h3>Site Matrix <small class="form-hint">every radio at a site against every radio it hears, both directions per cell</small></h3>
-                            <div class="mh-controls">
-                                <select id="sm-site" class="form-input" title="Site"></select>
-                                <input type="text" id="sm-radios" class="form-input" placeholder="or radio names, comma separated">
-                                <select id="sm-hours" class="form-input" title="History window">
-                                    <option value="6">6 h</option>
-                                    <option value="24" selected>24 h</option>
-                                    <option value="72">3 days</option>
-                                    <option value="168">7 days</option>
-                                </select>
-                                <label class="checkbox-label" title="Also show each pair's channel relation under the plan in the Channel Map what-if box">
-                                    <input type="checkbox" id="sm-whatif"> Use Channel Map what-if</label>
-                                <button id="sm-run" class="btn btn-primary">Show Matrix</button>
-                                <span id="sm-status" class="form-hint"></span>
-                            </div>
-                            <div id="sm-report"><p class="log-empty">Not run yet.</p></div>
-                        </div>
-                        <!-- end Site Matrix -->
-
-                        <!-- Route Watch (#9, route-watch.js) -->
-                        <div class="diag-section">
-                            <h3>Route Watch <small class="form-hint">periodic traceroutes along key paths: route changes and detours off the backbone</small></h3>
-                            <div class="mh-controls">
-                                <button id="rw-refresh" class="btn btn-secondary">Refresh</button>
-                                <span id="rw-status" class="form-hint"></span>
-                            </div>
-                            <div id="rw-paths"><p class="log-empty">Not loaded yet.</p></div>
-                            <div class="mh-controls rw-add">
-                                <input type="text" id="rw-source" class="form-input" placeholder="source node (empty = starting node)">
-                                <input type="text" id="rw-target" class="form-input" placeholder="target node">
-                                <input type="text" id="rw-label" class="form-input" placeholder="label (optional)">
-                                <button id="rw-add" class="btn btn-secondary">Add path</button>
-                            </div>
-                        </div>
-                        <!-- end Route Watch -->
-
-                        <!-- Path View (#18, path-view.js) -->
-                        <div class="diag-section">
-                            <h3>Path View <small class="form-hint">the route between two nodes, each hop coloured by the quality of the link it crossed</small></h3>
-                            <div class="mh-controls">
-                                <input type="text" id="pv-source" class="form-input" placeholder="source (empty = starting node)">
-                                <input type="text" id="pv-target" class="form-input" placeholder="target node">
-                                <select id="pv-hours" class="form-input" title="History window">
-                                    <option value="6">6 h</option>
-                                    <option value="24" selected>24 h</option>
-                                    <option value="72">3 days</option>
-                                    <option value="168">7 days</option>
-                                </select>
-                                <button id="pv-show" class="btn btn-primary">Show path</button>
-                                <button id="pv-trace" class="btn btn-secondary" title="Traceroute from the source node now">Trace now</button>
-                                <button id="pv-watch" class="btn btn-secondary" title="Add to Route Watch">Watch this path</button>
-                                <span id="pv-status" class="form-hint"></span>
-                            </div>
-                            <div id="pv-result"><p class="log-empty">Enter a target (and optionally a source) and press Show path.</p></div>
-                        </div>
-                        <!-- end Path View -->
-
-                        <!-- Single points of failure (#20, spof.js) -->
-                        <div class="diag-section">
-                            <h3>Single Points of Failure <small class="form-hint">links and nodes whose loss cuts nodes off from the starting node, weakest and most-depended-on first</small></h3>
-                            <div class="mh-controls">
-                                <label class="checkbox-label" title="Leave WireGuard / legacy tunnels out: what the RF and DtD backbone alone carries when the internet is down">
-                                    <input type="checkbox" id="spof-no-tunnels" checked> Internet down (ignore tunnels)</label>
-                                <button id="spof-run" class="btn btn-primary">Rank</button>
-                                <button id="spof-map" class="btn btn-secondary">Show on map</button>
-                                <span id="spof-status" class="form-hint"></span>
-                            </div>
-                            <div id="spof-report"><p class="log-empty">Press Rank.</p></div>
-                        </div>
-                        <!-- end Single points of failure -->
-
-                        <!-- Link budget + terrain (#26, link-budget.js) -->
-                        <div class="diag-section">
-                            <h3>Link Budget <small class="form-hint">predicted vs. measured signal and Fresnel clearance for RF links with an infrastructure end</small></h3>
-                            <div class="mh-controls">
-                                <button id="lb-run" class="btn btn-primary">Compute</button>
-                                <span id="lb-status" class="form-hint">Ground elevations come from Open-Meteo (cached; ELEVATION_ENABLED=0 to stay offline).</span>
-                            </div>
-                            <div id="lb-report"><p class="log-empty">Press Compute.</p></div>
-                            <div id="lb-detail" class="hidden"><div id="lb-detail-body"></div></div>
-                        </div>
-                        <!-- end Link budget -->
-
-                        <div class="diag-section">
-                            <h3>Infrastructure Review <small class="form-hint">radio settings of every infrastructure node: channel plans, beams, pointing, pairing, firmware</small></h3>
-                            <p class="form-hint">Site dashboards: <span id="site-dash-links">loading...</span></p>
-                            <div class="mh-controls">
-                                <label class="checkbox-label" title="Read current settings from each infrastructure node before reviewing">
-                                    <input type="checkbox" id="infra-refresh" checked> Refresh settings from nodes
-                                </label>
-                                <button id="infra-run" class="btn btn-primary">Run Infrastructure Review</button>
-                                <span id="infra-status" class="form-hint"></span>
-                            </div>
-                            <div id="infra-review"><p class="log-empty">Not run yet.</p></div>
-                        </div>
-
-                        <!-- Settings Drift (#12, drift.js) -->
-                        <div class="diag-section">
-                            <h3>Settings Drift <small class="form-hint">firmware and radio-setting mismatches across links, sites and the mesh</small></h3>
-                            <div class="mh-controls">
-                                <select id="drift-scope" class="form-input" title="Which nodes to compare">
-                                    <option value="all">All nodes in scope</option>
-                                    <option value="infrastructure">Infrastructure</option>
-                                    <option value="infrastructure-connected">Infrastructure + Connected</option>
-                                    <option value="selected">Selected Nodes</option>
-                                    <option value="selected-connected">Selected Nodes + Connected</option>
-                                </select>
-                                <button id="drift-run" class="btn btn-primary">Compare Settings</button>
-                                <span id="drift-status" class="form-hint"></span>
-                            </div>
-                            <div id="drift-report"><p class="log-empty">Not run yet.</p></div>
-                        </div>
-                        <!-- end Settings Drift -->
-                        <!-- Antenna Aim (#14, aim-check.js) -->
-                        <div class="diag-section">
-                            <h3>Antenna Aim <small class="form-hint">set azimuth vs. where each directional antenna's RF peers really are, plus location checks</small></h3>
-                            <div class="mh-controls">
-                                <select id="aim-scope" class="form-input" title="Which radios to check">
-                                    <option value="all">All nodes in scope</option>
-                                    <option value="infrastructure">Infrastructure</option>
-                                    <option value="infrastructure-connected">Infrastructure + Connected</option>
-                                    <option value="selected">Selected Nodes</option>
-                                    <option value="selected-connected">Selected Nodes + Connected</option>
-                                </select>
-                                <button id="aim-run" class="btn btn-primary">Check Aim</button>
-                                <span id="aim-status" class="form-hint"></span>
-                            </div>
-                            <div id="aim-report"><p class="log-empty">Not run yet.</p></div>
-                        </div>
-                        <!-- end Antenna Aim -->
-                        <!-- Sector Airtime (#6, airtime.js) -->
-                        <div class="diag-section">
-                            <h3>Sector Airtime <small class="form-hint">who hears whom around each sector, hidden pairs, shared channels on a mast and contention</small></h3>
-                            <div class="mh-controls">
-                                <select id="air-scope" class="form-input" title="Which radios to check">
-                                    <option value="all">All nodes in scope</option>
-                                    <option value="infrastructure">Infrastructure</option>
-                                    <option value="infrastructure-connected">Infrastructure + Connected</option>
-                                    <option value="selected">Selected Nodes</option>
-                                    <option value="selected-connected">Selected Nodes + Connected</option>
-                                </select>
-                                <select id="air-hours" class="form-input" title="Window for tx fail rates and packet counts">
-                                    <option value="6">Last 6 h</option>
-                                    <option value="24" selected>Last 24 h</option>
-                                    <option value="72">Last 3 days</option>
-                                    <option value="168">Last 7 days</option>
-                                </select>
-                                <button id="air-run" class="btn btn-primary">Check Sectors</button>
-                                <span id="air-status" class="form-hint"></span>
-                            </div>
-                            <details class="diag-details">
-                                <summary>Preview a channel plan</summary>
-                                <textarea id="air-overrides" class="form-input air-overrides" rows="5"
-                                    placeholder="one per line: name freq width, or name off (Channel Map what-if syntax)"></textarea>
-                                <div class="mh-controls">
-                                    <button id="air-use-map" class="btn btn-secondary btn-small">Use Channel Map what-if</button>
-                                    <button id="air-preview" class="btn btn-primary btn-small">Preview Plan</button>
-                                </div>
-                            </details>
-                            <div id="air-report"><p class="log-empty">Not run yet.</p></div>
-                        </div>
-                        <!-- end Sector Airtime -->
-                        <!-- Cleanup (#24, cleanup.js) -->
-                        <div class="diag-section">
-                            <h3>Cleanup <small class="form-hint">fake, placeholder, stale and known-unreachable nodes; exclude them from scanning or delete their records</small></h3>
-                            <div class="mh-controls">
-                                <label class="form-hint" for="cleanup-stale-days">Stale after</label>
-                                <input type="number" id="cleanup-stale-days" class="form-input cleanup-days" value="30" min="1" max="365"> <span class="form-hint">days</span>
-                                <button id="cleanup-run" class="btn btn-primary">Find Candidates</button>
-                                <button id="cleanup-exclude" class="btn btn-secondary" disabled title="Never poll the selected nodes (scan boundary: exclude)">Exclude</button>
-                                <button id="cleanup-unexclude" class="btn btn-secondary" disabled title="Poll the selected nodes again">Un-exclude</button>
-                                <button id="cleanup-delete" class="btn btn-danger" disabled title="Delete the selected node records and their history">Delete</button>
-                                <span id="cleanup-count" class="form-hint"></span>
-                                <span id="cleanup-status" class="form-hint"></span>
-                            </div>
-                            <div id="cleanup-list"><p class="log-empty">Not run yet. Infrastructure, Permanent/Event-tagged, selected and starting nodes are never offered.</p></div>
-                        </div>
-                        <!-- end Cleanup -->
-                        <!-- Maintenance windows (#22) -->
-                        <div class="diag-section">
-                            <details id="maint-section" class="notify-section">
-                                <summary><h3>Maintenance <small class="form-hint">planned work: hold alarms and leave it out of reports</small>
-                                    <span id="maint-badge" class="notify-badge"></span></h3></summary>
-                                <div id="maint-panel"><p class="log-empty">Loading...</p></div>
-                            </details>
-                        </div>
-                        <!-- End maintenance -->
-
-                        <!-- Notifications (#21) -->
-                        <div class="diag-section">
-                            <details id="notify-section" class="notify-section">
-                                <summary><h3>Notifications <small class="form-hint">email, Discord, ntfy or webhook alerts for important events</small>
-                                    <span id="notify-badge" class="notify-badge"></span></h3></summary>
-                                <div id="notify-panel"><p class="log-empty">Loading...</p></div>
-                            </details>
-                        </div>
-                        <!-- End notifications -->
-
+                        <!-- Needs-attention tiles (status-tiles.js); each opens its section or page -->
+                        <div id="status-tiles" class="rpt-summary status-tiles" aria-label="What needs attention"></div>
                         <div class="diag-section">
                             <h3>Mesh Health Check <small class="form-hint">network-wide problem finder, scoped by scan boundaries</small></h3>
                             <div class="mh-controls">
@@ -742,60 +528,444 @@
                                 <select id="mh-category" class="form-input">
                                     <option value="all">All categories</option>
                                 </select>
-                                <button id="mh-run" class="btn btn-primary">Run Health Check</button>
+                                <input type="text" id="mh-search" class="form-input" placeholder="Search nodes...">
+                                <select id="mh-hours" class="form-input" title="Window for the checks">
+                                    <option value="1">Last 1 hour</option>
+                                    <option value="6">Last 6 hours</option>
+                                    <option value="24" selected>Last 24 hours</option>
+                                    <option value="72">Last 3 days</option>
+                                    <option value="168">Last 7 days</option>
+                                </select>
+                                <button id="mh-run" class="btn btn-primary">Run health check</button>
                                 <span id="mh-scope" class="form-hint"></span>
                             </div>
                             <div id="mh-summary" class="mh-summary"></div>
-                            <div id="mh-findings" class="mh-findings"><p class="log-empty">Loading...</p></div>
+                            <div id="mh-findings" class="mh-findings"><p class="log-empty">Loading…</p></div>
                             <div class="health-footnote">
                                 <p><strong>What this checks.</strong> Near-far / overpowering radios (one neighbor so loud it desensitizes a receiver and masks weaker stations), SNR imbalance between link directions, TX/RX rate and throughput imbalance, one-way links, packet loss / latency / jitter, VoIP stability (estimated MOS, call tests, streamed sessions), flapping and LQM-blocked links, weak or unstable SNR, noise floor, channel congestion, node reboots / memory / poll reliability, hidden-node pairs, and single points of failure.</p>
-                                <p>Only nodes reachable from the scan seed without crossing a <strong>scan boundary</strong> are diagnosed. Set boundaries from a node's panel (Network tab) or node page. Findings are heuristics &mdash; confirm on the radios before changing anything.</p>
+                                <p>Only nodes reachable from the scan seed without crossing a <strong>scan boundary</strong> are diagnosed. Set boundaries from a node's panel (Topology) or node page. Findings are heuristics &mdash; confirm on the radios before changing anything.</p>
                             </div>
                         </div>
 
+                        <!-- Link Watch (link-watch.js) -->
                         <div class="diag-section">
-                            <h3>Flapping Links <small class="form-hint">drops/blocks per link, flappiest first</small></h3>
-                            <div class="table-scroll-wrapper">
-                                <table class="info-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Source</th><th>Peer</th><th>Type</th>
-                                            <th>Transitions</th><th>Node-reported flaps/hr</th><th>Scanner-to-node</th>
-                                            <th>Blocks</th><th>Top Block Reason</th><th>Last Change</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="diag-flaps-body"></tbody>
-                                </table>
+                            <h3>Link Watch <small class="form-hint">continuous one-way link alarm and noise-floor watch, checked after every scan</small></h3>
+                            <div class="mh-controls">
+                                <button id="lw-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                <label class="checkbox-label"><input type="checkbox" id="lw-all-radios"> Show all radios</label>
+                                <span id="lw-status" class="form-hint"></span>
+                            </div>
+                            <h4>One-way links</h4>
+                            <div id="lw-one-way"><p class="log-empty">Loading…</p></div>
+                            <h4>Noise floor</h4>
+                            <div id="lw-noise"><p class="log-empty">Loading…</p></div>
+                            <div id="lw-noise-detail" class="hidden">
+                                <h4 id="lw-noise-title"></h4>
+                                <div class="lw-charts">
+                                    <div class="lw-chart"><canvas id="lw-noise-series"></canvas></div>
+                                    <div class="lw-chart"><canvas id="lw-noise-profile"></canvas></div>
+                                </div>
                             </div>
                         </div>
+                        <!-- end Link Watch -->
 
+                        <!-- Node uptime (uptime.py, node-uptime.js) -->
+                        <div class="diag-section" id="uptime-section">
+                            <h3>Node Uptime <small class="form-hint">share of the checked time each node was up and answering (Nodes, Time and Search from the filter bar), lowest first</small></h3>
+                            <div class="mh-controls">
+                                <label class="gf-check"><input type="checkbox" id="nu-all"> Show every node (not only below 100%)</label>
+                                <button id="nu-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                <span id="nu-status" class="form-hint"></span>
+                            </div>
+                            <div id="nu-report"><p class="log-empty">Loading…</p></div>
+                            <details class="health-footnote">
+                                <summary>How uptime is measured</summary>
+                                <p>Up means running <em>and</em> answering. Time next to a failed poll counts as down (even if the node kept running but couldn't be reached), and so does the time before a reboot. Each answered poll reports how long the node has been running, which bridges gaps where nobody polled it. Long gaps where nobody polled the node and its uptime doesn't cover them are <em>unchecked</em> and left out, as is time in a maintenance window. Uptime % = up / (up + down). Nodes whose failed polls are explained (tunnel-only, answers ping but not HTTP, placeholder) show n/a: the monitor can't tell. A node is judged up to its last poll; "stale" means it hasn't been polled lately.</p>
+                            </details>
+                        </div>
+
+                        <!-- New nodes (#45, new-nodes.js) -->
                         <div class="diag-section">
-                            <h3>Asymmetric Links <small class="form-hint">SNR direction gap, largest first</small></h3>
-                            <div class="table-scroll-wrapper">
-                                <table class="info-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Source</th><th>Peer</th>
-                                            <th>SNR</th><th>Rev SNR</th>
-                                            <th>Within-row Δ</th><th>Cross-dir Δ</th><th>Max Δ</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="diag-asym-body"></tbody>
-                                </table>
+                            <h3>New Nodes <small class="form-hint">nodes discovered recently: setup checklist, links and a suggested channel, watched for a week</small></h3>
+                            <div class="mh-controls">
+                                <button id="nn-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                <label class="checkbox-label"><input type="checkbox" id="nn-all"> Include past</label>
+                                <span id="nn-status" class="form-hint"></span>
                             </div>
-                            <div class="health-footnote">
-                                <p><strong>What this shows.</strong> An RF link should be roughly equal in both directions. This section lists links where the two directions disagree on signal quality (largest gap first). Δ values are in dB; a gap of <strong>3&ndash;6 dB is marginal</strong> and <strong>&gt;6 dB is poor</strong>.</p>
-                                <ul>
-                                    <li><strong>SNR</strong> &mdash; the signal-to-noise ratio the <em>source</em> node hears from the peer (how well we receive them).</li>
-                                    <li><strong>Rev SNR</strong> &mdash; the reverse direction: the SNR the <em>peer</em> hears from the source (how well they receive us), as reported in the source's LQM.</li>
-                                    <li><strong>Within-row Δ</strong> &mdash; |SNR &minus; Rev SNR| from one node's own LQM (the two directions of the link as that node sees them).</li>
-                                    <li><strong>Cross-dir Δ</strong> &mdash; the gap between each node's <em>own</em> received SNR of the other, available only when both ends were polled (an independent cross-check).</li>
-                                    <li><strong>Max Δ</strong> &mdash; the larger of the two; the headline asymmetry used for ranking.</li>
-                                </ul>
-                                <p><strong>The problem &amp; likely causes.</strong> A large gap means one direction is much weaker &mdash; classically "we hear them fine but they can't hear us" (or vice-versa). Common causes: mismatched transmit power between the ends, different antenna gain or aiming, a one-sided obstruction or interference source, a degraded radio/feedline on one end, or a hidden-node / near-far situation.</p>
-                                <p><strong>Potential fixes.</strong> Re-aim or upgrade the antenna on the <em>weaker</em> end; equalize TX power between the two radios; clear or work around an obstruction and hunt one-sided interference (check the noise floor on the weak side); verify the distance setting and both radios' health. If it persists, reposition the weaker end.</p>
-                                <p><strong>Impact on throughput &amp; latency.</strong> A radio link is only as good as its <em>worse</em> direction: the modulation/data rate is negotiated down to what the weak path supports, driving retransmits, higher latency and jitter, and lower throughput. Because TCP ACKs travel the reverse path, a weak return direction caps end-to-end TCP speed even if the forward path is strong. Severe asymmetry also makes LQM penalize or block the link, which shows up as flapping &mdash; and it degrades VOIP into one-way audio or choppy calls.</p>
+                            <div id="nn-report"><p class="log-empty">Loading…</p></div>
+                        </div>
+
+                        <!-- Service checks (#36, service-checks.js) -->
+                        <div class="diag-section">
+                            <h3>Service Checks <small class="form-hint">advertised services (web, phones, cameras, Winlink) that stop answering while their node is up</small></h3>
+                            <div class="mh-controls">
+                                <button id="sc-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                <button id="sc-run" class="btn btn-primary">Check now</button>
+                                <label class="checkbox-label"><input type="checkbox" id="sc-all"> Show all services</label>
+                                <span id="sc-status" class="form-hint"></span>
                             </div>
+                            <div id="sc-report"><p class="log-empty">Loading…</p></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Radio & RF View -->
+            <div id="radio-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="subnav-layout">
+                    <nav class="subnav" aria-label="Radio and RF checks">
+                        <button class="subnav-btn" data-sub="sectors">Sectors</button>
+                        <button class="subnav-btn" data-sub="site-matrix">Site Matrix</button>
+                        <button class="subnav-btn" data-sub="aim">Antenna Aim</button>
+                        <button class="subnav-btn" data-sub="budget">Link Budget &amp; Potential</button>
+                        <button class="subnav-btn" data-sub="ghosts">Ghost Trackers</button>
+                        <button class="subnav-btn" data-sub="alerts">Link Alerts</button>
+                    </nav>
+                    <div class="diag-scroll subnav-body">
+                        <div class="subpage" data-sub="sectors">
+                            <!-- Sector Airtime (#6, airtime.js) -->
+                            <div class="diag-section">
+                                <h3>Sector Airtime <small class="form-hint">who hears whom around each sector, hidden pairs, shared channels on a mast and contention</small></h3>
+                                <div class="mh-controls">
+                                    <select id="air-scope" class="form-input" title="Which radios to check">
+                                        <option value="all">All nodes in scope</option>
+                                        <option value="infrastructure">Infrastructure</option>
+                                        <option value="infrastructure-connected">Infrastructure + Connected</option>
+                                        <option value="selected">Selected Nodes</option>
+                                        <option value="selected-connected">Selected Nodes + Connected</option>
+                                    </select>
+                                    <select id="air-hours" class="form-input" title="Window for tx fail rates and packet counts">
+                                        <option value="6">Last 6 h</option>
+                                        <option value="24" selected>Last 24 h</option>
+                                        <option value="72">Last 3 days</option>
+                                        <option value="168">Last 7 days</option>
+                                    </select>
+                                    <button id="air-run" class="btn btn-primary">Check sectors</button>
+                                    <span id="air-status" class="form-hint"></span>
+                                </div>
+                                <details class="diag-details">
+                                    <summary>Preview a channel plan</summary>
+                                    <textarea id="air-overrides" class="form-input air-overrides" rows="5"
+                                        placeholder="one per line: name freq width, or name off (Channel Map what-if syntax)"></textarea>
+                                    <div class="mh-controls">
+                                        <button id="air-use-map" class="btn btn-secondary btn-small">Use Channel Map what-if</button>
+                                        <button id="air-preview" class="btn btn-primary btn-small">Preview plan</button>
+                                    </div>
+                                </details>
+                                <div id="air-report"><p class="log-empty">Press Check sectors to run.</p></div>
+                            </div>
+                            <!-- end Sector Airtime -->
+                        </div>
+                        <div class="subpage" data-sub="site-matrix">
+                            <!-- Site Matrix (#16, site-matrix.js) -->
+                            <div class="diag-section">
+                                <h3>Site Matrix <small class="form-hint">every radio at a site against every radio it hears, both directions per cell</small></h3>
+                                <div class="mh-controls">
+                                    <select id="sm-site" class="form-input" title="Site"></select>
+                                    <input type="text" id="sm-radios" class="form-input" placeholder="or radio names, comma separated">
+                                    <select id="sm-hours" class="form-input" title="History window">
+                                        <option value="6">6 h</option>
+                                        <option value="24" selected>24 h</option>
+                                        <option value="72">3 days</option>
+                                        <option value="168">7 days</option>
+                                    </select>
+                                    <label class="checkbox-label" title="Also show each pair's channel relation under the plan in the Channel Map what-if box">
+                                        <input type="checkbox" id="sm-whatif"> Use Channel Map what-if</label>
+                                    <button id="sm-run" class="btn btn-primary">Show matrix</button>
+                                    <span id="sm-status" class="form-hint"></span>
+                                </div>
+                                <div id="sm-report"><p class="log-empty">Press Show matrix to run.</p></div>
+                            </div>
+                            <!-- end Site Matrix -->
+                        </div>
+                        <div class="subpage" data-sub="aim">
+                            <!-- Antenna Aim (#14, aim-check.js) -->
+                            <div class="diag-section">
+                                <h3>Antenna Aim <small class="form-hint">set azimuth vs. where each directional antenna's RF peers really are, plus location checks</small></h3>
+                                <div class="mh-controls">
+                                    <select id="aim-scope" class="form-input" title="Which radios to check">
+                                        <option value="all">All nodes in scope</option>
+                                        <option value="infrastructure">Infrastructure</option>
+                                        <option value="infrastructure-connected">Infrastructure + Connected</option>
+                                        <option value="selected">Selected Nodes</option>
+                                        <option value="selected-connected">Selected Nodes + Connected</option>
+                                    </select>
+                                    <button id="aim-run" class="btn btn-primary">Check aim</button>
+                                    <span id="aim-status" class="form-hint"></span>
+                                </div>
+                                <div id="aim-report"><p class="log-empty">Press Check aim to run.</p></div>
+                            </div>
+                            <!-- end Antenna Aim -->
+                        </div>
+                        <div class="subpage" data-sub="budget">
+                            <!-- Link budget + terrain (#26, link-budget.js) -->
+                            <div class="diag-section">
+                                <h3>Link Budget <small class="form-hint">predicted vs. measured signal and Fresnel clearance for RF links with an infrastructure end</small></h3>
+                                <div class="mh-controls">
+                                    <button id="lb-run" class="btn btn-primary">Compute link budgets</button>
+                                    <span id="lb-status" class="form-hint">Ground elevations come from Open-Meteo (cached; ELEVATION_ENABLED=0 to stay offline).</span>
+                                </div>
+                                <div id="lb-report"><p class="log-empty">Press Compute link budgets to run.</p></div>
+                                <div id="lb-detail" class="hidden"><div id="lb-detail-body"></div></div>
+                            </div>
+                            <!-- end Link budget -->
+
+                            <!-- Link potential (#69, link-potential.js) -->
+                            <div class="diag-section">
+                                <h3>Link Potential <small class="form-hint">every RF link: distance vs measured SNR or rate against what its antennas should give; links far below the curve are the ones to re-aim or re-channel</small></h3>
+                                <div class="mh-controls">
+                                    <button id="lpot-run" class="btn btn-primary">Plot link potential</button>
+                                    <select id="lpot-metric" class="form-input">
+                                        <option value="snr">Measured SNR</option>
+                                        <option value="rate">Measured rate</option>
+                                    </select>
+                                    <span id="lpot-status" class="form-hint"></span>
+                                </div>
+                                <div class="lpot-chart-wrap"><canvas id="lpot-chart"></canvas></div>
+                                <div id="lpot-report"><p class="log-empty">Press Plot link potential to run.</p></div>
+                            </div>
+                        </div>
+                        <div class="subpage" data-sub="ghosts">
+                            <!-- Ghost trackers (#33, ghost-trackers.js) -->
+                            <div class="diag-section">
+                                <h3>Ghost Trackers <small class="form-hint">RF trackers that can't be what they claim (radio off, cabled pair, channels apart, wrong distance, one MAC under two names)</small></h3>
+                                <div class="mh-controls">
+                                    <button id="gt-run" class="btn btn-primary">Find ghost trackers</button>
+                                    <span id="gt-status" class="form-hint"></span>
+                                </div>
+                                <div id="gt-report"><p class="log-empty">Press Find ghost trackers to run.</p></div>
+                            </div>
+                        </div>
+                        <div class="subpage" data-sub="alerts">
+                            <!-- Per-link alerts (#73, link-alerts.js) -->
+                            <div class="diag-section">
+                                <h3>Link Alerts <small class="form-hint">alert on one client link of a sector (SNR, LQ, rate, drops), not just the whole radio</small></h3>
+                                <div class="mh-controls">
+                                    <button id="la-run" class="btn btn-primary">Show alert rules</button>
+                                    <span id="la-status" class="form-hint"></span>
+                                </div>
+                                <div id="la-report"><p class="log-empty">Press Show alert rules to run.</p></div>
+                                <div class="mh-controls la-form">
+                                    <select id="la-sector" class="form-input"><option value="">Sector radio…</option></select>
+                                    <input id="la-sector-name" class="form-input" placeholder="or any radio name">
+                                    <button id="la-sector-load" class="btn btn-small btn-secondary">List clients</button>
+                                    <label>SNR below <input id="la-snr" type="number" class="form-input lp-num" placeholder="dB"></label>
+                                    <label>LQ below <input id="la-lq" type="number" class="form-input lp-num" placeholder="%"></label>
+                                    <label>Rate below <input id="la-rate" type="number" class="form-input lp-num" placeholder="Mbps"></label>
+                                    <label>More than <input id="la-flaps" type="number" class="form-input lp-num" placeholder="n"> drops/h</label>
+                                    <label><input id="la-missing" type="checkbox" checked> when missing</label>
+                                    <select id="la-sev" class="form-input"><option value="warning">warning</option><option value="critical">critical</option><option value="info">info</option></select>
+                                    <button id="la-sector-add" class="btn btn-small btn-primary">Add for checked clients</button>
+                                </div>
+                                <div id="la-clients" class="la-clients"></div>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Routing View -->
+            <div id="routing-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="subnav-layout">
+                    <nav class="subnav" aria-label="Routing checks">
+                        <button class="subnav-btn" data-sub="route-watch">Route Watch</button>
+                        <button class="subnav-btn" data-sub="path">Path View</button>
+                        <button class="subnav-btn" data-sub="spof">Single Points of Failure</button>
+                        <button class="subnav-btn" data-sub="babel">Babel Costs</button>
+                    </nav>
+                    <div class="diag-scroll subnav-body">
+                        <div class="subpage" data-sub="route-watch">
+                            <!-- Route Watch (#9, route-watch.js) -->
+                            <div class="diag-section">
+                                <h3>Route Watch <small class="form-hint">periodic traceroutes along key paths: route changes and detours off the backbone</small></h3>
+                                <div class="mh-controls">
+                                    <button id="rw-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                    <span id="rw-status" class="form-hint"></span>
+                                </div>
+                                <div id="rw-paths"><p class="log-empty">Loading…</p></div>
+                                <div class="mh-controls rw-add">
+                                    <input type="text" id="rw-source" class="form-input" placeholder="source node (empty = starting node)">
+                                    <input type="text" id="rw-target" class="form-input" placeholder="target node">
+                                    <input type="text" id="rw-label" class="form-input" placeholder="label (optional)">
+                                    <button id="rw-add" class="btn btn-secondary">Add path</button>
+                                </div>
+                            </div>
+                            <!-- end Route Watch -->
+                        </div>
+                        <div class="subpage" data-sub="path">
+                            <!-- Path View (#18, path-view.js) -->
+                            <div class="diag-section">
+                                <h3>Path View <small class="form-hint">the route between two nodes, each hop coloured by the quality of the link it crossed</small></h3>
+                                <div class="mh-controls">
+                                    <input type="text" id="pv-source" class="form-input" placeholder="source (empty = starting node)">
+                                    <input type="text" id="pv-target" class="form-input" placeholder="target node">
+                                    <select id="pv-hours" class="form-input" title="History window">
+                                        <option value="6">6 h</option>
+                                        <option value="24" selected>24 h</option>
+                                        <option value="72">3 days</option>
+                                        <option value="168">7 days</option>
+                                    </select>
+                                    <button id="pv-show" class="btn btn-primary">Show path</button>
+                                    <button id="pv-trace" class="btn btn-secondary" title="Traceroute from the source node now">Trace now</button>
+                                    <button id="pv-watch" class="btn btn-secondary" title="Add to Route Watch">Watch this path</button>
+                                    <span id="pv-status" class="form-hint"></span>
+                                </div>
+                                <div id="pv-result"><p class="log-empty">Enter a target (and optionally a source) and press Show path.</p></div>
+                            </div>
+                            <!-- end Path View -->
+                        </div>
+                        <div class="subpage" data-sub="spof">
+                            <!-- Single points of failure (#20, spof.js) -->
+                            <div class="diag-section">
+                                <h3>Single Points of Failure <small class="form-hint">links and nodes whose loss cuts nodes off from the starting node, weakest and most-depended-on first</small></h3>
+                                <div class="mh-controls">
+                                    <label class="checkbox-label" title="Leave WireGuard / legacy tunnels out: what the RF and DtD backbone alone carries when the internet is down">
+                                        <input type="checkbox" id="spof-no-tunnels" checked> Internet down (ignore tunnels)</label>
+                                    <button id="spof-run" class="btn btn-primary">Rank weak points</button>
+                                    <button id="spof-map" class="btn btn-secondary">Show on map</button>
+                                    <span id="spof-status" class="form-hint"></span>
+                                </div>
+                                <div id="spof-report"><p class="log-empty">Press Rank weak points to run.</p></div>
+                            </div>
+                            <!-- end Single points of failure -->
+                        </div>
+                        <div class="subpage" data-sub="babel">
+                            <!-- Babel costs (#35, babel-view.js) -->
+                            <div class="diag-section">
+                                <h3>Babel Costs <small class="form-hint">where routing doesn't follow the RF links: unroutable good links, detours, tunnels cheaper than RF</small></h3>
+                                <div class="mh-controls">
+                                    <button id="bv-run" class="btn btn-primary">Check Babel costs</button>
+                                    <select id="bv-node" class="form-input"><option value="">Neighbour costs for a node…</option></select>
+                                    <span id="bv-status" class="form-hint"></span>
+                                </div>
+                                <div id="bv-report"><p class="log-empty">Press Check Babel costs to run.</p></div>
+                                <div id="bv-detail"></div>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Setup View -->
+            <div id="setup-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="subnav-layout">
+                    <nav class="subnav" aria-label="Setup checks">
+                        <button class="subnav-btn" data-sub="infrastructure">Infrastructure Review</button>
+                        <button class="subnav-btn" data-sub="drift">Settings Drift</button>
+                        <button class="subnav-btn" data-sub="hygiene">Node Hygiene</button>
+                        <button class="subnav-btn" data-sub="cleanup">Cleanup</button>
+                    </nav>
+                    <div class="diag-scroll subnav-body">
+                        <div class="subpage" data-sub="infrastructure">
+                            <div class="diag-section">
+                                <h3>Infrastructure Review <small class="form-hint">radio settings of every infrastructure node: channel plans, beams, pointing, pairing, firmware</small></h3>
+                                <p class="form-hint">Site dashboards: <span id="site-dash-links">loading...</span></p>
+                                <div class="mh-controls">
+                                    <label class="checkbox-label" title="Read current settings from each infrastructure node before reviewing">
+                                        <input type="checkbox" id="infra-refresh" checked> Refresh settings from nodes
+                                    </label>
+                                    <button id="infra-run" class="btn btn-primary">Review infrastructure</button>
+                                    <span id="infra-status" class="form-hint"></span>
+                                </div>
+                                <div id="infra-review"><p class="log-empty">Press Review infrastructure to run.</p></div>
+                            </div>
+                        </div>
+                        <div class="subpage" data-sub="drift">
+                            <!-- Settings Drift (#12, drift.js) -->
+                            <div class="diag-section">
+                                <h3>Settings Drift <small class="form-hint">firmware and radio-setting mismatches across links, sites and the mesh</small></h3>
+                                <div class="mh-controls">
+                                    <select id="drift-scope" class="form-input" title="Which nodes to compare">
+                                        <option value="all">All nodes in scope</option>
+                                        <option value="infrastructure">Infrastructure</option>
+                                        <option value="infrastructure-connected">Infrastructure + Connected</option>
+                                        <option value="selected">Selected Nodes</option>
+                                        <option value="selected-connected">Selected Nodes + Connected</option>
+                                    </select>
+                                    <button id="drift-run" class="btn btn-primary">Compare settings</button>
+                                    <span id="drift-status" class="form-hint"></span>
+                                </div>
+                                <div id="drift-report"><p class="log-empty">Press Compare settings to run.</p></div>
+                            </div>
+                            <!-- end Settings Drift -->
+                        </div>
+                        <div class="subpage" data-sub="hygiene">
+                            <!-- Node hygiene (#37, hygiene.js) -->
+                            <div class="diag-section">
+                                <h3>Node Hygiene <small class="form-hint">setup score per node and what each owner should fix</small></h3>
+                                <div class="mh-controls">
+                                    <button id="hy-run" class="btn btn-primary">Score nodes</button>
+                                    <select id="hy-owner" class="form-input"><option value="">All owners</option></select>
+                                    <span id="hy-status" class="form-hint"></span>
+                                </div>
+                                <div id="hy-report"><p class="log-empty">Press Score nodes to run.</p></div>
+                            </div>
+                        </div>
+                        <div class="subpage" data-sub="cleanup">
+                            <!-- Cleanup (#24, cleanup.js) -->
+                            <div class="diag-section">
+                                <h3>Cleanup <small class="form-hint">fake, placeholder, stale and known-unreachable nodes; exclude them from scanning or delete their records</small></h3>
+                                <div class="mh-controls">
+                                    <label class="form-hint" for="cleanup-stale-days">Stale after</label>
+                                    <input type="number" id="cleanup-stale-days" class="form-input cleanup-days" value="30" min="1" max="365"> <span class="form-hint">days</span>
+                                    <button id="cleanup-run" class="btn btn-primary">Find candidates</button>
+                                    <button id="cleanup-exclude" class="btn btn-secondary" disabled title="Never poll the selected nodes (scan boundary: exclude)">Exclude</button>
+                                    <button id="cleanup-unexclude" class="btn btn-secondary" disabled title="Poll the selected nodes again">Un-exclude</button>
+                                    <button id="cleanup-delete" class="btn btn-danger" disabled title="Delete the selected node records and their history">Delete</button>
+                                    <span id="cleanup-count" class="form-hint"></span>
+                                    <span id="cleanup-status" class="form-hint"></span>
+                                </div>
+                                <div id="cleanup-list"><p class="log-empty">Press Find candidates to run. Infrastructure, Permanent/Event-tagged, selected and starting nodes are never offered.</p></div>
+                            </div>
+                            <!-- end Cleanup -->
+                        </div>
+                    </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Maintenance View (Admin, maintenance.js) -->
+            <div id="maintenance-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="diag-scroll">
+                        <!-- Maintenance windows (#22) -->
+                        <div class="diag-section" id="maint-section">
+                            <h3>Maintenance <small class="form-hint">planned work: hold alarms and leave it out of reports</small>
+                                <span id="maint-badge" class="notify-badge"></span></h3>
+                            <div id="maint-panel"><p class="log-empty">Loading…</p></div>
+                        </div>
+                        <!-- End maintenance -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notifications View (Admin, notifications.js) -->
+            <div id="notifications-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="diag-scroll">
+                        <!-- Notifications (#21) -->
+                        <div class="diag-section" id="notify-section">
+                            <h3>Notifications <small class="form-hint">email, Discord, ntfy or webhook alerts for important events</small>
+                                <span id="notify-badge" class="notify-badge"></span></h3>
+                            <div id="notify-panel"><p class="log-empty">Loading…</p></div>
+                        </div>
+                        <!-- End notifications -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sites View (sites-list.js) -->
+            <div id="sites-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="diag-scroll">
+                        <div class="diag-section">
+                            <h3>Sites <small class="form-hint">infrastructure sites: radios, spectrum over time, clients per sector, uplink paths, health</small></h3>
+                            <div id="sites-list"><p class="log-empty">Loading…</p></div>
                         </div>
                     </div>
                 </div>
@@ -829,7 +999,7 @@
                                 <button id="rpt-prev" class="btn btn-secondary" title="Previous window">&#9664; Prev</button>
                                 <button id="rpt-next" class="btn btn-secondary" title="Next window">Next &#9654;</button>
                                 <button id="rpt-latest" class="btn btn-secondary" title="Window ending now">Latest</button>
-                                <button id="rpt-load" class="btn btn-primary">Load</button>
+                                <button id="rpt-load" class="btn btn-primary">Load window</button>
                             </div>
                             <span id="rpt-status" class="nodes-count">Idle</span>
                         </div>
@@ -846,8 +1016,11 @@
                                 <option value="selected-connected">Selected Nodes + Connected</option>
                                 <option value="infrastructure">Infrastructure Nodes</option>
                                 <option value="infrastructure-connected">Infrastructure + Connected</option>
-                                <option value="rf">RF-only Nodes</option>
-                                <option value="active">Currently Active</option>
+                            </select>
+                            <select id="rpt-node-status" class="form-input rpt-select" title="Node status (used instead of the Nodes filter when set)">
+                                <option value="any">Any node status</option>
+                                <option value="rf">RF-only nodes</option>
+                                <option value="active">Currently active</option>
                                 <option value="inactive">Inactive</option>
                             </select>
                             <select id="rpt-link-type" class="form-input rpt-select">
@@ -903,7 +1076,7 @@
                                     <input type="checkbox" id="hs-never"> Show nodes that never answered</label>
                                 <span id="hs-hint" class="form-hint"></span>
                             </div>
-                            <div id="hs-table"><p class="log-empty">Not loaded yet.</p></div>
+                            <div id="hs-table"><p class="log-empty">Loading…</p></div>
                             <div id="hs-changes" class="hs-changes hidden">
                                 <h4><span id="hs-changes-title"></span>
                                     <button id="hs-changes-close" class="btn btn-secondary btn-small">Close</button></h4>
@@ -938,7 +1111,7 @@
                                 <span id="sl-hint" class="form-hint"></span>
                             </div>
                             <div id="sl-legend" class="sl-legend"></div>
-                            <div id="sl-lanes" class="sl-lanes"><p class="log-empty">Not loaded yet.</p></div>
+                            <div id="sl-lanes" class="sl-lanes"><p class="log-empty">Loading…</p></div>
                         </div>
                         <!-- end Link swimlanes -->
 
@@ -946,12 +1119,12 @@
                         <div class="diag-section">
                             <h3>Capacity <small class="form-hint">iPerf capacity, PHY rate, estimated traffic and spare capacity per key link (last 7 days, not the window above); click a row for its history</small></h3>
                             <div class="mh-controls">
-                                <button id="cap-refresh" class="btn btn-secondary">Refresh</button>
+                                <button id="cap-refresh" class="btn btn-secondary btn-small">Refresh</button>
                                 <button id="cap-run" class="btn btn-secondary" title="One pass over the key links now (one test at a time)">Run iPerf pass now</button>
                                 <label class="checkbox-label"><input type="checkbox" id="cap-all"> Show every tested link</label>
                                 <span id="cap-hint" class="form-hint"></span>
                             </div>
-                            <div id="cap-table"><p class="log-empty">Not loaded yet.</p></div>
+                            <div id="cap-table"><p class="log-empty">Loading…</p></div>
                             <div id="cap-detail" class="hidden">
                                 <h4 id="cap-detail-title"></h4>
                                 <div class="cap-chart-wrap"><canvas id="cap-chart"></canvas></div>
@@ -968,7 +1141,7 @@
                         <!-- end Capacity -->
 
                         <!-- Weekly report (#25, weekly-report.js) -->
-                        <div class="diag-section">
+                        <div class="diag-section" id="weekly-report-section">
                             <h3>Weekly Report <small class="form-hint">saved weekly summary: worst links, new problems, infrastructure verdicts, changes</small></h3>
                             <div class="mh-controls">
                                 <button id="wr-generate" class="btn btn-primary">Generate now</button>
@@ -976,7 +1149,7 @@
                                 <span id="wr-status" class="form-hint"></span>
                             </div>
                             <div id="wr-channels" class="mh-controls"></div>
-                            <div id="wr-list"><p class="log-empty">Not loaded yet.</p></div>
+                            <div id="wr-list"><p class="log-empty">Loading…</p></div>
                             <div id="wr-view" class="hidden">
                                 <div class="mh-controls"><button id="wr-copy" class="btn btn-secondary btn-small">Copy text</button></div>
                                 <pre id="wr-text" class="wr-text"></pre>
@@ -1009,7 +1182,7 @@
                                 <button id="wx-refresh" class="btn btn-secondary btn-small">Fetch now</button>
                                 <span id="wx-refresh-result" class="form-hint"></span>
                             </div>
-                            <div id="wx-panel"><p class="log-empty">Loading...</p></div>
+                            <div id="wx-panel"><p class="log-empty">Loading…</p></div>
                         </div>
                         <!-- end Weather -->
 
@@ -1103,21 +1276,6 @@
                         </div>
                     </div>
                     <div class="diag-section">
-                        <h3>Rollouts <small class="form-hint">channel plans as checklists: clients first, backbones last; steps tick off when a scan sees the radio on its new channel</small></h3>
-                        <div class="mh-controls">
-                            <button id="ro-refresh" class="btn btn-secondary">Refresh</button>
-                            <button id="ro-check" class="btn btn-secondary" title="Re-check every active rollout against the last scan">Check now</button>
-                            <span id="ro-status" class="form-hint"></span>
-                        </div>
-                        <div id="ro-list"><p class="log-empty">Not loaded yet.</p></div>
-                        <details class="diag-details">
-                            <summary>New rollout from what-if lines</summary>
-                            <input type="text" id="ro-name" class="form-input" placeholder="Name (optional)">
-                            <textarea id="ro-text" class="form-input cm-whatif-text" rows="6" placeholder="w0gq-col-rkt-n 5915 20&#10;w0gq-col-sq-2bldg112 off"></textarea>
-                            <button id="ro-create" class="btn btn-primary btn-small">Create rollout</button>
-                        </details>
-                    </div>
-                    <div class="diag-section">
                         <h3>Change log <small class="form-hint">channel, radio-setting and firmware changes are added automatically from scans</small></h3>
                         <div class="table-scroll-wrapper" id="chg-list"></div>
                     </div>
@@ -1193,7 +1351,7 @@
                         <label class="header-checkbox" title="Apply the Channel Map's what-if box (e.g. a plan loaded from the planner)"><input type="checkbox" id="sp-whatif"> Channel Map what-if</label>
                         <label title="Show the spectrum as it was: the surveys taken by then and each radio's channel at that time">As of
                             <select id="sp-at" class="form-input"><option value="">Now</option></select></label>
-                        <button id="sp-reload" class="btn btn-secondary">Reload</button>
+                        <button id="sp-reload" class="btn btn-secondary btn-small">Reload</button>
                         <span id="sp-status" class="nodes-count"></span>
                     </div>
                     <div class="sp-body">
@@ -1243,7 +1401,7 @@
                             <input type="range" id="cm-fmax-range" min="5600" max="5950" step="5" value="5950" aria-label="Highest frequency">
                             <label>to <input type="number" id="cm-fmax" class="form-input cm-num" value="5950" step="5"></label>
                         </span>
-                        <button id="cm-reload" class="btn btn-secondary">Reload</button>
+                        <button id="cm-reload" class="btn btn-secondary btn-small">Reload</button>
                         <button id="cm-plan-open" class="btn btn-primary" title="Open the Channel Planning page (Analysis menu)">Plan channels</button>
                         <span id="cm-status" class="nodes-count"></span>
                     </div>
@@ -1273,83 +1431,134 @@
                 </div>
             </div>
 
-            <!-- Channel Planning View (channel-planner.js, wifi-scans.js) -->
+            <!-- Channel Planning View (channel-planner.js, wifi-scans.js, wifi-survey.js, rollouts.js) -->
             <div id="planning-view" class="view-container">
-                <div class="diag-scroll plan-page">
-                    <section class="diag-section">
-                        <h3>Channel planner <small class="form-hint">suggests channels; nothing is saved and no radio is touched</small></h3>
-                        <p class="form-hint">Whole channel inside the band, sectors keep their clients, one channel per radio on a mast with
-                            guard bands between them, clear of radios in the beams, away from the WiFi the scans below heard.
-                            Only frequency and width are changed.</p>
-                        <div class="cp-form">
-                            <label>Plan for
-                                <select id="cp-target" class="form-input">
-                                    <option value="sites" selected>Sites</option>
-                                    <option value="infrastructure">All infrastructure</option>
-                                    <option value="radios">Radios</option>
-                                </select>
-                            </label>
-                            <span id="cp-sites" class="cp-sites" title="Tick one site, or several to plan them together"></span>
-                            <input type="text" id="cp-radios" class="form-input cp-radios" hidden placeholder="radio names, comma separated">
-                            <span id="cp-infra-note" class="form-hint" hidden>every infrastructure site together, with the clients of each sector</span>
+                <div class="nodes-container">
+                    <div class="subnav-layout">
+                    <nav class="subnav" aria-label="Planning">
+                        <button class="subnav-btn" data-sub="planner">Channel Planning</button>
+                        <button class="subnav-btn" data-sub="wifi">WiFi Surveys</button>
+                        <button class="subnav-btn" data-sub="rollouts">Rollouts</button>
+                    </nav>
+                    <div class="diag-scroll subnav-body plan-page">
+                        <div class="subpage" data-sub="planner">
+                            <section class="diag-section">
+                                <h3>Channel planner <small class="form-hint">suggests channels; nothing is saved and no radio is touched</small></h3>
+                                <p class="form-hint">Whole channel inside the band, sectors keep their clients, one channel per radio on a mast with
+                                    guard bands between them, clear of radios in the beams, away from the WiFi the scans below heard.
+                                    Only frequency and width are changed.</p>
+                                <div class="cp-form">
+                                    <label>Plan for
+                                        <select id="cp-target" class="form-input">
+                                            <option value="sites" selected>Sites</option>
+                                            <option value="infrastructure">All infrastructure</option>
+                                            <option value="radios">Radios</option>
+                                        </select>
+                                    </label>
+                                    <span id="cp-sites" class="cp-sites" title="Tick one site, or several to plan them together"></span>
+                                    <input type="text" id="cp-radios" class="form-input cp-radios" hidden placeholder="radio names, comma separated">
+                                    <span id="cp-infra-note" class="form-hint" hidden>every infrastructure site together, with the clients of each sector</span>
+                                </div>
+                                <div class="cp-form">
+                                    <label>Band <input type="number" id="cp-band-low" class="form-input cm-num" value="5650" step="5">
+                                        &ndash; <input type="number" id="cp-band-high" class="form-input cm-num" value="5925" step="5"> MHz</label>
+                                    <span class="cp-widths">Widths:
+                                        <label class="header-checkbox"><input type="checkbox" id="cp-keep-width" checked> keep current</label>
+                                        <label class="header-checkbox"><input type="checkbox" class="cp-width" value="10"> 10</label>
+                                        <label class="header-checkbox"><input type="checkbox" class="cp-width" value="20" checked> 20</label>
+                                        <label class="header-checkbox"><input type="checkbox" class="cp-width" value="40"> 40</label>
+                                    </span>
+                                </div>
+                                <div class="cp-form">
+                                    <label class="header-checkbox" title="Sectors and the RF-linked radios they serve (and both ends of a PtP link) get one channel">
+                                        <input type="checkbox" id="cp-move-clients" checked> Move clients with their sector</label>
+                                    <label class="header-checkbox" title="Point-to-point dishes with no RF links are suggested off instead of getting a channel">
+                                        <input type="checkbox" id="cp-idle-off" checked> Turn off idle dishes</label>
+                                    <label class="header-checkbox" title="AREDN recommends a different channel per sector: radios on one mast sharing a channel can halve site throughput">
+                                        <input type="checkbox" id="cp-separate" checked> One channel per sector</label>
+                                    <input type="text" id="cp-locked" class="form-input" placeholder="locked radios (keep as is)">
+                                    <span class="cp-protect" title="Protected radios keep their channel, and no radio in range may share or overlap it (e.g. an event omni with no clients most of the year)">
+                                        <input type="text" id="cp-protected" class="form-input" placeholder="protected radios">
+                                        <button id="cp-protected-save" class="btn btn-secondary btn-small" title="Save this list as the default for every plan">Save as default</button>
+                                    </span>
+                                    <label>Plans <select id="cp-top" class="form-input">
+                                        <option>1</option><option selected>3</option><option>5</option></select></label>
+                                    <label title="Length of the maintenance window created by Schedule">Window
+                                        <select id="cp-maint-hours" class="form-input">
+                                            <option value="1">1 h</option><option value="2" selected>2 h</option>
+                                            <option value="4">4 h</option><option value="8">8 h</option></select></label>
+                                </div>
+                                <details class="diag-details" id="cp-compare-box">
+                                    <summary>Score my own plan too (optional)</summary>
+                                    <p class="form-hint">One radio per line: <code>name frequency [width]</code> or <code>name off</code>.
+                                        It is scored the same way as the suggested plans.</p>
+                                    <textarea id="cp-compare-text" class="form-input cm-whatif-text" rows="6" placeholder="w0gq-col-rkt-n 5915 20"></textarea>
+                                    <div class="cm-whatif-actions">
+                                        <button id="cp-compare-from-map" class="btn btn-secondary btn-small" title="Copy the Channel Map's what-if box here">Use Channel Map what-if</button>
+                                        <button id="cp-compare-clear" class="btn btn-secondary btn-small">Clear</button>
+                                    </div>
+                                </details>
+                                <div class="cp-form">
+                                    <button id="cp-run" class="btn btn-primary">Suggest channels</button>
+                                    <span id="cp-status" class="form-hint"></span>
+                                </div>
+                                <div id="cp-results"></div>
+                            </section>
                         </div>
-                        <div class="cp-form">
-                            <label>Band <input type="number" id="cp-band-low" class="form-input cm-num" value="5650" step="5">
-                                &ndash; <input type="number" id="cp-band-high" class="form-input cm-num" value="5925" step="5"> MHz</label>
-                            <span class="cp-widths">Widths:
-                                <label class="header-checkbox"><input type="checkbox" id="cp-keep-width" checked> keep current</label>
-                                <label class="header-checkbox"><input type="checkbox" class="cp-width" value="10"> 10</label>
-                                <label class="header-checkbox"><input type="checkbox" class="cp-width" value="20" checked> 20</label>
-                                <label class="header-checkbox"><input type="checkbox" class="cp-width" value="40"> 40</label>
-                            </span>
-                        </div>
-                        <div class="cp-form">
-                            <label class="header-checkbox" title="Sectors and the RF-linked radios they serve (and both ends of a PtP link) get one channel">
-                                <input type="checkbox" id="cp-move-clients" checked> Move clients with their sector</label>
-                            <label class="header-checkbox" title="Point-to-point dishes with no RF links are suggested off instead of getting a channel">
-                                <input type="checkbox" id="cp-idle-off" checked> Turn off idle dishes</label>
-                            <label class="header-checkbox" title="AREDN recommends a different channel per sector: radios on one mast sharing a channel can halve site throughput">
-                                <input type="checkbox" id="cp-separate" checked> One channel per sector</label>
-                            <input type="text" id="cp-locked" class="form-input" placeholder="locked radios (keep as is)">
-                            <label>Plans <select id="cp-top" class="form-input">
-                                <option>1</option><option selected>3</option><option>5</option></select></label>
-                            <label title="Length of the maintenance window created by Schedule">Window
-                                <select id="cp-maint-hours" class="form-input">
-                                    <option value="1">1 h</option><option value="2" selected>2 h</option>
-                                    <option value="4">4 h</option><option value="8">8 h</option></select></label>
-                        </div>
-                        <details class="diag-details" id="cp-compare-box">
-                            <summary>Score my own plan too (optional)</summary>
-                            <p class="form-hint">One radio per line: <code>name frequency [width]</code> or <code>name off</code>.
-                                It is scored the same way as the suggested plans.</p>
-                            <textarea id="cp-compare-text" class="form-input cm-whatif-text" rows="6" placeholder="w0gq-col-rkt-n 5915 20"></textarea>
-                            <div class="cm-whatif-actions">
-                                <button id="cp-compare-from-map" class="btn btn-secondary btn-small" title="Copy the Channel Map's what-if box here">Use Channel Map what-if</button>
-                                <button id="cp-compare-clear" class="btn btn-secondary btn-small">Clear</button>
+                        <div class="subpage" data-sub="wifi">
+                            <!-- WiFi survey (#34, wifi-survey.js) -->
+                            <div class="diag-section">
+                                <h3>WiFi Survey <small class="form-hint">non-mesh access points heard at each radio; the channel planner uses them instead of fixed WiFi guesses</small></h3>
+                                <div class="mh-controls">
+                                    <button id="ws-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                    <input type="text" id="ws-node" class="form-input" placeholder="radio name, e.g. w0gq-col-rkt-n" list="chg-node-names">
+                                    <button id="ws-scan" class="btn btn-primary" title="Asks the radio for a WiFi scan; its links blip for a few seconds">Scan now…</button>
+                                    <span id="wsv-status" class="form-hint"></span>
+                                </div>
+                                <details class="diag-details">
+                                    <summary>Import scan text</summary>
+                                    <textarea id="ws-text" class="form-input cm-whatif-text" rows="6" placeholder="Paste `iw dev wlan0 scan` output or the node's WiFi scan page"></textarea>
+                                    <button id="ws-import" class="btn btn-secondary btn-small">Import for this radio</button>
+                                </details>
+                                <div id="ws-report"><p class="log-empty">Loading…</p></div>
                             </div>
-                        </details>
-                        <div class="cp-form">
-                            <button id="cp-run" class="btn btn-primary">Suggest channels</button>
-                            <span id="cp-status" class="form-hint"></span>
+
+                            <section class="diag-section">
+                                <h3>WiFi scan results <small class="form-hint">what each radio heard, and how busy each frequency is</small></h3>
+                                <div class="cp-form">
+                                    <label>Scan <select id="ws-pick" class="form-input"></select></label>
+                                    <label>Range <select id="ws-range" class="form-input">
+                                        <option value="5640-5930" selected>Ham band (5650&ndash;5925)</option>
+                                        <option value="5150-5930">All 5 GHz</option>
+                                    </select></label>
+                                    <label class="header-checkbox"><input type="checkbox" id="ws-mesh"> List mesh radios too</label>
+                                    <button id="ws-reload" class="btn btn-secondary btn-small">Reload</button>
+                                    <span id="ws-status" class="form-hint"></span>
+                                </div>
+                                <div id="ws-chart"></div>
+                                <div id="ws-slot" class="ws-slot-detail"></div>
+                                <div id="ws-table"></div>
+                            </section>
                         </div>
-                        <div id="cp-results"></div>
-                    </section>
-                    <section class="diag-section">
-                        <h3>WiFi scan results <small class="form-hint">what each radio heard, and how busy each frequency is</small></h3>
-                        <div class="cp-form">
-                            <label>Scan <select id="ws-pick" class="form-input"></select></label>
-                            <label>Range <select id="ws-range" class="form-input">
-                                <option value="5640-5930" selected>Ham band (5650&ndash;5925)</option>
-                                <option value="5150-5930">All 5 GHz</option>
-                            </select></label>
-                            <label class="header-checkbox"><input type="checkbox" id="ws-mesh"> List mesh radios too</label>
-                            <button id="ws-reload" class="btn btn-secondary btn-small">Reload</button>
-                            <span id="ws-status" class="form-hint"></span>
+                        <div class="subpage" data-sub="rollouts">
+                            <div class="diag-section">
+                                                    <h3>Rollouts <small class="form-hint">channel plans as checklists: clients first, backbones last; steps tick off when a scan sees the radio on its new channel</small></h3>
+                                                    <div class="mh-controls">
+                                                        <button id="ro-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                                        <button id="ro-check" class="btn btn-secondary" title="Re-check every active rollout against the last scan">Check now</button>
+                                                        <span id="ro-status" class="form-hint"></span>
+                                                    </div>
+                                                    <div id="ro-list"><p class="log-empty">Loading…</p></div>
+                                                    <details class="diag-details">
+                                                        <summary>New rollout from what-if lines</summary>
+                                                        <input type="text" id="ro-name" class="form-input" placeholder="Name (optional)">
+                                                        <textarea id="ro-text" class="form-input cm-whatif-text" rows="6" placeholder="w0gq-col-rkt-n 5915 20&#10;w0gq-col-sq-2bldg112 off"></textarea>
+                                                        <button id="ro-create" class="btn btn-primary btn-small">Create rollout</button>
+                                                    </details>
+                                                </div>
                         </div>
-                        <div id="ws-chart"></div>
-                        <div id="ws-slot" class="ws-slot-detail"></div>
-                        <div id="ws-table"></div>
-                    </section>
+                    </div>
+                    </div>
                 </div>
             </div>
 
@@ -1379,8 +1588,8 @@
                                 <option value="g729">Codec: G.729</option>
                                 <option value="g711">Codec: G.711</option>
                             </select>
-                            <button id="voip-run" class="btn btn-primary">Run Call Test</button>
-                            <button id="voip-ping-all" class="btn btn-secondary">Ping All</button>
+                            <button id="voip-run" class="btn btn-primary">Run call test</button>
+                            <button id="voip-ping-all" class="btn btn-secondary">Ping all</button>
                         </div>
                         <div class="nodes-count"><span id="voip-status">Idle</span></div>
                     </div>
@@ -1398,7 +1607,7 @@
                                 <span id="ph-status" class="form-hint"></span>
                             </div>
                             <div id="ph-tiles" class="np-tiles"></div>
-                            <div id="ph-report"><p class="log-empty">Loading...</p></div>
+                            <div id="ph-report"><p class="log-empty">Loading…</p></div>
                             <div id="ph-unresolved"></div>
                             <details class="ph-more" id="ph-add-box">
                                 <summary>Add phones</summary>
@@ -1445,9 +1654,9 @@
                                 <input type="text" id="voip-sess-source" class="form-input" placeholder="source label (e.g. node name)">
                                 <input type="number" id="voip-sess-pps" class="form-input" value="50" min="1" max="200" title="packets/sec">
                                 <input type="number" id="voip-sess-bytes" class="form-input" value="172" min="28" max="1400" title="UDP bytes">
-                                <button id="voip-sess-start" class="btn btn-primary">Start Session</button>
+                                <button id="voip-sess-start" class="btn btn-primary">Start session</button>
                                 <button id="voip-sess-stop" class="btn btn-secondary" disabled>Stop</button>
-                                <button id="voip-sess-routes" class="btn btn-secondary" disabled>Refresh Routes</button>
+                                <button id="voip-sess-routes" class="btn btn-secondary" disabled>Refresh routes</button>
                             </div>
                             <div class="voip-session-metrics" id="voip-sess-metrics">
                                 <div class="vs-metric"><span class="vs-label">A&#8594;B loss</span><span class="vs-val" id="vs-floss">&#8212;</span></div>
@@ -1507,6 +1716,13 @@
                     </div>
                     <div class="form-group">
                         <label class="checkbox-label">
+                            <input type="checkbox" id="scan-selected-only">
+                            Scan only selected nodes
+                        </label>
+                        <small class="form-hint">Limits what the scanner polls (and the graph) to the selected nodes. A badge in the header shows while it is on.</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
                             <input type="checkbox" id="show-tunnels">
                             Show Tunnel/Wireguard Links
                         </label>
@@ -1543,14 +1759,21 @@
                         <small class="form-hint">Nodes and related local state older than this are deleted from SQLite</small>
                     </div>
                     <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="tdwr-nearby">
+                            TDWR weather radar in range
+                        </label>
+                        <small class="form-hint">Tick when an airport TDWR (5600–5650 MHz) is within about 50 km (30 mi) or in line of sight of the mesh: the channel planner, Spectrum and diagnostics then treat 5600–5650 as radar and avoid 5650–5660 too. Off: 5600–5650 is only "below the ham band" (Cedar Rapids: the nearest TDWR is Chicago, about 360 km / 225 mi away).</small>
+                    </div>
+                    <div class="form-group">
                         <label>Scan Boundaries:</label>
                         <div id="scan-boundary-list" class="scan-boundary-list"><small class="form-hint">None</small></div>
                         <small class="form-hint"><strong>Block</strong>: never poll the node, so nothing reached only through it is scanned. <strong>Stop</strong>: poll it but don't scan past it. Set from a node's panel or node page.</small>
                     </div>
                     <div class="form-group">
-                        <button id="save-settings" class="btn btn-primary">Save Settings</button>
-                        <button id="save-layout" class="btn btn-secondary">Save Node Layout</button>
-                        <button id="reset-positions" class="btn btn-secondary">Reset Node Positions</button>
+                        <button id="save-settings" class="btn btn-primary">Save settings</button>
+                        <button id="save-layout" class="btn btn-secondary">Save node layout</button>
+                        <button id="reset-positions" class="btn btn-secondary">Reset node positions</button>
                         <small class="form-hint">Save Node Layout stores current node positions in the database so the arrangement survives browser resets and nodes that come and go</small>
                     </div>
                     <div class="settings-info">
@@ -1584,6 +1807,10 @@
                     <label class="checkbox-label">
                         <input type="checkbox" id="filter-freq" checked>
                         Frequency
+                    </label>
+                    <label class="checkbox-label" title="Starting node, scans, maintenance and anything else">
+                        <input type="checkbox" id="filter-system" checked>
+                        System
                     </label>
                 </div>
                 <div id="log-content" class="log-content">
@@ -1728,6 +1955,12 @@
     <script src="{{ url_for('static', filename='js/spectrum.js') }}"></script>
     <script src="{{ url_for('static', filename='js/geo-map.js') }}"></script>
     <script src="{{ url_for('static', filename='js/nav-menu.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/page-router.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/sections.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/global-filter.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/status-tiles.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/node-uptime.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/sites-list.js') }}"></script>
     <script src="{{ url_for('static', filename='js/channel-planner.js') }}"></script>
     <script src="{{ url_for('static', filename='js/wifi-scans.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rollouts.js') }}"></script>

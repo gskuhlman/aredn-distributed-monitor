@@ -263,13 +263,37 @@ def import_text(node, text):
     return store(node, aps, 'import')
 
 
+# AREDN's WiFi Scan only runs in Mesh (ad-hoc) mode; in PtP / PtMP / Station
+# mode its page lists the connected stations only.
+NO_SCAN_MODES = {'ptp': 'Mesh PtP', 'ptmp': 'Mesh PtMP', 'sta': 'Mesh Station'}
+
+
+class ScanModeError(RuntimeError):
+    """The radio's mode has no WiFi Scan (PtP / PtMP / Station)."""
+
+
+def mode_blocks_scan(mode, links=()):
+    """Why a radio in this mode can't be scanned remotely, or None."""
+    label = NO_SCAN_MODES.get((mode or '').lower())
+    if not label:
+        return None
+    links = sorted(links)
+    return (f"in {label} mode: AREDN's WiFi Scan only works in Mesh mode (in {label} it lists connected "
+            "stations only). To scan, switch it to Mesh, run WiFi Scan, paste the table with Import here, and "
+            "switch it back" + (f"; its link(s) to {', '.join(links[:4])}{'...' if len(links) > 4 else ''} stay "
+                                "down until then" if links else '') + '.')
+
+
 def scan_node(node):
     """Ask the node for a WiFi scan (on request only: briefly interrupts it)."""
     import gateway
+    with database.get_connection() as conn:
+        r = conn.execute('SELECT ip, rf_mode FROM nodes WHERE name = ?', (node,)).fetchone()
+    blocked = mode_blocks_scan(r['rf_mode'] if r else None)
+    if blocked:
+        raise ScanModeError(f'{node} is {blocked}')
     if not gateway.is_reachable():
         raise RuntimeError(gateway.unreachable_message())
-    with database.get_connection() as conn:
-        r = conn.execute('SELECT ip FROM nodes WHERE name = ?', (node,)).fetchone()
     host = f'{node}.local.mesh'
     errors = []
     for path in WIFI_SCAN_PATHS:
@@ -350,7 +374,9 @@ def queue_tonight(radios, reason=None):
     ensure_tables()
     now = datetime.now().strftime(TS_FMT)
     with database.get_connection() as conn:
-        known = {r[0] for r in conn.execute('SELECT name FROM nodes')}
+        # PtP / PtMP / Station radios can't be scanned remotely (mode_blocks_scan).
+        known = {r[0] for r in conn.execute("SELECT name FROM nodes WHERE COALESCE(LOWER(rf_mode), '') "
+                                            "NOT IN ('ptp', 'ptmp', 'sta')")}
         names = [n.strip().lower() for n in radios if n and n.strip().lower() in known]
         conn.executemany('INSERT OR REPLACE INTO wifi_survey_queue (node_name, requested_at, reason) VALUES (?, ?, ?)',
                          [(n, now, reason) for n in names])
@@ -505,12 +531,18 @@ def report():
 
 def nightly_job():
     """Infrastructure radios when WIFI_SURVEY_ENABLED, plus every radio queued
-    for tonight; queued radios leave the queue once tried."""
+    for tonight; queued radios leave the queue once tried. Radios in PtP /
+    PtMP / Station mode are skipped (no scan outside Mesh mode)."""
     names = set(r['node_name'] for r in queued())
     if config.WIFI_SURVEY_ENABLED:
         names |= set(database.get_infrastructure_nodes())
     done = []
+    modes = {}
+    with database.get_connection() as conn:
+        modes = {r[0]: r[1] for r in conn.execute('SELECT name, rf_mode FROM nodes')}
     for n in sorted(names):
+        if mode_blocks_scan(modes.get(n)):
+            continue  # PtP / PtMP / Station: the scan page would list stations only
         try:
             scan_node(n)
             done.append(n)

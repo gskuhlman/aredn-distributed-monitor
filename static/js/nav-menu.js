@@ -20,6 +20,7 @@ const NavMenu = {
             toggle.setAttribute('aria-expanded', String(!panel.hidden));
             if (!panel.hidden) panel.querySelector('.tab-btn.active, .tab-btn')?.focus();
         });
+        panel.querySelectorAll('.nav-link').forEach(link => link.addEventListener('click', close));
         panel.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
             document.getElementById('nav-current').textContent = btn.textContent.trim();
             this.showFilters(btn.dataset.tab);
@@ -37,24 +38,23 @@ const NavMenu = {
         });
         const active = panel.querySelector('.tab-btn.active');
         if (active) document.getElementById('nav-current').textContent = active.textContent.trim();
-        this.showFilters(active?.dataset.tab || 'network');
+        this.showFilters(active?.dataset.tab || 'status');
         // The selected-only box is loaded from settings after start-up.
         setTimeout(() => this.showFilters(), 1500);
     },
 
-    // Header graph filters only affect the Topology and Map pages; elsewhere
-    // they are hidden, but a selected-only scan stays visible as a badge
-    // because it also limits what the scanner polls.
-    FILTER_TABS: ['network', 'geo-map'],
-    tab: 'network',
+    // The old header graph filters stay in the page (network.js reads them)
+    // but are set from the shared filter bar (global-filter.js). A
+    // selected-only scan shows as a badge on every page because it also limits
+    // what the scanner polls (set in Scanning settings).
+    tab: 'status',
 
     showFilters(tab) {
         if (tab) this.tab = tab;
-        const onMap = this.FILTER_TABS.includes(this.tab);
         const filters = document.getElementById('header-filters');
-        if (filters) filters.hidden = !onMap;
+        if (filters) filters.hidden = true;
         const badge = document.getElementById('selected-scan-badge');
-        if (badge) badge.hidden = onMap || !document.getElementById('scan-selected-only')?.checked;
+        if (badge) badge.hidden = !document.getElementById('scan-selected-only')?.checked;
     }
 };
 

@@ -52,6 +52,15 @@
             </section>
 
             <section class="node-page-section">
+                <h2>SSH radio details <button id="ssh-refresh" class="btn btn-small btn-secondary">Refresh</button>
+                    <button id="ssh-collect-all" class="btn btn-small btn-secondary">Collect all now</button></h2>
+                <p class="form-hint">Station dump, channel survey, logs and settings read from each infrastructure node over SSH
+                    with a key (never a password). Add the public key below to each node's SSH keys; the private key stays
+                    on this PC.</p>
+                <div id="ssh-admin"><p class="loading">Loading...</p></div>
+            </section>
+
+            <section class="node-page-section">
                 <h2>Collectors &amp; distributed status <button id="ds-refresh" class="btn btn-small btn-secondary">Refresh</button></h2>
                 <p class="form-hint">Status from every collector's observations: UP, LOCALLY_UNREACHABLE (another collector sees it),
                     PARTITIONED (collectors disagree), STALE (not enough evidence), DOWN_CONFIRMED (several healthy collectors

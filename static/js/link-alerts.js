@@ -46,7 +46,7 @@ const LinkAlerts = {
                         : r.last_check ? '<span class="sc-up">ok</span>' : '<span class="form-hint">not checked yet</span>'}</td>
                     <td><button class="btn btn-small btn-secondary" data-la-toggle="${r.id}" data-enabled="${r.enabled ? 1 : 0}">${r.enabled ? 'Disable' : 'Enable'}</button>
                         <button class="btn btn-small btn-secondary" data-la-del="${r.id}">Remove</button></td></tr>`).join('')}</tbody></table></div>`
-                : '<p class="log-empty">No per-link alert rules yet. Add them for a sector below, or from a link\'s diagnosis in RF Stats.</p>';
+                : '<p class="log-empty">No per-link alert rules yet. Add them for a sector below, or from a link\'s diagnosis on the Links page.</p>';
             this.setStatus(`${rules.length} rule(s), ${rules.filter(r => r.active).length} alerting · checked after every scan`);
             this.fillSectors();
         } catch (error) {

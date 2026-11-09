@@ -54,7 +54,7 @@ const WeeklyReportPanel = {
             ? `Built every ${sch.day} at ${sch.time} for the 7 days before.` : 'Scheduled report is off (WEEKLY_REPORT_ENABLED).';
         document.getElementById('wr-channels').innerHTML = 'Send on: ' + this.CHANNELS.map(c =>
             `<label class="checkbox-label"><input type="checkbox" value="${c}" ${d.channels.includes(c) ? 'checked' : ''}> ${c}</label>`).join(' ')
-            + ' <span class="form-hint">(channels set up under Diagnostics &gt; Notifications)</span>';
+            + ' <span class="form-hint">(channels set up under Admin &gt; Notifications)</span>';
         const el = document.getElementById('wr-list');
         if (!d.reports.length) {
             el.innerHTML = '<p class="log-empty">No reports yet. Generate one now.</p>';

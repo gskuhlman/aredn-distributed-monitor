@@ -42,7 +42,7 @@ const RouteWatch = {
     async load() {
         this.setStatus('Loading...');
         try {
-            const resp = await fetch('/api/routes?hours=24');
+            const resp = await fetch(`/api/routes?hours=${((typeof GlobalFilter !== 'undefined') ? GlobalFilter.hours() : 24)}`);
             this.data = await resp.json();
             this.render();
             const d = this.data;

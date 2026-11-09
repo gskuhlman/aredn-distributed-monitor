@@ -49,6 +49,43 @@ def rate_for_snr(snr, chanbw=20):
     return round(HT20_RATES[mcs] * STREAMS * WIDTH_FACTOR.get(int(chanbw or 20), (chanbw or 20) / 20), 1)
 
 
+# Per-stream VHT rates (Mbps, long GI) for MCS 0-9; HT MCS 0-7 are the first
+# eight at 20/40 MHz. 5/10 MHz scale the 20 MHz row. MCS 8/9 need about 29/31 dB.
+VHT_RATES = {20: [6.5, 13, 19.5, 26, 39, 52, 58.5, 65, 78, 86.7],
+             40: [13.5, 27, 40.5, 54, 81, 108, 121.5, 135, 162, 180],
+             80: [29.3, 58.5, 87.8, 117, 175.5, 234, 263.3, 292.5, 351, 390]}
+VHT_SNR = MCS_SNR + [29, 31]
+RATE_MATCH = 0.03
+
+
+def _per_stream(chanbw):
+    bw = int(chanbw or 20)
+    return VHT_RATES.get(bw) or [r * bw / 20 for r in VHT_RATES[20]]
+
+
+def mcs_from_rate(rate_mbps, chanbw=20, streams=STREAMS, nearest=True):
+    """(streams, MCS) pairs whose PHY rate (long or short GI) matches the rate
+    within RATE_MATCH, fewest streams first; else the nearest one ([] with
+    nearest=False: e.g. a legacy 802.11a rate). A rate can fit two: 54 Mbps
+    at 40 MHz is MCS 3 on one stream or MCS 1 on two."""
+    if not rate_mbps or rate_mbps <= 0:
+        return []
+    fits = []
+    for nss in range(1, streams + 1):
+        for mcs, r in enumerate(_per_stream(chanbw)):
+            err = min(abs(r * nss * gi - rate_mbps) / rate_mbps for gi in (1.0, 10 / 9))
+            fits.append((err, nss, mcs))
+    close = [(nss, mcs) for err, nss, mcs in fits if err <= RATE_MATCH]
+    return close or ([min(fits)[1:]] if nearest else [])
+
+
+def supported_mcs(snr):
+    """Highest per-stream MCS (0-9) the SNR clears, None below MCS 0."""
+    if snr is None or snr < VHT_SNR[0]:
+        return None
+    return max(i for i, need in enumerate(VHT_SNR) if snr >= need)
+
+
 def _median(conn, sql, params):
     vals = [r[0] for r in conn.execute(sql, params) if r[0] is not None]
     return round(median(vals), 1) if vals else None
@@ -117,6 +154,7 @@ def report(hours=24, metric='snr'):
                 'grade': None if ratio is None else 'good' if ratio >= GOOD_RATIO else 'fair' if ratio >= POOR_RATIO else 'poor',
                 'infrastructure': src in infra or dst in infra,
                 'assumed': rx['gain_assumed'] or tx['gain_assumed'] or tx['tx_assumed'],
+                'gain_assumed': rx['gain_assumed'] or tx['gain_assumed'],
             })
     gains = [radios[n]['gain'] for n in radios if radios[n]]
     freqs = [p['frequency'] for p in points]
@@ -142,3 +180,112 @@ def report(hours=24, metric='snr'):
                       'are left out (RF Stats "Link budget & terrain" adds them for one link).',
                       'Theoretical rate assumes 2 streams and HT MCS steps; measured rate is the overnight iPerf '
                       'capacity when there is one, else the radio\'s PHY rate.']}
+
+
+# --------------------------------------------- far below potential (watch) --
+# An infrastructure RF link whose rate or SNR is far below its potential both
+# over UNDER_HOURS and the last UNDER_RECENT_HOURS gets a Mesh Health and
+# Infrastructure Review finding and, from the hourly watch, an event.
+UNDER_HOURS = 24
+UNDER_RECENT_HOURS = 3
+EVENT_UNDER = 'link_underperforming'
+EVENT_UNDER_CLEARED = 'link_underperforming_cleared'
+
+
+def poor_reasons(p):
+    """Why one plotted direction is far below its potential ([] = it isn't).
+    The SNR gap counts only when both antenna gains are set: a guessed gain
+    can be several dB off."""
+    out = []
+    if p.get('ratio') is not None and p['ratio'] < POOR_RATIO and p.get('rate_mbps') is not None:
+        out.append(f"{p['rate_mbps']:g} Mbps is {round(p['ratio'] * 100)}% of the {p['expected_mbps']:g} Mbps "
+                   f"its predicted {p['predicted_snr']:g} dB SNR supports at {p['chanbw']:g} MHz")
+    if p.get('snr_gap_db') is not None and p['snr_gap_db'] <= -link_budget.WEAKER_DB and not p.get('gain_assumed'):
+        out.append(f"SNR {p['snr']:g} dB is {-p['snr_gap_db']:g} dB below the link budget ({p['predicted_snr']:g} dB)")
+    return out
+
+
+def underperforming(hours=UNDER_HOURS, recent_hours=UNDER_RECENT_HOURS, infra_only=True):
+    """Directions far below their potential over `hours` and still over the
+    last `recent_hours` (so a link fixed this morning drops out at once).
+    [{from, to, reasons, rate_mbps, expected_mbps, ratio, snr, predicted_snr, snr_gap_db, chanbw, ...}]."""
+    recent = {(p['from'], p['to']): p for p in report(hours=recent_hours)['points']}
+    out = []
+    for p in report(hours=hours)['points']:
+        if infra_only and not p['infrastructure']:
+            continue
+        now = recent.get((p['from'], p['to']))
+        reasons = poor_reasons(p)
+        if reasons and now is not None and poor_reasons(now):
+            out.append(dict(p, reasons=reasons, recent=poor_reasons(now)))
+    return sorted(out, key=lambda p: (p['ratio'] if p['ratio'] is not None else 1, p['from'], p['to']))
+
+
+def recommendation(p):
+    slow = p.get('ratio') is not None and p['ratio'] < POOR_RATIO and p.get('rate_mbps')
+    single = slow and any(nss == 1 for nss, _ in mcs_from_rate(p['rate_mbps'], p['chanbw'], nearest=False))
+    if not slow:
+        return ('The rate is fine but the signal is well under the link budget: check the aim at both ends, '
+                'the path (trees, new buildings) and the stored antenna gain and height.')
+    return ('Check the aim at both ends, then each chain: a 2x2 link on one stream at a good SNR usually '
+            'means one polarisation is off (aim, a loose or wet connector, a bad cable on one chain). '
+            'If the signal matches the link budget, look for interference on the channel instead.'
+            if single else
+            'Check the aim at both ends and the path (trees, new buildings), then interference on the '
+            'channel (Spectrum tab, WiFi survey).')
+
+
+def ensure_tables():
+    with database.get_connection() as conn:
+        conn.execute('''CREATE TABLE IF NOT EXISTS link_potential_state (
+                            node_a TEXT NOT NULL, node_b TEXT NOT NULL, since TEXT, detail TEXT,
+                            PRIMARY KEY (node_a, node_b))''')
+
+
+def active():
+    ensure_tables()
+    with database.get_connection() as conn:
+        return [dict(r) for r in conn.execute('SELECT * FROM link_potential_state ORDER BY since')]
+
+
+def watch(now=None):
+    """Hourly: raise `link_underperforming` (warning) for an infrastructure
+    pair far below its potential (`underperforming`), clear it once neither
+    direction is poor over the last UNDER_RECENT_HOURS. Pairs in maintenance
+    are left alone. Returns the logged events."""
+    import maintenance
+    ensure_tables()
+    now_s = (now or datetime.now()).strftime(TS_FMT)
+    pairs = {}
+    for p in underperforming():
+        pairs.setdefault(tuple(sorted((p['from'], p['to']))), []).append(p)
+    recent = {tuple(sorted((p['from'], p['to']))) for p in report(hours=UNDER_RECENT_HOURS)['points']}
+    events = []
+    with database.get_connection() as conn:
+        state = {(r['node_a'], r['node_b']): dict(r) for r in conn.execute('SELECT * FROM link_potential_state')}
+        for key, dirs in pairs.items():
+            if key in state or maintenance.is_in_maintenance(key[0], peer=key[1]):
+                continue
+            detail = (f"RF link to {key[1]}: far below its potential. "
+                      + ' '.join(f"{p['from']} → {p['to']}: {'; '.join(p['reasons'])}." for p in dirs)
+                      + ' ' + recommendation(dirs[0]))
+            conn.execute('INSERT INTO link_potential_state VALUES (?, ?, ?, ?)', (key[0], key[1], now_s, detail))
+            events.append((EVENT_UNDER, key[0], detail, 'warning'))
+        for key, st in state.items():
+            # Cleared only on fresh samples that look fine, never because the link went quiet.
+            if key not in pairs and key in recent and not maintenance.is_in_maintenance(key[0], peer=key[1]):
+                conn.execute('DELETE FROM link_potential_state WHERE node_a = ? AND node_b = ?', key)
+                events.append((EVENT_UNDER_CLEARED, key[0],
+                               f"RF link to {key[1]}: back near its potential (far below since {st['since']})", 'info'))
+    for ev, node, text, sev in events:
+        database.log_event(ev, node, text, sev)
+    return [{'timestamp': now_s, 'event_type': ev, 'node_name': n, 'details': t, 'severity': s}
+            for ev, n, t, s in events]
+
+
+def install(scheduler):
+    import config
+    if not config.LINK_POTENTIAL_WATCH_ENABLED:
+        return
+    scheduler.add_job(lambda: watch(), 'interval', minutes=60, id='link_potential_watch', replace_existing=True,
+                      next_run_time=datetime.now() + timedelta(minutes=5))

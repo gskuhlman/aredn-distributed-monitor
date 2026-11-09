@@ -1,6 +1,7 @@
 /**
- * Admin page: login for changes (auth.py), database care (db_care.py) and
- * collectors / distributed status (distributed_status.py).
+ * Admin page: login for changes (auth.py), database care (db_care.py), SSH
+ * radio details setup and status (ssh_collect.py) and collectors /
+ * distributed status (distributed_status.py).
  */
 const Admin = {
     ds: null,
@@ -20,11 +21,54 @@ const Admin = {
                 + 'scans and pages wait for it.')) this.dbAction('vacuum', 'VACUUM running…');
         });
         on('ds-refresh', () => this.loadDs());
+        on('ssh-refresh', () => this.loadSsh());
+        on('ssh-collect-all', () => this.collectSsh());
         document.getElementById('ds-filter')?.addEventListener('change', () => this.renderDs());
         document.addEventListener('auth-changed', () => this.loadAuth());
         this.loadAuth();
         this.loadDb();
         this.loadDs();
+        this.loadSsh();
+    },
+
+    async loadSsh() {
+        const el = document.getElementById('ssh-admin');
+        if (!el) return;
+        let d;
+        try {
+            d = await (await fetch('/api/ssh/status')).json();
+        } catch (error) {
+            el.innerHTML = '<p class="log-empty">Failed to load.</p>';
+            return;
+        }
+        const setup = d.key_present
+            ? `<p>Public key (paste into each node's SSH keys; AREDN's SSH is port ${this.esc(d.port)}, user ${this.esc(d.user)}):</p>
+                <code class="ssh-pubkey">${this.esc(d.public_key || '(public key file missing)')}</code>`
+            : `<p class="node-warning">No key yet. On this PC run <code>python ssh_collect.py --keygen</code> in the app folder,
+                then reload this page for the public key.</p>`;
+        const badge = n => n.error_kind ? `<span class="diag-badge infra-badge-warning">${this.esc(n.error_kind)}</span>`
+            : n.last_ok ? '<span class="diag-badge infra-badge-ok">ok</span>' : '<span class="form-hint">not tried</span>';
+        el.innerHTML = setup + `<p class="form-hint">${d.enabled ? `Collecting every ${d.interval_minutes} min (logs and settings every ${d.slow_hours} h)`
+                : d.configured ? 'Not collecting until the key exists.' : 'Turned off (SSH_COLLECT_ENABLED).'}
+            ${d.running ? ' · running now' : ''} · ssh: ${this.esc(d.ssh_exe)} · host keys pinned in ${this.esc(d.known_hosts)}</p>
+            <div class="table-scroll-wrapper"><table class="info-table diag-table">
+            <thead><tr><th>Node</th><th>State</th><th>Last OK</th><th>Logs & settings</th><th>Last error</th></tr></thead>
+            <tbody>${d.nodes.map(n => `<tr><td><a href="/nodes/${encodeURIComponent(n.node_name)}">${this.esc(n.node_name)}</a></td>
+                <td>${badge(n)}</td><td>${this.esc(n.last_ok || '-')}</td><td>${this.esc(n.last_slow || '-')}</td>
+                <td class="form-hint">${this.esc(n.error || '')}${n.hint ? ` (${this.esc(n.hint)})` : ''}</td></tr>`).join('')}</tbody></table></div>`
+            + (d.alarms.length ? `<p class="node-warning">${d.alarms.length} chain / stream alarm(s): ${d.alarms.map(a =>
+                `${this.esc(a.node_name)} ↔ ${this.esc(a.peer)}`).join(', ')}</p>` : '');
+    },
+
+    async collectSsh() {
+        const r = await fetch('/api/ssh/collect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            document.getElementById('ssh-admin').insertAdjacentHTML('afterbegin',
+                `<p class="node-warning">${this.esc(d.error || 'Could not start the collection.')}</p>`);
+            return;
+        }
+        setTimeout(() => this.loadSsh(), 1500);
     },
 
     async loadAuth() {

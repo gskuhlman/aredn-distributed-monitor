@@ -64,6 +64,15 @@ EVENT_TYPES = [
     # Round 4: Prometheus alarms (prom_watch.py) and per-link alerts (link_alerts.py)
     'resource_alarm', 'resource_cleared', 'route_count_drop', 'route_count_restored',
     'mcs_drop', 'mcs_restored', 'link_alert', 'link_alert_cleared',
+    # Infrastructure links far below their potential (link_potential.py)
+    'link_underperforming', 'link_underperforming_cleared',
+    # Antenna chain / stream alarms from SSH radio details (ssh_collect.py)
+    'radio_chain_alarm', 'radio_chain_cleared',
+    # More SSH radio health alarms (ssh_health.py)
+    'radio_retries_high', 'radio_retries_cleared', 'radio_reconnects', 'radio_reconnects_cleared',
+    'radio_interference', 'radio_interference_cleared', 'radio_rx_errors', 'radio_rx_errors_cleared',
+    'ethernet_problem', 'ethernet_cleared', 'radio_distance_short', 'radio_distance_ok',
+    'node_clock_skew', 'node_clock_ok',
     # Phone connectivity (phones.py)
     'phone_unreachable', 'phone_restored',
 ]
@@ -81,6 +90,15 @@ RECOVERY_OF = {
     'route_count_drop': 'route_count_restored',
     'mcs_drop': 'mcs_restored',
     'link_alert': 'link_alert_cleared',
+    'link_underperforming': 'link_underperforming_cleared',
+    'radio_chain_alarm': 'radio_chain_cleared',
+    'radio_retries_high': 'radio_retries_cleared',
+    'radio_reconnects': 'radio_reconnects_cleared',
+    'radio_interference': 'radio_interference_cleared',
+    'radio_rx_errors': 'radio_rx_errors_cleared',
+    'ethernet_problem': 'ethernet_cleared',
+    'radio_distance_short': 'radio_distance_ok',
+    'node_clock_skew': 'node_clock_ok',
     'phone_unreachable': 'phone_restored',
 }
 PROBLEM_OF = {v: k for k, v in RECOVERY_OF.items()}

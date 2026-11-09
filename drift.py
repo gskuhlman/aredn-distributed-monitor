@@ -13,11 +13,16 @@ SSID, channel, width, LQM user blocks) plus firmware and model, and checks:
 - network-wide: firmware versions against the newest release seen, and nodes
   whose settings have never been read
 
-sysinfo does not report LQM distance/SNR thresholds or the radio distance
-setting, so those cannot be compared. Read-only over SQLite; scoped like the
-other reports and by scan boundaries.
+sysinfo does not report LQM thresholds, the radio distance setting or TX
+power; for nodes collected over SSH (ssh_collect.py) the settings read from
+`uci show` and `iw` add: the ACK window (coverage class) vs. the radio's
+longest RF link, the distance setting vs. that link, TX power set vs. what the
+radio uses (a regulatory or hardware cap), and LQM options that differ
+between radios at one site. Read-only over SQLite; scoped like the other
+reports and by scan boundaries.
 """
 
+import json
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
@@ -372,6 +377,124 @@ def _check_missing(ctx, f):
 
 # ----------------------------------------------------------------- entry --
 
+def _check_ssh_settings(ctx, f):
+    """Settings read over SSH (ssh_health.settings): per radio rows plus
+    findings; empty when SSH collection isn't set up."""
+    try:
+        import ssh_health
+        with database.get_connection() as conn:
+            longest = ssh_health.longest_links(conn)
+        rows = {s['node_name']: s for s in ssh_health.settings() if s['node_name'] in ctx['radios']}
+        tx_now = {n: ssh_health.tx_power(n) for n in rows}
+    except Exception:  # SSH tables missing
+        return []
+    out = []
+    for name, s in sorted(rows.items()):
+        peer, dist = longest.get(name, (None, None))
+        out.append({'name': name, 'mode': s['mode'], 'channel': s['channel'], 'chanbw': s['chanbw'],
+                    'country': s['country'], 'distance_m': s['distance_m'], 'coverage_class': s['coverage_class'],
+                    'coverage_m': s['coverage_m'], 'txpower_set': s['txpower_set'], 'txpower_dbm': tx_now.get(name),
+                    'lqm': s['lqm'], 'longest_peer': peer, 'longest_m': dist, 'read_at': s['timestamp']})
+        if peer and s['coverage_m'] is not None and s['coverage_m'] < dist:
+            _add(f, 'info', 'radio', f"{name}: ACK window shorter than its {dist:.0f} m link to {peer}",
+                 f"Coverage class {s['coverage_class']} waits for ACKs from up to {s['coverage_m']} m. AREDN sets it "
+                 "from LQM's distance and rounds down, so a link just past a step is slightly outside it; late ACKs "
+                 "count as lost frames and are resent. Often harmless; it matters when the link also shows heavy "
+                 "retries.", [name, peer], recommendation=
+                 f"Watch {name}'s retries (node page, Radio Details); if they are high, try a longer distance.")
+        if peer and s['distance_m'] and s['distance_m'] < dist:
+            _add(f, 'warning', 'radio', f"{name}: distance setting {s['distance_m']} m is shorter than its "
+                 f"{dist:.0f} m link to {peer}",
+                 'The radio distance caps how long the radio waits for an ACK; a link beyond it loses ACKs.',
+                 [name, peer], recommendation=f"Raise {name}'s distance setting above {dist:.0f} m.")
+        tx = tx_now.get(name)
+        if tx is not None and s['txpower_set'] is not None and abs(tx - s['txpower_set']) >= 1:
+            _add(f, 'info', 'radio', f"{name}: TX power set to {s['txpower_set']:g} dBm, radio uses {tx:g} dBm",
+                 'The driver capped the setting (regulatory limit for the channel or the hardware maximum).',
+                 [name])
+    for site in ctx['sites']:
+        # user_blocks are compared per sector already (_check_sites)
+        opts = {r['name']: json.dumps({k: v for k, v in rows[r['name']]['lqm'].items() if k != 'user_blocks'},
+                                      sort_keys=True)
+                for r in site['members'] if r['name'] in rows}
+        if len(set(opts.values())) > 1:
+            _add(f, 'info', 'site', f"{site['name']}: LQM settings differ between radios",
+                 'LQM thresholds (minimum SNR, margin, quality, distance) decide which neighbours are blocked; '
+                 'radios on one mast are usually set alike.', list(opts), site['code'],
+                 [f"{n}: {v if v != '{}' else 'defaults'}" for n, v in sorted(opts.items())],
+                 'Confirm each difference is deliberate.')
+    return out
+
+
+def _check_radio_firmware(ctx, f):
+    """Radio (ath10k/ath11k) firmware read over SSH (ssh_health.radio_firmware):
+    a firmware file replaced in the overlay is not the one AREDN ships; a
+    radio whose firmware differs from other radios with the same chip on the
+    same AREDN release (the reference is what radios with untouched files
+    run, else the most common) is flagged too. Empty without SSH."""
+    try:
+        import ssh_health
+        fw = ssh_health.radio_firmware()
+        with database.get_connection() as conn:
+            nodes = {r[0].lower(): (r[1], r[2]) for r in conn.execute('SELECT name, model, firmware_version FROM nodes')}
+    except Exception:  # SSH tables missing
+        return []
+    rows = []
+    for node, info in fw.items():
+        model, aredn = nodes.get(node, (None, None))
+        replaced = [x for x in info['files'] if x.get('overlay')]
+        for r in info['radios']:
+            rows.append({'name': node, 'model': model, 'aredn': aredn, 'chip': r['chip'], 'device': r['device'],
+                         'version': r['version'], 'ct': r['ct'], 'files': info['files'], 'replaced': bool(replaced),
+                         'read_at': info['read_at'], 'source': info['source']})
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r['chip'], r['aredn'])].append(r)
+    for (chip, aredn), members in groups.items():
+        pool = [r for r in members if not r['replaced']] or members
+        common = Counter(r['version'] for r in pool).most_common(2)
+        ref = common[0][0] if common and (len(common) == 1 or common[0][1] > common[1][1]) else None
+        for r in members:
+            r['expected'] = ref
+            r['differs'] = bool(ref) and r['version'] != ref
+    scoped = {n.lower(): n for n in ctx['radios']}
+    flagged = set()
+    for r in sorted(rows, key=lambda r: r['name']):
+        name = scoped.get(r['name'])
+        if not name or name in flagged or not (r['replaced'] or r['differs']):
+            continue
+        flagged.add(name)
+        others = sorted({x['name'] for x in groups[(r['chip'], r['aredn'])]
+                         if x['name'] != r['name'] and x['version'] == r['expected']})
+        evidence = [f"{name} ({r['chip'] or 'radio'}): firmware {r['version']}"
+                    + ('' if r['ct'] else ' (not a CT build: none of the -CT features)')]
+        if r['differs']:
+            evidence.append(f"other {r['chip'] or ''} radios on AREDN {r['aredn'] or '?'} run {r['expected']}: "
+                            + ', '.join(others[:8]) + (' ...' if len(others) > 8 else ''))
+        for x in r['files']:
+            evidence.append(f"{x['path']}: {x.get('size') or '?'} bytes, md5 {x.get('md5') or '?'}"
+                            + (' (replaced in the overlay)' if x.get('overlay') else ''))
+        if r['replaced']:
+            title = f"{name}: radio firmware file replaced"
+            detail = (f"The radio firmware file is in the writable overlay, so it is not the one AREDN "
+                      f"{r['aredn'] or ''} ships; it survives reboots and AREDN's own driver (ath10k-ct) runs on it.")
+            rec = ("If it was not deliberate, delete the overlay copy (/overlay/upper + the path above) and reboot; "
+                   "either way, add a firmware entry to the change log.")
+        else:
+            title = f"{name}: radio firmware {r['version']} differs from other {r['chip'] or ''} radios"
+            detail = (f"Radios with the same chip on AREDN {r['aredn'] or '?'} run {r['expected']}. Radio firmware "
+                      "changes rate control, retries and ACK handling, so a different build can make one link "
+                      "behave unlike the rest.")
+            rec = "Find out who changed it and why; put AREDN's build back unless the change was deliberate."
+        if not r['ct']:
+            detail += (" It is not a CT build, which AREDN's ath10k-ct driver is made for (the kernel log says the "
+                       "firmware lacks the feature flag for retry limits above 2).")
+        _add(f, 'warning', 'radio', title, detail, [name], evidence=evidence, recommendation=rec)
+    return [{k: r[k] for k in ('name', 'model', 'aredn', 'chip', 'version', 'ct', 'replaced', 'expected', 'differs',
+                               'read_at', 'source')} | {'md5': next((x.get('md5') for x in r['files']), None)}
+            for r in sorted(rows, key=lambda r: (r['chip'] or '', r['name'])) if r['name'] in scoped]
+
+
 def run_report(scope='all'):
     now = datetime.now()
     nodes = database.get_all_nodes()
@@ -429,6 +552,8 @@ def run_report(scope='all'):
     sites = _check_sites(ctx, findings)
     histogram = _check_firmware(ctx, findings)
     _check_missing(ctx, findings)
+    ssh_rows = _check_ssh_settings(ctx, findings)
+    radio_fw = _check_radio_firmware(ctx, findings)
     findings.sort(key=lambda x: SEVERITY_ORDER[x['severity']])
 
     counts = Counter(x['severity'] for x in findings)
@@ -442,6 +567,9 @@ def run_report(scope='all'):
         'links': links,
         'sites': sites,
         'firmware': histogram,
-        'notes': ['sysinfo does not report LQM distance/SNR thresholds or the radio distance setting, '
-                  'so those are not compared.'],
+        'ssh_settings': ssh_rows,
+        'radio_firmware': radio_fw,
+        'notes': ['sysinfo does not report LQM thresholds, the radio distance setting or TX power: those are '
+                  'compared only for nodes collected over SSH' + (f" ({len(ssh_rows)} here)." if ssh_rows else
+                                                                    ' (none yet).')],
     }

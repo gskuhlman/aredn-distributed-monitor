@@ -75,7 +75,7 @@ const SectorAirtime = {
             <div class="diag-findings">${d.findings.map(f => this.renderFinding(f)).join('')}</div>
             ${d.masts.map(m => this.renderMast(m)).join('')}
             ${d.sectors.length ? d.sectors.map(s => this.renderSector(s)).join('')
-                : '<p class="form-hint">No radio has two or more current RF neighbours in this scope.</p>'}
+                : '<p class="form-hint">No sectors in this scope: no radio has two or more current RF neighbours, and no infrastructure sector antenna has a client.</p>'}
             <details class="diag-details"><summary>About the data</summary>
                 <ul class="diag-evidence">${d.data_notes.map(n => `<li>${this.esc(n)}</li>`).join('')}</ul></details>`;
     },
@@ -153,6 +153,7 @@ const SectorAirtime = {
         return `<details class="diag-details" ${s.hidden_pairs.length || (t.fail_pct ?? 0) >= 5 ? 'open' : ''}>
             <summary>Sector: ${this.esc(s.name)} · ${this.esc(this.chan(s))}${s.what_if ? ' (plan)' : ''} ·
                 ${s.clients.length} clients · fail ${this.pct(t.fail_pct)} · airtime ${this.pct(t.airtime_pct)} (${this.esc(t.load)})
+                ${s.channel_busy ? ` · <span title="Measured over the last hour from the radio's survey counters (SSH): receive ${this.esc(s.channel_busy.rx_pct)}%, transmit ${this.esc(s.channel_busy.tx_pct)}%">channel busy ${this.esc(s.channel_busy.busy_pct)}% (measured)${s.channel_busy.others_pct != null ? `, ${this.esc(s.channel_busy.others_pct)}% used by others` : ''}</span>` : ''}
                 ${s.hidden_pairs.length ? ` · <strong>${s.hidden_pairs.length} hidden pair(s)</strong>` : ''}</summary>
             <div class="table-scroll-wrapper"><table class="info-table diag-table">
                 <thead><tr><th>Client</th><th>Distance</th><th>SNR (hub/client)</th><th>LQ (out/in)</th>

@@ -119,8 +119,8 @@ const Spectrum = {
             <p class="form-hint">A scan shows what WiFi each antenna really hears. Queued radios are scanned at
                 ${String(survey.hour ?? 3).padStart(2, '0')}:15 tonight${survey.enabled ? ' with the nightly survey' : ' (the nightly survey is off; only queued radios are scanned)'}.</p>
             <div class="table-scroll-wrapper"><table class="info-table diag-table"><thead><tr><th></th><th>Radio</th><th>Site</th><th>Why</th><th>Cost of scanning</th></tr></thead>
-            <tbody>${rem.map(r => `<tr><td><input type="checkbox" class="sp-rem" value="${this.esc(r.radio)}" ${r.queued ? 'disabled checked' : ''}></td>
-                <td>${this.esc(r.radio)}${r.queued ? ' <small class="hs-infra">queued</small>' : ''}</td><td>${this.esc(r.site)}</td>
+            <tbody>${rem.map(r => `<tr><td><input type="checkbox" class="sp-rem" value="${this.esc(r.radio)}" ${r.queued ? 'disabled checked' : r.manual ? 'disabled title="Not scannable remotely in this mode"' : ''}></td>
+                <td>${this.esc(r.radio)}${r.queued ? ' <small class="hs-infra">queued</small>' : ''}${r.manual ? ` <small>${this.esc({ ptp: 'PtP', ptmp: 'PtMP', sta: 'Station' }[r.mode] || r.mode)}</small>` : ''}</td><td>${this.esc(r.site)}</td>
                 <td>${this.esc(r.why)}</td><td class="form-hint">${this.esc(r.impact)}</td></tr>`).join('')}</tbody></table></div>
             <div class="mh-controls"><button id="sp-queue" class="btn btn-small btn-primary">Scan checked radios tonight</button>
                 ${(survey.queued || []).length ? '<button id="sp-unqueue" class="btn btn-small btn-secondary">Clear tonight\'s queue</button>' : ''}
@@ -354,7 +354,7 @@ const Spectrum = {
             }
             if (!ours.length && !mesh.length && !c.wifi.length && !c.may.length) {
                 html += `<p>${c.status === 'unsurveyed'
-                    ? 'No mesh radios here. Nothing at this site has been scanned, so WiFi is unknown — scan one of its radios (Diagnostics → WiFi Survey).'
+                    ? 'No mesh radios here. Nothing at this site has been scanned, so WiFi is unknown — scan one of its radios (Channel Planning → WiFi Surveys).'
                     : c.guard ? 'Nothing heard, but within 10 MHz of one of our radios on this mast.' : 'Nothing heard here.'}</p>`;
             }
         }

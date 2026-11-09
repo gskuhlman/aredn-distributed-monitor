@@ -167,7 +167,7 @@ const InfraReview = {
                 <td><span class="diag-badge infra-badge-${this.esc(l.severity)}">${this.esc(l.severity)}</span></td>
                 <td>${this.esc(l.a)} ↔ ${this.esc(l.b)}${l.both_infrastructure ? ' <small>(both infra)</small>' : ''}</td>
                 <td class="infra-verdict">${this.esc(l.verdict)}</td></tr>`).join('')}</tbody></table></div>
-            <p class="form-hint">Open a link on the RF Stats tab for its full diagnosis.</p>`;
+            <p class="form-hint">Open a link on the Links page for its full diagnosis.</p>`;
     },
 
     setStatus(text) {

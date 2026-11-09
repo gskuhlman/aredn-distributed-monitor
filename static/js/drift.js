@@ -63,7 +63,49 @@ const SettingsDrift = {
                 <summary>RF links (${d.links.length})</summary>
                 ${this.renderLinks()}
             </details>
+            ${(d.ssh_settings || []).length ? `<details class="diag-details">
+                <summary>Radio settings read over SSH (${d.ssh_settings.length})</summary>
+                ${this.renderSsh()}
+            </details>` : ''}
+            ${(d.radio_firmware || []).length ? `<details class="diag-details">
+                <summary>Radio firmware read over SSH (${d.radio_firmware.length})</summary>
+                ${this.renderRadioFirmware()}
+            </details>` : ''}
             ${(d.notes || []).map(n => `<p class="form-hint">${this.esc(n)}</p>`).join('')}`;
+    },
+
+    renderRadioFirmware() {
+        const v = x => (x === null || x === undefined || x === '') ? '-' : this.esc(String(x));
+        const rows = this.data.radio_firmware.map(r => `<tr>
+            <td>${v(r.name)}</td><td>${v(r.model)}</td><td>${v(r.chip)}</td><td>${v(r.aredn)}</td>
+            <td class="${r.differs ? 'drift-diff' : ''}">${v(r.version)}${r.differs ? `<br><small>others: ${v(r.expected)}</small>` : ''}</td>
+            <td class="${r.ct ? '' : 'drift-diff'}">${r.ct ? 'yes' : 'no'}</td>
+            <td class="${r.replaced ? 'drift-diff' : ''}">${r.replaced ? 'replaced in overlay' : (r.md5 ? 'as shipped' : '-')}</td>
+            <td><code>${v(r.md5 ? r.md5.slice(0, 8) : null)}</code></td>
+            <td>${v(r.read_at)} <small>(${v(r.source)})</small></td></tr>`).join('');
+        return `<div class="table-scroll-wrapper"><table class="info-table diag-table">
+            <thead><tr><th>Radio</th><th>Model</th><th>Chip</th><th>AREDN</th><th>Radio firmware</th><th>CT build</th>
+            <th>File</th><th>md5</th><th>Read</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    },
+
+    renderSsh() {
+        const v = x => (x === null || x === undefined || x === '') ? '-' : this.esc(String(x));
+        const rows = this.data.ssh_settings.map(s => {
+            const short = s.coverage_m != null && s.longest_m != null && s.coverage_m < s.longest_m;
+            const capped = s.txpower_set != null && s.txpower_dbm != null && Math.abs(s.txpower_set - s.txpower_dbm) >= 1;
+            const lqm = Object.entries(s.lqm || {}).map(([k, x]) => `${k}=${x}`).join(', ') || 'defaults';
+            return `<tr>
+                <td>${v(s.name)}</td><td>${v(s.mode)}</td><td>${v(s.channel)} / ${v(s.chanbw)}</td><td>${v(s.country)}</td>
+                <td>${v(s.distance_m)}</td>
+                <td class="${short ? 'drift-diff' : ''}">${s.coverage_class != null ? `${s.coverage_class} (${v(s.coverage_m)} m)` : '-'}</td>
+                <td>${s.longest_m != null ? `${Math.round(s.longest_m)} m to ${v(s.longest_peer)}` : '-'}</td>
+                <td class="${capped ? 'drift-diff' : ''}">${v(s.txpower_set)} / ${v(s.txpower_dbm)}</td>
+                <td>${this.esc(lqm)}</td><td>${v(s.read_at)}</td></tr>`;
+        }).join('');
+        return `<div class="table-scroll-wrapper"><table class="info-table diag-table">
+            <thead><tr><th>Radio</th><th>Mode</th><th>Channel / width</th><th>Country</th><th>Distance set (m)</th>
+            <th>ACK window</th><th>Longest RF link</th><th>TX power set / used (dBm)</th><th>LQM options</th><th>Read</th></tr></thead>
+            <tbody>${rows}</tbody></table></div>`;
     },
 
     renderFirmware() {

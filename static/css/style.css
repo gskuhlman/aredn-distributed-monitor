@@ -652,9 +652,10 @@ body {
 }
 
 /* Toast notifications */
+/* Lower left, above the status bar, so they don't cover the menu and filters. */
 .toast-container {
     position: fixed;
-    top: 80px;
+    bottom: 44px;
     left: 20px;
     z-index: 1000;
     display: flex;
@@ -1741,6 +1742,10 @@ body {
     margin-bottom: 8px;
 }
 
+/* Full-width selects open a native list as wide as the page; on a wide screen
+   Chrome on Windows can draw it with the option text off-screen. */
+.mh-controls .form-input { width: auto; max-width: 100%; }
+
 .mh-summary {
     display: flex;
     flex-wrap: wrap;
@@ -2139,6 +2144,7 @@ body {
 .plan-page [hidden] { display: none !important; }
 .plan-page .cp-plan .spec-wrap { max-width: 820px; }
 .cp-sites small { color: #777; }
+.cp-protect { display: inline-flex; gap: 6px; align-items: center; }
 .ws-ham { fill: #eaf2f8; }
 .ws-major { stroke: #ccd1d1; }
 .ws-ch { fill: #aaa; font-size: 9px; }
@@ -2496,6 +2502,23 @@ tr.site-down td { opacity: 0.65; }
     display: block; text-decoration: none; color: #2c3e50; border-radius: 4px; padding: 7px 10px; font-size: 0.92rem;
 }
 .nav-panel .nav-link:hover, .nav-panel .nav-link:focus { background: #ecf0f1; outline: none; }
+.nav-panel button.nav-link { background: none; border: none; width: 100%; text-align: left; cursor: pointer; font-family: inherit; }
+.nav-panel { width: max-content; max-width: calc(100vw - 32px); flex-wrap: wrap; }
+
+/* Pages with a side menu of sub-pages (page-router.js): Radio & RF, Routing, Setup, Planning */
+.subnav-layout { flex: 1; display: flex; min-height: 0; }
+.subnav { flex: 0 0 200px; display: flex; flex-direction: column; gap: 2px; padding: 14px 8px; border-right: 1px solid #eee; background: #f8f9fa; overflow-y: auto; }
+.subnav-btn { text-align: left; background: none; border: none; border-radius: 4px; padding: 8px 10px; font-size: 0.92rem; color: #2c3e50; cursor: pointer; font-family: inherit; }
+.subnav-btn:hover, .subnav-btn:focus-visible { background: #ecf0f1; outline: none; }
+.subnav-btn.active { background: #2c3e50; color: white; }
+.subnav-body { min-width: 0; }
+.subpage { display: none; }
+.subpage.active { display: block; }
+.page-title { margin: 0 10px 0 0; font-size: 1.2rem; }
+@media (max-width: 768px) {
+    .subnav-layout { flex-direction: column; }
+    .subnav { flex: none; flex-direction: row; flex-wrap: wrap; border-right: none; border-bottom: 1px solid #eee; padding: 8px; }
+}
 
 /* Login box (auth.js) */
 .auth-overlay {
@@ -2670,3 +2693,86 @@ tr.site-down td { opacity: 0.65; }
 .ph-host { padding: 2px 0; font-size: 13px; }
 .ph-unresolved { margin: 4px 0; padding-left: 18px; font-size: 13px; }
 .ph-unresolved li { margin: 2px 0; }
+
+/* SSH radio details (node-ssh.js, admin.js) */
+.ssh-snap-text { max-height: 420px; overflow: auto; white-space: pre; font-size: 12px; padding: 8px;
+    background: #f6f8fa; border: 1px solid #ddd; border-radius: 4px; }
+.ssh-pubkey { display: block; word-break: break-all; white-space: pre-wrap; padding: 6px; user-select: all; background: #f6f8fa; border-radius: 4px; }
+
+/* Collapsible sections (sections.js): click a heading to collapse / reopen. */
+.diag-section.collapsible > h3 { cursor: pointer; user-select: none; }
+.diag-section.collapsible > h3::before {
+    content: '\25BE'; display: inline-block; width: 1.1em; color: #7f8c8d; transition: transform 0.15s;
+}
+.diag-section.collapsed > h3::before { transform: rotate(-90deg); }
+.diag-section.collapsible > h3:focus-visible { outline: 2px solid #3498db; outline-offset: 2px; }
+.diag-section.collapsed > :not(h3) { display: none !important; }
+@media (prefers-reduced-motion: reduce) { .diag-section.collapsible > h3::before { transition: none; } }
+
+/* Shared filter bar (global-filter.js) */
+.global-filters {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+    padding: 6px 20px; background: #f8f9fa; border-bottom: 1px solid #e3e6e8; font-size: 0.85rem;
+}
+.global-filters[hidden] { display: none; }
+.gf-group { display: inline-flex; align-items: center; gap: 6px; }
+.gf-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #7f8c8d; }
+.gf-chips { display: inline-flex; border: 1px solid #cfd6db; border-radius: 4px; overflow: hidden; }
+.gf-chip {
+    border: none; border-right: 1px solid #cfd6db; background: white; color: #2c3e50;
+    padding: 4px 9px; font-size: 0.82rem; cursor: pointer; font-family: inherit;
+}
+.gf-chip:last-child { border-right: none; }
+.gf-chip:hover:not(:disabled) { background: #ecf0f1; }
+.gf-chip.active { background: #2c3e50; color: white; }
+.gf-chip:disabled { color: #b7bfc5; cursor: not-allowed; }
+.gf-chip.active:disabled { background: #95a5a6; color: white; }
+.gf-chip:focus-visible { outline: 2px solid #3498db; outline-offset: -2px; }
+.gf-check { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+.global-filters .form-input { width: auto; padding: 4px 6px; font-size: 0.82rem; }
+#gf-search { width: 170px; }
+.gf-off { opacity: 0.45; }
+.gf-note { color: #7f8c8d; font-size: 0.78rem; }
+.gf-replaced { display: none !important; }
+@media (max-width: 768px) { .global-filters { padding: 6px 12px; } #gf-search { width: 130px; } }
+
+/* Node page section groups (node-tabs.js) */
+.node-group-tabs {
+    display: flex; flex-wrap: wrap; gap: 4px; position: sticky; top: 0; z-index: 5;
+    background: #f4f6f8; padding: 8px 0; margin-bottom: 8px; border-bottom: 1px solid #e3e6e8;
+}
+.node-group-btn {
+    border: 1px solid #cfd6db; background: white; color: #2c3e50; border-radius: 4px;
+    padding: 6px 14px; font-size: 0.9rem; cursor: pointer; font-family: inherit;
+}
+.node-group-btn:hover { background: #ecf0f1; }
+.node-group-btn.active { background: #2c3e50; border-color: #2c3e50; color: white; }
+.node-page-section.ng-hidden { display: none; }
+
+/* Status page needs-attention tiles (status-tiles.js) */
+.status-tiles { margin: 0 0 16px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.status-tile { border: none; border-left: 4px solid #bdc3c7; text-align: left; cursor: pointer; font-family: inherit; }
+.status-tile:hover { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15); }
+.status-tile:focus-visible { outline: 2px solid #3498db; outline-offset: 1px; }
+.status-tile.st-ok { border-left-color: #27ae60; }
+.status-tile.st-warn { border-left-color: #f39c12; }
+.status-tile.st-warn .rpt-tile-value { color: #d35400; }
+.status-tile.st-crit { border-left-color: #c0392b; }
+.status-tile.st-crit .rpt-tile-value { color: #c0392b; }
+.status-tile.st-info { border-left-color: #3498db; }
+.status-tile.st-unknown .rpt-tile-value { color: #95a5a6; }
+
+/* Link Stability at the bottom of the Links page */
+.rf-stability { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e3e6e8; }
+.rf-stability > .page-title { margin: 0 0 8px; }
+
+/* Status page Node Uptime (node-uptime.js) */
+.nu-table td.nu-pct { white-space: nowrap; }
+.nu-bar { display: inline-block; width: 90px; height: 8px; background: #ecf0f1; border-radius: 4px; overflow: hidden; vertical-align: middle; }
+.nu-bar > span { display: block; height: 100%; background: currentColor; }
+.nu-ok { color: #27ae60; }
+.nu-fair { color: #7f9f2a; }
+.nu-warn { color: #d35400; }
+.nu-bad { color: #c0392b; }
+.nu-na { color: #95a5a6; }
+.nu-stale { color: #8e44ad; }

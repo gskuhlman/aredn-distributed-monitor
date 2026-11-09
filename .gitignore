@@ -48,3 +48,6 @@ maps/
 tools/pmtiles*
 
 backups/
+
+# SSH key pair and pinned host keys (ssh_collect.py): never commit
+ssh/

@@ -680,6 +680,7 @@ const NodePage = {
             const asymmetry = h.rate_asymmetry || {};
             const block = h.lqm_block || {};
             const snrAsym = h.snr_asymmetry || {};
+            const lqmTx = h.lqm_tx || {};
 
             return `<tr>
                 <td><a href="/nodes/${encodeURIComponent(h.peer)}">${this.escapeHtml(h.peer)}</a></td>
@@ -698,6 +699,7 @@ const NodePage = {
                 <td>${this.healthCell(snr.snr, ' dB', snr.rating)}</td>
                 <td>${this.healthCell(noise.noise_floor, ' dBm', noise.noise_rating)}${noise.interference_likely ? ' <span class="health-flag health-poor" title="Elevated noise floor suggests interference">!</span>' : ''}</td>
                 <td>${this.healthCell(stability.quality_stddev, '%', stability.rating)}</td>
+                <td>${this.lqmTxCell(lqmTx)}</td>
                 <td>${this.trendCell(stability.quality_trend)}</td>
                 <td>${this.trendCell(stability.snr_trend)}</td>
                 <td>${this.healthCell(asymmetry.ratio, '', asymmetry.rating)}</td>
@@ -725,6 +727,7 @@ const NodePage = {
                             <th>SNR</th>
                             <th>Noise</th>
                             <th>RF Stability</th>
+                            <th title="Share of LQM samples where retries reached the frames sent: AREDN then shows ping quality alone, so a 100% quality hides heavy retries">Hidden retries</th>
                             <th>Quality Trend</th>
                             <th>SNR Trend</th>
                             <th>TX/RX Ratio</th>
@@ -761,6 +764,12 @@ const NodePage = {
     healthCell(value, suffix, rating) {
         if (value === null || value === undefined) return '<span class="health-val health-unknown">-</span>';
         return `<span class="health-val health-${rating || 'unknown'}">${this.escapeHtml(String(value))}${suffix}</span>`;
+    },
+
+    lqmTxCell(m) {
+        if (m.masked_pct === null || m.masked_pct === undefined) return '<span class="health-val health-unknown">-</span>';
+        const dirs = (m.directions || []).map(d => `${d.source} → ${d.target}: ${d.masked_pct}% of samples, quality ${d.reported_quality_avg}% shown, ${d.quality_avg}% counting transmit quality`).join('\n');
+        return `<span class="health-val health-${m.rating || 'unknown'}" title="${this.escapeHtml((m.message ? m.message + '\n' : '') + dirs)}">${this.escapeHtml(String(m.masked_pct))}%</span>`;
     },
 
     trendCell(trend) {

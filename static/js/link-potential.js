@@ -31,7 +31,7 @@ const LinkPotential = {
         this.init();
         this.setStatus('Loading...');
         try {
-            this.data = await (await fetch('/api/reports/link-potential?hours=24')).json();
+            this.data = await (await fetch(`/api/reports/link-potential?hours=${((typeof GlobalFilter !== 'undefined') ? GlobalFilter.hours() : 24)}`)).json();
             this.draw();
             const d = this.data;
             this.setStatus(`${d.points.length} link direction(s), ${d.below.length} well below potential`

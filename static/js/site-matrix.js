@@ -98,7 +98,7 @@ const SiteMatrix = {
             ${this.renderMatrix()}
             <p class="form-hint">Cell: <strong>row hears column</strong> / column hears row (SNR dB), colored by the weaker
                 direction. ${Object.values(this.FLAG_MARKS).map(f => `${f.mark} ${f.label}`).join(' · ')}.
-                Faded = heard only in the window, not in the latest scan. Click a cell to open the pair in RF Stats.</p>
+                Faded = heard only in the window, not in the latest scan. Click a cell to open the pair on the Links page.</p>
             <div class="diag-findings">${d.findings.map(f => this.renderFinding(f)).join('') ||
                 '<p class="log-empty">No findings.</p>'}</div>`;
     },

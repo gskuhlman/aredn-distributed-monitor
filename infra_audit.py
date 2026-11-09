@@ -432,8 +432,21 @@ def _check_near_far(ctx, f):
                  f"Ask {hot['node']} to lower its TX power by about {cut} dB; {name} is infrastructure and keeps its power.")
 
 
+def _check_potential(ctx, f):
+    """Infrastructure RF links far below their potential over a day and still
+    now (link_potential.underperforming): rate far under what the SNR the
+    link budget predicts supports, or SNR 10 dB or more under the budget."""
+    import link_potential
+    for p in link_potential.underperforming():
+        name = p['from'] if p['from'] in ctx['infra'] else p['to']
+        _add(f, 'warning', 'potential', f"{p['from']} → {p['to']} is far below its potential",
+             f"Over the last {link_potential.UNDER_HOURS} h and still now, {p['distance_km']:g} km at "
+             f"{p['chanbw']:g} MHz.",
+             [p['from'], p['to']], ctx['infra'].get(name), p['reasons'], link_potential.recommendation(p))
+
+
 CHECKS = (_check_sites, _check_beams, _check_pointing, _check_pairing, _check_firmware,
-          _check_misc, _check_near_far)
+          _check_misc, _check_near_far, _check_potential)
 
 
 # ----------------------------------------------------------------- entry --

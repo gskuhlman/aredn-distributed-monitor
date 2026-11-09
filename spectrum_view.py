@@ -192,9 +192,11 @@ def scan_changes(conn, node, aps_now, bins):
     return {'previous_taken_at': rows[0]['taken_at'], 'new': new, 'gone': gone, 'cells': cells}
 
 
-def reminders(rows, linked, surveys_all, queue, now=None):
+def reminders(rows, linked, surveys_all, queue, now=None, modes=None):
     """Scan to-dos (TODO #71): transmitting radios at infrastructure sites
-    never scanned, or last scanned more than SCAN_REMINDER_DAYS ago."""
+    never scanned, or last scanned more than SCAN_REMINDER_DAYS ago. A radio
+    in PtP / PtMP / Station mode can't be scanned remotely (`manual`): it
+    has to be switched to Mesh mode, scanned and the table imported."""
     now = now or datetime.now()
     out = []
     for row in rows:
@@ -206,14 +208,17 @@ def reminders(rows, linked, surveys_all, queue, now=None):
             if last and age <= config.SCAN_REMINDER_DAYS:
                 continue
             peers = sorted(linked.get(r['name'], set()))
+            manual = wifi_survey.mode_blocks_scan((modes or {}).get(r['name']), peers)
             out.append({'radio': r['name'], 'site': row['name'], 'last_scan': last, 'age_days': age,
                         'why': ('never scanned: WiFi at this site is a guess (the typical ranges)' if not last else
                                 f'last scanned {age} days ago (older than {config.SCAN_REMINDER_DAYS})'),
                         'links': peers,
-                        'impact': ('the radio leaves its channel for about 5-15 s; '
+                        'impact': (f'manual scan: {manual}' if manual else
+                                   'the radio leaves its channel for about 5-15 s; '
                                    + (f"its {len(peers)} RF link(s) ({', '.join(peers[:4])}"
                                       f"{'...' if len(peers) > 4 else ''}) pause that long" if peers
                                       else 'it has no RF links to interrupt')),
+                        'mode': (modes or {}).get(r['name']), 'manual': bool(manual),
                         'queued': r['name'] in queue})
     out.sort(key=lambda x: (x['last_scan'] is not None, x['site'], x['radio']))
     return out
@@ -324,8 +329,9 @@ def build(scope='infrastructure', band=None, overrides=None, include_inactive=Fa
     surveyed_rows = [r for r in rows if r['surveyed']]
     typical = []
     for lo, hi in bins:
-        hits = [n['label'] for n in channel_planner.NOISE_RANGES if _overlaps(lo, hi, n['low'], n['high'])]
-        cost = max([n['cost'] for n in channel_planner.NOISE_RANGES if _overlaps(lo, hi, n['low'], n['high'])] or [0])
+        ranges = channel_planner.noise_ranges()
+        hits = [n['label'] for n in ranges if _overlaps(lo, hi, n['low'], n['high'])]
+        cost = max([n['cost'] for n in ranges if _overlaps(lo, hi, n['low'], n['high'])] or [0])
         typical.append({'low': lo, 'high': hi, 'labels': hits,
                         'status': 'busy' if cost >= 20 else ('some' if cost > 0 else 'free')})
     common = [all(r['cells'][i]['status'] in ('free', 'unsurveyed') for r in rows) for i in range(len(bins))]
@@ -344,7 +350,8 @@ def build(scope='infrastructure', band=None, overrides=None, include_inactive=Fa
         'what_if': None if at else data.get('what_if'),
         'as_of': at.strftime(TS_FMT) if at else None,
         'history_channels': history,
-        'reminders': [] if at else reminders(rows, linked, surveys_all, queue),
+        'reminders': [] if at else reminders(rows, linked, surveys_all, queue,
+                                             modes={n: r.get('mode') for n, r in radios.items()}),
         'scan_times': _scan_times(rows),
         'survey': {'enabled': config.WIFI_SURVEY_ENABLED, 'hour': config.WIFI_SURVEY_HOUR,
                    'queued': sorted(queue), 'reminder_days': config.SCAN_REMINDER_DAYS},

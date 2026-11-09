@@ -47,7 +47,6 @@ const ChangesModule = {
             // Automatic before/after verdicts (change_verdict.py), by change id.
             this.verdicts = new Map((verdicts.verdicts || []).map(v => [v.change_id, v]));
             this.verdictHours = verdicts.hours || 24;
-            if (typeof Rollouts !== 'undefined') Rollouts.load();
             this.selected = new Set(sel.selected_nodes || []);
             this.infrastructure = new Set(Object.keys(infra.infrastructure_nodes || {}));
             this.renderList();
@@ -353,23 +352,7 @@ const ChangesModule = {
     }
 };
 
-// Deep link from the node page: /#changes or /#changes/<id> opens the tab
-// (and that change's before/after comparison).
-document.addEventListener('DOMContentLoaded', () => {
-    const m = /^#changes(?:\/(\d+))?$/.exec(location.hash || '');
-    if (!m) return;
-    document.querySelector('.tab-btn[data-tab="changes"]')?.click();
-    if (m[1]) {
-        const id = Number(m[1]);
-        const wait = setInterval(() => {
-            if (ChangesModule.changes.length) {
-                clearInterval(wait);
-                ChangesModule.compare(id);
-            }
-        }, 200);
-        setTimeout(() => clearInterval(wait), 10000);
-    }
-});
+// The /#changes and /#changes/<id> deep links are handled by page-router.js.
 
 // Draws chart.$changeMarkers ([{t: ms, label, end?}]) as dashed vertical lines
 // (or shaded bands when `end` is set, e.g. maintenance windows) on charts with

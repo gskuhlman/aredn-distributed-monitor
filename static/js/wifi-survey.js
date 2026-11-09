@@ -71,7 +71,7 @@ const WifiSurvey = {
     },
 
     setStatus(text) {
-        const el = document.getElementById('ws-status');
+        const el = document.getElementById('wsv-status');
         if (el) el.textContent = text;
     },
 
@@ -83,3 +83,17 @@ const WifiSurvey = {
 };
 
 document.addEventListener('DOMContentLoaded', () => WifiSurvey.init());
+
+// Load the survey list when Planning > WiFi Surveys is shown (the page is open).
+const wifiSurveyShown = () => {
+    const view = document.getElementById('planning-view');
+    const sub = view?.querySelector('.subpage.active')?.dataset.sub;
+    if (view?.classList.contains('active') && sub === 'wifi' && !WifiSurvey.loaded) {
+        WifiSurvey.loaded = true;
+        WifiSurvey.load();
+    }
+};
+document.addEventListener('subpage-shown', wifiSurveyShown);
+document.addEventListener('click', (event) => {
+    if (event.target.closest('.tab-btn[data-tab="planning"]')) setTimeout(wifiSurveyShown, 0);
+});

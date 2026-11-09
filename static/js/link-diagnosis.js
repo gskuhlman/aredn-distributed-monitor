@@ -444,13 +444,4 @@ const LinkDiagnosis = {
     }
 };
 
-// Deep link from other pages (site dashboard): /#diagnose/<a>/<b> opens the pair in RF Stats.
-document.addEventListener('DOMContentLoaded', () => {
-    const m = /^#diagnose\/([^/]+)\/([^/]+)$/.exec(location.hash || '');
-    if (!m) return;
-    const [a, b] = [decodeURIComponent(m[1]), decodeURIComponent(m[2])];
-    setTimeout(() => {
-        document.querySelector('.tab-btn[data-tab="rf-stats"]')?.click();
-        setTimeout(() => { if (typeof RFStats !== 'undefined') RFStats.selectLink(a, b); }, 500);
-    }, 300);
-});
+// The /#diagnose/<a>/<b> deep link is handled by page-router.js.

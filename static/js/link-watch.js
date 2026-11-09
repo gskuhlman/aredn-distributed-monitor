@@ -20,7 +20,7 @@ const LinkWatch = {
         this.setStatus('Loading...');
         try {
             const [oneResp, noiseResp] = await Promise.all([
-                fetch('/api/reports/one-way?hours=24'),
+                fetch(`/api/reports/one-way?hours=${((typeof GlobalFilter !== 'undefined') ? GlobalFilter.hours() : 24)}`),
                 fetch('/api/reports/noise')
             ]);
             this.oneWay = await oneResp.json();

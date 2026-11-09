@@ -34,12 +34,18 @@ EVENT_CATEGORIES = {
     'node': ('node_discovered', 'node_offline', 'node_online', 'node_degraded', 'node_reboot',
              'radio_config_change', 'firmware_change',
              'noise_jump', 'noise_cleared', 'resource_alarm', 'resource_cleared',
-             'route_count_drop', 'route_count_restored', 'phone_unreachable', 'phone_restored'),
+             'route_count_drop', 'route_count_restored', 'phone_unreachable', 'phone_restored',
+             'radio_interference', 'radio_interference_cleared', 'radio_rx_errors', 'radio_rx_errors_cleared',
+             'ethernet_problem', 'ethernet_cleared', 'radio_distance_short', 'radio_distance_ok',
+             'node_clock_skew', 'node_clock_ok'),
     'link': ('link_new', 'link_dropped', 'link_removed', 'link_restored',
              'link_blocked', 'link_unblocked',
              'one_way_link', 'one_way_link_cleared',
              'route_changed', 'route_detour', 'route_restored',
-             'mcs_drop', 'mcs_restored', 'link_alert', 'link_alert_cleared'),
+             'mcs_drop', 'mcs_restored', 'link_alert', 'link_alert_cleared',
+             'link_underperforming', 'link_underperforming_cleared',
+             'radio_chain_alarm', 'radio_chain_cleared',
+             'radio_retries_high', 'radio_retries_cleared', 'radio_reconnects', 'radio_reconnects_cleared'),
     'freq': ('frequency_change',),
     'system': ('gateway_lost', 'gateway_restored', 'scan_incomplete', 'scan_complete_again',
                'maintenance_scheduled', 'maintenance_started', 'maintenance_ended'),
@@ -303,6 +309,14 @@ def window_report(start, end, scope='all', link_type='all', search='',
                     polls = row.get('polls') or 0
                     row['reachable_pct'] = (round(100.0 * (polls - row['unreachable']) / polls, 1)
                                             if polls else None)
+        # ---- uptime % (uptime.py): time up / time judged, from polls + uptimes.
+        import uptime as node_uptime   # uptime imports reports
+        up = node_uptime.node_uptime(s, e, names, conn)
+        for row in nodes:
+            u = up.get(row['name']) or {}
+            explained = (causes.get(row['name']) or {}).get('explained')
+            row['uptime_pct'] = None if explained else u.get('uptime_pct')
+            row['down_minutes'] = u.get('down_minutes')
         windows = maintenance.windows_between(s, e, conn)
         explained_names = sorted(n for n, c in causes.items() if c['explained'])
         explained_sql = f' AND node_name NOT IN ({_in(explained_names)})' if explained_names else ''

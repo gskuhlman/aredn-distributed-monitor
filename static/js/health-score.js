@@ -164,7 +164,7 @@ const HealthScorePanel = {
         const head = `<p class="form-hint">Searched ${this.esc(r.searched.start.slice(5, 16))} – ${this.esc(r.searched.end.slice(5, 16))}
             (the bucket plus some time either side)${r.neighbours.length ? ` · RF neighbours checked too: ${r.neighbours.map(n => this.esc(n)).join(', ')}` : ''}</p>`;
         if (!r.items.length) {
-            list.innerHTML = head + '<p class="log-empty">Nothing recorded: no reboots, config, noise, route or starting-node events. Look at the RF Stats charts for a gradual change (noise, interference).</p>';
+            list.innerHTML = head + '<p class="log-empty">Nothing recorded: no reboots, config, noise, route or starting-node events. Look at the Links page charts for a gradual change (noise, interference).</p>';
             return;
         }
         list.innerHTML = head + `<p>${counts}</p>

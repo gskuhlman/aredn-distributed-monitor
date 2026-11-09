@@ -168,7 +168,7 @@ const PathView = {
         }
         html += `<div class="pv-legend"><span class="pv-seg pv-good">good ≥ 80%</span><span class="pv-seg pv-fair">fair 50–79%</span>
             <span class="pv-seg pv-poor">poor &lt; 50%</span><span class="pv-seg pv-tunnel">tunnel</span><span class="pv-seg pv-unknown">unknown</span>
-            <span class="form-hint">RF quality shown as forward / reverse; click an RF hop to open it in RF Stats.</span></div>`;
+            <span class="form-hint">RF quality shown as forward / reverse; click an RF hop to open it on the Links page.</span></div>`;
         el.innerHTML = html;
     },
 

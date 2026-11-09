@@ -189,6 +189,15 @@ def profile(a, b, freq_mhz, fetch=None):
 
 # ------------------------------------------------------------------ data --
 
+def _ssh_tx_power(name):
+    """TX power the radio reports over SSH (ssh_health.py), or None."""
+    try:
+        import ssh_health
+        return ssh_health.tx_power(name)
+    except Exception:  # SSH tables missing or unreadable: assume as before
+        return None
+
+
 def _radio(conn, name):
     r = conn.execute('SELECT * FROM nodes WHERE name = ?', (name,)).fetchone()
     if not r:
@@ -208,6 +217,10 @@ def _radio(conn, name):
                      f'{DEFAULT_HEIGHT_M:g} m assumed')
         height = DEFAULT_HEIGHT_M
     tx = ld._num(r.get('rf_txpower'))
+    if tx is None:
+        tx = _ssh_tx_power(name)
+        if tx is not None:
+            notes.append(f'TX power {tx:g} dBm read from the radio over SSH')
     tx_assumed = tx is None
     if tx_assumed:
         tx = config.LINK_BUDGET_TX_DBM
@@ -280,7 +293,7 @@ def budget(a, b, hours=24, fetch=None):
         for n in r['notes']:
             findings.append({'severity': 'info', 'text': f"{r['name']}: {n}"})
     if ra['tx_assumed'] or rb['tx_assumed']:
-        findings.append({'severity': 'info', 'text': f'TX power not reported by AREDN: {config.LINK_BUDGET_TX_DBM:g} dBm '
+        findings.append({'severity': 'info', 'text': f'TX power not known (sysinfo has none, SSH not set up): {config.LINK_BUDGET_TX_DBM:g} dBm '
                                                      'assumed (LINK_BUDGET_TX_DBM); a lower power setting shows as "weaker than predicted"'})
     if terrain['available']:
         c = terrain['min_fresnel_clearance']

@@ -196,14 +196,69 @@ def mos_label(mos):
 
 # ============ RF Stability ============
 
+MASKED_MARGINAL_PCT = 10
+MASKED_POOR_PCT = 50
+
+
+def lqm_masked(row):
+    """True when an AREDN LQM quality sample hides heavy retries. lqm.uc sets
+    tx_quality = 100 * (1 - max(retries, failures) / packets sent), then tests
+    `if (track.tx_quality)`: once retries reach the packets sent tx_quality is
+    0, which counts as no data, so quality falls back to ping quality alone
+    (usually 100) and the worst transmit state reads as a perfect link."""
+    txq = row.get('tx_quality')
+    return txq is not None and txq <= 0 and row.get('quality') is not None
+
+
+def effective_quality(row):
+    """LQM quality with a tx_quality of 0 counted instead of skipped:
+    (0 + ping quality) / 2."""
+    if lqm_masked(row):
+        ping = row.get('ping_quality')
+        return round(ping / 2) if ping is not None else 0
+    return row.get('quality')
+
+
+def analyze_lqm_masking(rows):
+    """Per direction, the share of LQM samples whose quality hides heavy
+    retries (lqm_masked), with the reported and the effective average; rated
+    on the worst direction."""
+    by_dir = {}
+    for r in rows:
+        if r.get('tx_quality') is None or r.get('quality') is None:
+            continue
+        d = by_dir.setdefault((r['source_node'], r['target_node']), [0, 0, 0.0, 0.0])
+        d[0] += 1
+        d[1] += lqm_masked(r)
+        d[2] += r['quality']
+        d[3] += effective_quality(r)
+    dirs = [{'source': s, 'target': t, 'samples': n, 'masked_pct': round(100 * m / n, 1),
+             'reported_quality_avg': round(q / n, 1), 'quality_avg': round(e / n, 1)}
+            for (s, t), (n, m, q, e) in sorted(by_dir.items())]
+    dirs = [d for d in dirs if d['samples'] >= 3]
+    if not dirs:
+        return {'rating': 'unknown', 'masked_pct': None, 'directions': []}
+    worst = max(dirs, key=lambda d: d['masked_pct'])
+    pct = worst['masked_pct']
+    rating = 'poor' if pct >= MASKED_POOR_PCT else 'marginal' if pct >= MASKED_MARGINAL_PCT else 'good'
+    out = {'rating': rating, 'masked_pct': pct, 'source': worst['source'], 'target': worst['target'],
+           'directions': dirs}
+    if rating != 'good':
+        out['message'] = (f"{worst['source']} reports {worst['reported_quality_avg']:.0f}% quality, but in {pct:.0f}% "
+                          f"of samples its retries reached the frames it sent and AREDN showed ping quality alone. "
+                          f"Counting transmit quality it averages {worst['quality_avg']:.0f}%.")
+    return out
+
+
 def compute_rf_stability(quality_history):
     """
     Compute RF stability metrics from quality/SNR history.
 
     Returns dict with stddev, trend, and dip counts.
     """
+    # LQM samples that hide heavy retries count at their real quality.
     quality_values = [
-        row['quality'] for row in quality_history
+        effective_quality(row) for row in quality_history
         if row.get('quality') is not None
     ]
     snr_values = [
@@ -635,6 +690,7 @@ _METRIC_WEIGHTS = {
     'asymmetry': 1,
     'lqm_block': 4,
     'snr_asymmetry': 3,
+    'lqm_tx': 3,
 }
 
 
@@ -658,6 +714,7 @@ def compute_overall_grade(metrics):
         'asymmetry': metrics.get('rate_asymmetry', {}).get('rating'),
         'lqm_block': metrics.get('lqm_block', {}).get('rating'),
         'snr_asymmetry': metrics.get('snr_asymmetry', {}).get('rating'),
+        'lqm_tx': metrics.get('lqm_tx', {}).get('rating'),
     }
 
     for metric_name, rating in rating_map.items():
@@ -728,6 +785,7 @@ def analyze_link(node_name, link, quality_history, ping_history):
     asymmetry = analyze_rate_asymmetry(link)
     block_state = analyze_block(link)
     snr_asymmetry = analyze_snr_asymmetry(link)
+    lqm_tx = analyze_lqm_masking(link_quality)
 
     # Attach the dominant LQM block reason from the structured state log so the
     # flap column can show *why* a link is flapping, not just how often.
@@ -765,6 +823,7 @@ def analyze_link(node_name, link, quality_history, ping_history):
         'rate_asymmetry': asymmetry,
         'lqm_block': block_state,
         'snr_asymmetry': snr_asymmetry,
+        'lqm_tx': lqm_tx,
     }
 
     metrics['overall'] = compute_overall_grade(metrics)

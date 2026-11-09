@@ -4,7 +4,8 @@ Read-only over SQLite.
 
 A "sector" is any transmitting radio with two or more current RF neighbours
 (AREDN meshes in adhoc mode, so a hub is simply a radio several others link
-to). For each one this reports:
+to), or an infrastructure sector/omni antenna (beam wider than
+SECTOR_MIN_BEAM) with at least one. For each one this reports:
 
 - its clients, with SNR / LQ / quality, bitrates and tx-fail / retry rates
   from the cumulative LQM counters in link_history (deltas over the window);
@@ -28,6 +29,7 @@ channels. Never recommends TX power changes on infrastructure.
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
 
 import channel_map as cm
@@ -35,9 +37,12 @@ import database
 import infra_audit as ia
 import link_diagnostics as ld
 
+logger = logging.getLogger(__name__)
+
 FRAME_BYTES = 600             # assumed average frame for the airtime estimate
 FAIL_WARN_PCT = 10.0          # tx fail rate that makes a link/sector a warning
 FAIL_INFO_PCT = 5.0
+SECTOR_MIN_BEAM = 45          # infrastructure antennas wider than this are sectors even with one client
 LOAD_LEVELS = ((50, 'busy'), (20, 'moderate'), (5, 'light'))   # estimated airtime %
 BETTER_SECTOR_DEG = 30        # another sector this much closer to boresight is "better aimed"
 SECTOR_MIN_BEAM_DEG = 45      # narrower antennas are PtP dishes, not sectors a client could move to
@@ -228,7 +233,13 @@ def run_report(scope='all', hours=24, overrides=None):
 
     f = _Findings()
     sectors = []
-    for hub in sorted(n for n in neighbours if live(n) and len(neighbours[n]) >= 2):
+    def is_sector(n):
+        if len(neighbours[n]) >= 2:
+            return True
+        r = radios[n]
+        return bool(r.get('is_infrastructure')) and (r.get('beamwidth') or 360) > SECTOR_MIN_BEAM
+
+    for hub in sorted(n for n in neighbours if live(n) and is_sector(n)):
         sectors.append(_sector(hub, radios, neighbours, hear, hears, rates, hidden_lists, polled, f))
 
     masts = _masts(base, radios, neighbours, hear, hears, rates, live, f)
@@ -307,6 +318,17 @@ def _client_row(hub, c, radios, hear, rates):
     return row
 
 
+def _channel_busy(hub):
+    """Measured busy / receive / transmit % of the sector's channel over the
+    last hour from SSH survey counters (ssh_collect.py), or None."""
+    try:
+        import ssh_collect
+        return ssh_collect.channel_busy(hub)
+    except Exception as exc:  # never lose the report to this
+        logger.warning("Channel busy for %s failed: %s", hub, exc)
+        return None
+
+
 def _sector(hub, radios, neighbours, hear, hears, rates, hidden_lists, polled, f):
     hr = radios[hub]
     clients = sorted(neighbours[hub])
@@ -354,6 +376,7 @@ def _sector(hub, radios, neighbours, hear, hears, rates, hidden_lists, polled, f
         'totals': {'fail_pct': fail_pct, 'airtime_pct': airtime, 'load': _load_level(airtime),
                    'min_bitrate': min(bitrates) if bitrates else None},
         'contention': contention,
+        'channel_busy': _channel_busy(hub),
     }
 
     # ---- findings ----

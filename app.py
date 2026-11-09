@@ -37,6 +37,7 @@ import health_score
 import heatmap
 import swimlanes
 import unreachable
+import uptime
 import cleanup
 import link_diagnostics
 import infra_audit
@@ -89,6 +90,7 @@ import prom_watch
 import link_alerts
 import phones
 import link_potential
+import ssh_collect
 import embeds
 
 # Configure logging
@@ -727,6 +729,8 @@ def api_wifi_survey_scan():
         return _json_error('node is required')
     try:
         return jsonify(wifi_survey.scan_node(node))
+    except wifi_survey.ScanModeError as exc:
+        return _json_error(exc, 409)
     except (RuntimeError, ValueError) as exc:
         return _json_error(exc, 502)
 
@@ -1059,6 +1063,8 @@ def api_get_settings():
     else:
         settings['database_retention_days'] = int(settings['database_retention_days'])
 
+    settings['tdwr_nearby'] = 'true' if channel_planner.tdwr_nearby() else 'false'
+
     settings['link_timeout'] = config.LINK_TIMEOUT
     settings['quality_good'] = config.QUALITY_GOOD
     settings['quality_poor'] = config.QUALITY_POOR
@@ -1132,6 +1138,10 @@ def api_update_settings():
         database.set_setting('database_retention_days', str(database_retention_days))
         logger.info(f"Database retention updated to: {database_retention_days} days")
 
+    if 'tdwr_nearby' in data:
+        channel_planner.set_tdwr_nearby(bool(data['tdwr_nearby']))
+        logger.info(f"TDWR nearby updated to: {bool(data['tdwr_nearby'])}")
+
     return jsonify({'success': True, 'settings': database.get_all_settings()})
 
 
@@ -1166,6 +1176,13 @@ def api_get_events():
     offset = request.args.get('offset', 0, type=int)
     events = database.get_events(limit=limit, offset=offset)
     return jsonify(events)
+
+
+@app.route('/api/events/categories')
+def api_event_categories():
+    """Event type -> category, as the Reports tab groups them (anything else is 'system')."""
+    return jsonify({'categories': {cat: list(types) for cat, types in reports.EVENT_CATEGORIES.items()},
+                    'default': 'system'})
 
 
 @app.route('/api/events/clear', methods=['POST'])
@@ -1502,6 +1519,55 @@ def api_link_alert_clients(node):
     return jsonify({'node': node.lower(), 'clients': link_alerts.sector_clients(node.lower())})
 
 
+# ---- Radio details over SSH (ssh_collect.py) ----
+
+def run_ssh_collect_task(nodes=None, slow=None, manual=False):
+    try:
+        result = ssh_collect.run(nodes, slow=slow, manual=manual)
+        for event in result.get('events', []):
+            socketio.emit('new_event', event)
+        return result
+    except Exception as exc:
+        logger.error("SSH collection error: %s", exc)
+        return {'results': [], 'events': [], 'error': str(exc)}
+
+
+@app.route('/api/ssh/status')
+def api_ssh_status():
+    return jsonify(ssh_collect.status())
+
+
+@app.route('/api/ssh/collect', methods=['POST'])
+def api_ssh_collect():
+    body = request.get_json(silent=True) or {}
+    if not ssh_collect.key_present():
+        return jsonify({'error': 'No SSH key yet: run python ssh_collect.py --keygen on this PC.'}), 409
+    if ssh_collect.status()['running']:
+        return jsonify({'error': 'A collection is already running.'}), 409
+    slow = body.get('slow') if isinstance(body.get('slow'), bool) else None
+    if body.get('node'):
+        result = run_ssh_collect_task([str(body['node'])], slow=slow, manual=True)
+        if result.get('busy'):
+            return jsonify({'error': 'A collection is already running.'}), 409
+        return jsonify(result), 503 if result.get('error') else 200
+    socketio.start_background_task(run_ssh_collect_task, None, slow, True)
+    return jsonify({'started': True}), 202
+
+
+@app.route('/api/ssh/node/<path:name>')
+def api_ssh_node(name):
+    return jsonify(ssh_collect.node_details(name, hours=max(1, min(_hours_arg(24), 24 * 31))))
+
+
+@app.route('/api/ssh/snapshot/<int:snap_id>')
+def api_ssh_snapshot(snap_id):
+    # Logs and settings: behind the login when one is set (uci secrets are already removed).
+    if auth.enabled() and not auth.logged_in():
+        return jsonify({'error': 'Log in to read node logs and settings', 'login_required': True}), 401
+    snap = ssh_collect.snapshot(snap_id)
+    return jsonify(snap) if snap else (jsonify({'error': 'not found'}), 404)
+
+
 @app.route('/api/reports/link-potential')
 def api_link_potential():
     return jsonify(link_potential.report(hours=max(1, min(_hours_arg(24), 24 * 31))))
@@ -1558,7 +1624,8 @@ def api_channel_planner():
     Body: {site? | radios?: [...], band?: [low, high], widths?: [..] | {name: [..]},
     locked?: [...], move_clients?: bool, top?: N, compare?: "name freq width" lines,
     idle_off?: bool (default true: radios with no RF links are suggested off),
-    separate_sectors?: bool (default true: one channel per radio on a mast, as AREDN recommends)}"""
+    separate_sectors?: bool (default true: one channel per radio on a mast, as AREDN recommends),
+    protected?: [...] (default: the saved list, /api/channel-planner/protected)}"""
     body = request.get_json(silent=True) or {}
     radios = body.get('radios')
     if isinstance(radios, str):
@@ -1584,10 +1651,21 @@ def api_channel_planner():
         site=body.get('site'), radios=radios, band=band, widths=body.get('widths'),
         locked=locked, move_clients=body.get('move_clients', True) is not False,
         top=top, compare=body.get('compare') or None, idle_off=body.get('idle_off', True) is not False,
-        separate_sectors=body.get('separate_sectors', True) is not False)
+        separate_sectors=body.get('separate_sectors', True) is not False,
+        protected=body.get('protected') if 'protected' in body else None)
     if result.get('error'):
         return jsonify(result), 400
     return jsonify(result)
+
+
+@app.route('/api/channel-planner/protected', methods=['GET', 'POST'])
+def api_channel_planner_protected():
+    """Radios the planner protects by default (keep their channel, nothing in
+    range may share or overlap it). POST {radios: [...] | "a, b"} replaces the list."""
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        return jsonify({'radios': channel_planner.set_protected(body.get('radios') or [])})
+    return jsonify({'radios': channel_planner.get_protected()})
 # ---- end Channel Map ----
 # --- Link Watch routes ---
 @app.route('/api/reports/noise')
@@ -2157,6 +2235,27 @@ def api_report_unreachable():
             scope=request.args.get('scope', 'all'),
             link_type=request.args.get('link_type', 'all'),
             search=request.args.get('search', '')))
+    except reports.ReportError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/reports/uptime')
+def api_report_uptime():
+    """Node uptime % (uptime.py): start/end (local YYYY-MM-DDTHH:MM) or the
+    last `hours` (default 24), plus scope/link_type/search."""
+    try:
+        start = request.args.get('start')
+        end = request.args.get('end')
+        if start or end:
+            start_dt, end_dt = reports.parse_window(start, end)
+        else:
+            end_dt = datetime.now()
+            hours = min(max(request.args.get('hours', 24, type=float), 0.25), 24 * 32)
+            start_dt = end_dt - timedelta(hours=hours)
+        return jsonify(uptime.report(start_dt, end_dt,
+                                     scope=request.args.get('scope', 'all'),
+                                     link_type=request.args.get('link_type', 'all'),
+                                     search=request.args.get('search', '')))
     except reports.ReportError as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -3037,6 +3136,10 @@ def start_scheduler():
     wifi_survey.install(scheduler)
     # Round 4: extra node details from Prometheus (alarms after each snapshot).
     prom_source.install(scheduler, run_prometheus_task)
+    # Hourly: infrastructure links far below their potential.
+    link_potential.install(scheduler)
+    # Radio details over SSH from infrastructure nodes (once the key exists).
+    ssh_collect.install(scheduler, run_ssh_collect_task)
 
     scheduler.start()
     logger.info("Scheduler started")

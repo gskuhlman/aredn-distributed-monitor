@@ -203,17 +203,22 @@ def _to_int(value):
 
 
 def _parse_uptime_seconds(text):
-    """Parse AREDN's human uptime string ('1 days, 2:03:04' / '02:03:04')."""
+    """Parse AREDN's human uptime string ('8 days, 18:37', '1 days, 2:03:04',
+    '02:03:04', '0 days, 1:12'). AREDN sends hours:minutes; seconds are optional.
+    Zero is a real answer (just booted), unlike an unparseable string (None)."""
     if not text:
         return None
     total = 0
+    matched = False
     days_match = re.search(r'(\d+)\s*day', text)
     if days_match:
         total += int(days_match.group(1)) * 86400
-    hms = re.search(r'(\d+):(\d+):(\d+)', text)
+        matched = True
+    hms = re.search(r'(\d+):(\d{2})(?::(\d{2}))?', text)
     if hms:
-        total += int(hms.group(1)) * 3600 + int(hms.group(2)) * 60 + int(hms.group(3))
-    return total or None
+        total += int(hms.group(1)) * 3600 + int(hms.group(2)) * 60 + int(hms.group(3) or 0)
+        matched = True
+    return total if matched else None
 
 
 def build_node_observation(data, collector_id, collector_site, observed_at,

@@ -215,7 +215,7 @@ const WeatherPanel = {
                 ${this.linkRows(sum.temperature || [], [
                     ['r(temp)', r => this.num(r.temp_r, 2)], ['Range °C', r => this.num(r.temp_range_c)],
                     ['Below 0 °C drop', r => this.num(r.freezing_drop_db)]])}</details>
-            <p class="form-hint">Turn on "Weather" above the RF Stats or node page charts to overlay rain, temperature and wind.</p>`;
+            <p class="form-hint">Turn on "Weather" above the Links page or node page charts to overlay rain, temperature and wind.</p>`;
     }
 };
 

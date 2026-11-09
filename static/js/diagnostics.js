@@ -17,13 +17,15 @@ const DiagnosticsModule = {
     init() {
         if (this.initialized) return;
         this.initialized = true;
-        document.getElementById('diag-refresh')?.addEventListener('click', () => this.load());
-        document.getElementById('diag-hours')?.addEventListener('change', () => this.load());
+        document.getElementById('diag-refresh')?.addEventListener('click', () => this.load({ health: false }));
+        document.getElementById('diag-hours')?.addEventListener('change', () => this.load({ health: false }));
         document.getElementById('diag-status-filter')?.addEventListener('change', () => this.applyView());
         document.getElementById('diag-type-filter')?.addEventListener('change', () => this.applyView());
         document.getElementById('diag-infra-filter')?.addEventListener('change', () => this.applyView());
         document.getElementById('diag-sort')?.addEventListener('change', () => this.applyView());
         document.getElementById('mh-run')?.addEventListener('click', () => this.loadHealth());
+        document.getElementById('mh-hours')?.addEventListener('change', () => this.loadHealth());
+        document.getElementById('mh-search')?.addEventListener('input', () => this.applyView());
         document.getElementById('mh-severity')?.addEventListener('change', () => this.applyView());
         document.getElementById('mh-category')?.addEventListener('change', () => this.applyView());
         const search = document.getElementById('diag-node-filter');
@@ -32,7 +34,8 @@ const DiagnosticsModule = {
         }
     },
 
-    async load() {
+    /** Flapping/asymmetric tables (Links page), then Mesh Health unless `health` is false. */
+    async load({ health = true } = {}) {
         const hours = document.getElementById('diag-hours')?.value || 24;
         this.setStatus('Loading...');
         try {
@@ -57,11 +60,13 @@ const DiagnosticsModule = {
             this.setStatus('Failed to load');
             console.error('Diagnostics load error:', error);
         }
-        await this.loadHealth();
+        if (health) await this.loadHealth();
     },
 
     async loadHealth() {
-        const hours = document.getElementById('diag-hours')?.value || 24;
+        // Mesh Health is on the Status page with its own window and search;
+        // the Link Stability filter bar only applies to flaps and asymmetry.
+        const hours = document.getElementById('mh-hours')?.value || 24;
         const btn = document.getElementById('mh-run');
         const container = document.getElementById('mh-findings');
         if (btn) btn.disabled = true;
@@ -70,6 +75,7 @@ const DiagnosticsModule = {
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
             this.health = data;
+            document.dispatchEvent(new CustomEvent('mesh-health-loaded', { detail: data }));
             this.populateCategories(data.categories || {});
             this.applyView();
         } catch (error) {
@@ -247,13 +253,15 @@ const DiagnosticsModule = {
         return true;
     },
 
-    linkPasses(source, target, search, status, ctx) {
+    linkPasses(source, target, search, status, ctx, scope = 'all') {
         const matchesSearch = !search ||
             source.toLowerCase().includes(search) || target.toLowerCase().includes(search);
         if (!matchesSearch) return false;
-        if (status === 'all') return true;
-        // Keep the link if either endpoint matches the node status.
-        return this.nodeMatchesStatus(source, status, ctx) || this.nodeMatchesStatus(target, status, ctx);
+        // Keep the link if either endpoint matches the nodes filter, and either
+        // endpoint matches the node status.
+        const either = (value) => value === 'all'
+            || this.nodeMatchesStatus(source, value, ctx) || this.nodeMatchesStatus(target, value, ctx);
+        return either(scope) && either(status);
     },
 
     sortRows(rows, sortBy) {
@@ -282,6 +290,7 @@ const DiagnosticsModule = {
     linkTypeBucket(linkType) {
         const t = String(linkType || '').toUpperCase();
         if (t === 'RF') return 'rf';
+        if (t === 'DTD') return 'dtd';
         if (t === 'WIREGUARD' || t === 'WG') return 'wireguard';
         if (t === 'TUN' || t === 'TUNNEL' || t === 'VTUN') return 'tunnel';
         return null;
@@ -289,6 +298,9 @@ const DiagnosticsModule = {
 
     applyView() {
         const search = (document.getElementById('diag-node-filter')?.value || '').trim().toLowerCase();
+        // Which nodes comes from the shared filter bar (global-filter.js writes
+        // #diag-scope); the page's own select is node status only.
+        const scope = document.getElementById('diag-scope')?.value || 'all';
         const status = document.getElementById('diag-status-filter')?.value || 'all';
         const typeFilter = document.getElementById('diag-type-filter')?.value || 'all';
         const sortBy = document.getElementById('diag-sort')?.value || 'relevance';
@@ -304,7 +316,7 @@ const DiagnosticsModule = {
 
         const flaps = this.sortRows(
             this.flaps.filter(l =>
-                this.linkPasses(l.source_node, l.target_node, search, status, ctx)
+                this.linkPasses(l.source_node, l.target_node, search, status, ctx, scope)
                 && infraPasses(l)
                 && (typeFilter === 'all' || this.linkTypeBucket(l.link_type) === typeFilter)),
             sortBy
@@ -313,14 +325,18 @@ const DiagnosticsModule = {
         // type filter is "all" or "rf".
         const asym = this.sortRows(
             this.asym.filter(l =>
-                this.linkPasses(l.source_node, l.target_node, search, status, ctx)
+                this.linkPasses(l.source_node, l.target_node, search, status, ctx, scope)
                 && infraPasses(l)
                 && (typeFilter === 'all' || typeFilter === 'rf')),
             sortBy
         );
         this.renderFlaps(flaps);
         this.renderAsymmetry(asym);
-        this.renderHealth(search, status, ctx);
+        const mhSearch = (document.getElementById('mh-search')?.value || '').trim().toLowerCase();
+        // Mesh Health findings follow the shared bar's Nodes filter (a finding
+        // stays when any of its nodes matches).
+        const mhScope = (typeof GlobalFilter !== 'undefined') ? GlobalFilter.scope() : 'all';
+        this.renderHealth(mhSearch, mhScope, ctx);
     },
 
     renderFlaps(links) {

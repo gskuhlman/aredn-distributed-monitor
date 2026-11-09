@@ -46,7 +46,7 @@ const WifiScans = {
                 select.innerHTML = '';
                 this.setStatus('');
                 document.getElementById('ws-chart').innerHTML = `<p class="log-empty">No WiFi scans yet. Paste a radio's
-                    scan table (Diagnostics tab, WiFi Survey, Import) or scan a radio from there.</p>`;
+                    scan table (WiFi Survey above, Import) or scan a radio from there.</p>`;
                 document.getElementById('ws-table').innerHTML = '';
                 return;
             }

@@ -136,7 +136,7 @@ const SitePage = {
                     <td>${this.q(c.quality)} / ${this.q(c.rev_quality)}</td><td>${this.q(c.median_quality)}</td>
                     <td>${c.snr ?? '?'} / ${c.rev_snr ?? '?'} dB</td><td>${c.distance_km != null ? c.distance_km + ' km' : '-'}</td>
                     <td><a class="btn btn-small btn-secondary" href="/#diagnose/${encodeURIComponent(s.name)}/${encodeURIComponent(c.name)}"
-                        title="Open RF Stats and diagnose this pair">Diagnose</a></td></tr>`).join('')}</tbody></table></div></div>`;
+                        title="Open the Links page and diagnose this pair">Diagnose</a></td></tr>`).join('')}</tbody></table></div></div>`;
         }).join('');
     },
 
