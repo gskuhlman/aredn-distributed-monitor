@@ -20,6 +20,12 @@ a fixed script on stdin -- never anything typed by a user:
          chain, tx/rx bitrate with MCS, streams and width, retries, failures)
          and `ssh_survey_samples` (the in-use channel's cumulative active /
          busy / receive / transmit time and noise; busy % from deltas);
+         ath10k fw_reset_stats (firmware crashes / warm / cold restarts, kept
+         by the driver: reading it never asks the firmware) and ath10k
+         fw_stats (asks the firmware; a radio whose firmware doesn't answer
+         within the driver's 1 s logs "failed to request fw stats: -145"
+         each time, so after SSH_FW_STATS_BACKOFF_FAILS timeouts in a row it
+         is read only on slow runs until a read works again);
   slow   (every SSH_SLOW_HOURS, or on request) `iw phy`, ath10k fw_stats and
          ath9k ani/xmit/reset from debugfs when readable, the last 400 dmesg
          and 600 logread lines, the radio firmware (ath10k/ath11k version
@@ -66,6 +72,7 @@ import maintenance
 logger = logging.getLogger(__name__)
 TS_FMT = '%Y-%m-%d %H:%M:%S'
 MARK = '@@AREDNMON'
+import iface_traffic  # noqa: E402  (after MARK: its script uses it)
 EVENT_ALARM = 'radio_chain_alarm'
 EVENT_CLEARED = 'radio_chain_cleared'
 WATCH_RUNS = 2
@@ -90,10 +97,18 @@ for d in $(iw dev 2>/dev/null | awk '$1=="Interface"{{print $2}}'); do
   echo "{MARK} survey $d"; iw dev "$d" survey dump 2>&1
   echo "{MARK} info $d"; iw dev "$d" info 2>&1
 done
-for f in /sys/kernel/debug/ieee80211/*/ath10k/fw_stats; do [ -r "$f" ] && {{ echo "{MARK} fw_stats $f"; cat "$f" 2>&1; }}; done
+for f in /sys/kernel/debug/ieee80211/*/ath10k/fw_reset_stats; do [ -r "$f" ] && {{ echo "{MARK} fw_reset $f"; cat "$f" 2>&1; }}; done
+''' + iface_traffic.SCRIPT.format(mark=MARK)
+# fw_stats (counters for receive errors, missing ACKs, PHY resets) is read
+# every run unless the node is backed off (see the docstring), and kept as a
+# snapshot on slow runs.
+FW_STATS_SCRIPT = f'''for f in /sys/kernel/debug/ieee80211/*/ath10k/fw_stats; do [ -r "$f" ] && {{ echo "{MARK} fw_stats $f"; cat "$f" 2>&1; }}; done
 '''
-# fw_stats is read every run (counters for receive errors and missing ACKs)
-# and kept as a snapshot on slow runs.
+# The shell would exit at the end of stdin anyway; `exit` ends the session
+# right after the end marker so dropbear sees an orderly close.
+END_SCRIPT = f'''echo "{MARK} end"
+exit 0
+'''
 SLOW_SCRIPT = f'''echo "{MARK} phy"; iw phy 2>&1
 for f in /sys/kernel/debug/ieee80211/*/ath9k/ani /sys/kernel/debug/ieee80211/*/ath9k/xmit /sys/kernel/debug/ieee80211/*/ath9k/reset; do [ -r "$f" ] && {{ echo "{MARK} ath9k $f"; cat "$f" 2>&1; }}; done
 echo "{MARK} dmesg"; dmesg 2>&1 | tail -n 400
@@ -123,7 +138,9 @@ LOG_PATTERNS = [
 # Lines matched above that every node logs and that mean nothing: ath10k-ct
 # messages on each association, and our own SSH logins (dropbear).
 LOG_BENIGN = re.compile(r'failed to enable peer stats info: -95|pdev param 0 not supported|'
-                        r'Firmware lacks feature flag|dropbear\[', re.I)
+                        r'Firmware lacks feature flag|dropbear\[|'
+                        # our own fw_stats read timing out (ssh_status.fw_stats_fails)
+                        r'failed to request fw stats', re.I)
 
 # Station columns added after the first release (ALTER TABLE on old databases).
 STATION_EXTRA = (('connected_s', 'INTEGER'), ('beacon_loss', 'INTEGER'), ('rx_drop_misc', 'INTEGER'),
@@ -140,6 +157,9 @@ FW_FIELDS = {'Channel noise floor': 'noise_floor', 'Channel TX power': 'txpower_
              'MPDU errors (FCS, MIC, ENC)': 'rx_mpdu_errors', 'MPDU queued': 'tx_mpdus',
              'MPDUs receive no ACK': 'mpdu_no_ack', 'ppdu aggr count': 'ppdu_aggr', 'ppdu noack': 'ppdu_noack',
              'Excessive retries': 'excessive_retries', 'PDEV resets': 'pdev_resets'}
+# ath10k fw_reset_stats (driver counters since boot) -> ssh_fw_samples column.
+FW_RESET_FIELDS = {'fw_crash_counter': 'fw_crashes', 'fw_warm_reset_counter': 'fw_warm_resets',
+                   'fw_cold_reset_counter': 'fw_cold_resets'}
 
 _lock = threading.Lock()
 
@@ -202,8 +222,14 @@ def ensure_tables():
                 conn.execute(f'ALTER TABLE ssh_station_samples ADD COLUMN {col} {kind}')
         if 'rx_mpdus_stack' not in {r[1] for r in conn.execute('PRAGMA table_info(ssh_fw_samples)')}:
             conn.execute('ALTER TABLE ssh_fw_samples ADD COLUMN rx_mpdus_stack INTEGER')
+        have = {r[1] for r in conn.execute('PRAGMA table_info(ssh_fw_samples)')}
+        for col in FW_RESET_FIELDS.values():
+            if col not in have:
+                conn.execute(f'ALTER TABLE ssh_fw_samples ADD COLUMN {col} INTEGER')
         if 'severity' not in {r[1] for r in conn.execute('PRAGMA table_info(ssh_alarm_state)')}:
             conn.execute('ALTER TABLE ssh_alarm_state ADD COLUMN severity TEXT')
+        if 'fw_stats_fails' not in {r[1] for r in conn.execute('PRAGMA table_info(ssh_status)')}:
+            conn.execute('ALTER TABLE ssh_status ADD COLUMN fw_stats_fails INTEGER DEFAULT 0')
 
 
 def _exe(name):
@@ -499,6 +525,30 @@ def parse_fw_stats(text):
     return out
 
 
+def parse_fw_reset_stats(text):
+    """{fw_crashes, fw_warm_resets, fw_cold_resets} from ath10k fw_reset_stats
+    ('fw_crash_counter\t\t3'). A warm restart also happens on every normal
+    interface restart (AREDN's daily mesh restart, a settings change)."""
+    out = dict.fromkeys(FW_RESET_FIELDS.values())
+    for line in (text or '').splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] in FW_RESET_FIELDS and parts[1].isdigit():
+            out[FW_RESET_FIELDS[parts[0]]] = int(parts[1])
+    return out
+
+
+def fw_stats_failed(text):
+    """True when an fw_stats read gave no counters (the firmware didn't answer:
+    'cat: can't open ...: Operation timed out')."""
+    return not any(v is not None for v in parse_fw_stats(text).values())
+
+
+def node_script(slow, fw_stats=True):
+    """The fixed script for one session: the fast part, fw_stats unless backed
+    off (always on slow runs), the slow part on slow runs."""
+    return FAST_SCRIPT + (FW_STATS_SCRIPT if fw_stats or slow else '') + (SLOW_SCRIPT if slow else '') + END_SCRIPT
+
+
 def parse_coverage(phy_text):
     """{wiphy index: (coverage class, metres)} from `iw phy`
     ('Coverage class: 13 (up to 5850m)'): the radio's ACK window."""
@@ -582,13 +632,19 @@ def _peer_names(conn, node):
 def _status(conn, node):
     r = conn.execute('SELECT * FROM ssh_status WHERE node_name = ?', (node,)).fetchone()
     return dict(r) if r else {'node_name': node, 'last_try': None, 'last_ok': None, 'last_slow': None,
-                              'error': None, 'error_kind': None, 'fails': 0}
+                              'error': None, 'error_kind': None, 'fails': 0, 'fw_stats_fails': 0}
+
+
+STATUS_COLS = ('node_name', 'last_try', 'last_ok', 'last_slow', 'error', 'error_kind', 'fails', 'fw_stats_fails')
 
 
 def _save_status(conn, st):
-    conn.execute('INSERT OR REPLACE INTO ssh_status VALUES (?, ?, ?, ?, ?, ?, ?)',
-                 (st['node_name'], st['last_try'], st['last_ok'], st['last_slow'], st['error'],
-                  st['error_kind'], st['fails']))
+    conn.execute(f"INSERT OR REPLACE INTO ssh_status ({', '.join(STATUS_COLS)}) "
+                 f"VALUES ({', '.join('?' * len(STATUS_COLS))})", [st.get(c) for c in STATUS_COLS])
+
+
+def fw_stats_backed_off(st):
+    return (st.get('fw_stats_fails') or 0) >= config.SSH_FW_STATS_BACKOFF_FAILS
 
 
 def _due(st, now, manual):
@@ -613,7 +669,7 @@ def collect_node(node, slow=None, manual=False, now=None):
         return {'node': node, 'ok': False, 'skipped': True, 'error_kind': st['error_kind'], 'error': st['error']}
     slow = _slow_due(st, now) if slow is None else slow
     try:
-        code, out, err = _run_ssh(node, FAST_SCRIPT + (SLOW_SCRIPT if slow else '') + f'echo "{MARK} end"\n')
+        code, out, err = _run_ssh(node, node_script(slow, fw_stats=not fw_stats_backed_off(st)))
     except subprocess.TimeoutExpired:
         code, out, err = None, '', 'timed out'
     except OSError as exc:
@@ -632,7 +688,8 @@ def collect_node(node, slow=None, manual=False, now=None):
         return {'node': node, 'ok': False, 'error': st['error'], 'error_kind': kind,
                 'hint': ERROR_HINTS.get(kind)}
     received = time.time()
-    stations, surveys, snaps, infos, fws, eth, sysinfo, uci = [], [], [], [], [], [], {}, None
+    stations, surveys, snaps, infos, fws, eth, sysinfo, uci = [], [], [], [], {}, [], {}, None
+    fw_read = fw_ok = False
     for kind, arg, body in sections:
         if kind == 'station':
             stations += parse_station_dump(body, arg)
@@ -644,15 +701,26 @@ def collect_node(node, slow=None, manual=False, now=None):
             sysinfo = parse_sys(body)
         elif kind == 'eth':
             eth = parse_eth(body)
-        elif kind == 'fw_stats':
+        elif kind in ('fw_stats', 'fw_reset'):
             m = re.search(r'/(phy\d+)/', arg or '')
-            fws.append((m.group(1) if m else (arg or 'phy'), parse_fw_stats(body)))
+            row = fws.setdefault(m.group(1) if m else (arg or 'phy'), {})
+            if kind == 'fw_reset':
+                row.update(parse_fw_reset_stats(body))
+            else:
+                fw_read = True
+                fw_ok = fw_ok or not fw_stats_failed(body)
+                row.update({k: v for k, v in parse_fw_stats(body).items() if v is not None})
         if kind == 'uci':
             uci = parse_uci_settings(body)
         if kind in SLOW_KINDS and (slow or kind != 'fw_stats'):
             snaps.append((kind, arg or None, redact_uci(body) if kind == 'uci' else body))
+    for kind, _, body in snaps:
+        if kind == 'logread':
+            import syslog_rx
+            syslog_rx.ingest_logread(node, body)
     with database.get_connection() as conn:
         _store_extras(conn, node, now_s, sysinfo, received, eth, infos, fws, uci, snaps)
+        iface_traffic.store(conn, node, now_s, sections)
         names = _peer_names(conn, node)
         # ath10k lists four chain values on 2x2 radios (the SXTsq 5 ac: '-64 [-64, -65, -79, -79]');
         # keep the radio's receive chains (AREDN radios are 1x1 or 2x2 when its iw phy isn't known).
@@ -681,6 +749,8 @@ def collect_node(node, slow=None, manual=False, now=None):
                                            AND COALESCE(label, '') = ? ORDER BY timestamp DESC, id DESC LIMIT ?)''',
                          (node, kind, label or '', node, kind, label or '', config.SSH_SNAPSHOT_KEEP))
         st.update(last_try=now_s, last_ok=now_s, error=None, error_kind=None, fails=0)
+        if fw_read:
+            st['fw_stats_fails'] = 0 if fw_ok else (st.get('fw_stats_fails') or 0) + 1
         if slow:
             st['last_slow'] = now_s
         _save_status(conn, st)
@@ -710,10 +780,12 @@ def _store_extras(conn, node, now_s, sysinfo, received, eth, infos, fws, uci, sn
         conn.execute('INSERT OR REPLACE INTO ssh_radio_samples VALUES (?,?,?,?,?,?,?,?,?)',
                      (node, now_s, i['iface'], i['wiphy'], i['type'], i['frequency'], i['width'], i['center1'],
                       i['txpower_dbm']))
-    cols = list(FW_FIELDS.values())
-    for phy, v in fws:
+    cols = list(FW_FIELDS.values()) + list(FW_RESET_FIELDS.values())
+    for phy, v in fws.items():
+        if not any(v.get(c) is not None for c in cols):
+            continue
         conn.execute(f"INSERT OR REPLACE INTO ssh_fw_samples (node_name, timestamp, phy, {', '.join(cols)}) "
-                     f"VALUES ({', '.join('?' * (len(cols) + 3))})", [node, now_s, phy] + [v[c] for c in cols])
+                     f"VALUES ({', '.join('?' * (len(cols) + 3))})", [node, now_s, phy] + [v.get(c) for c in cols])
     phy = next((t for k, _, t in snaps if k == 'phy'), None)
     if not uci and conn.execute('SELECT 1 FROM ssh_settings WHERE node_name = ?', (node,)).fetchone() is None:
         # Never read: use the newest stored snapshots (uci is stored redacted,
@@ -759,6 +831,7 @@ def _prune(now):
         for table in ('ssh_station_samples', 'ssh_survey_samples', 'ssh_node_samples', 'ssh_eth_samples',
                       'ssh_radio_samples', 'ssh_fw_samples'):
             conn.execute(f'DELETE FROM {table} WHERE timestamp < ?', (cutoff,))
+        iface_traffic.cleanup(conn, cutoff)
 
 
 def install(scheduler, job):

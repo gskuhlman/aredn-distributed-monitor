@@ -258,3 +258,22 @@ def test_mesh_health_lists_resource_findings(mesh, monkeypatch):
     report = mesh_diagnostics.run_health_check(hours=24)
     res = [f for f in report['findings'] if f['category'] == 'resources']
     assert res and res[0]['severity'] == 'critical' and 'Low memory' in res[0]['title']
+
+
+def test_mesh_health_follows_nodes_filter(mesh, monkeypatch):
+    monkeypatch.setattr(config, 'PROMETHEUS_URL', 'http://prom.test:9090')
+    mesh.node('w0aa-col-sq', scan_depth=0)
+    mesh.node('kf0zz-home', scan_depth=1)
+    mesh.link('w0aa-col-sq', 'kf0zz-home', link_type='DtD')
+    now = datetime.now().replace(microsecond=0)
+    _store_series('w0aa-col-sq', now, 2, mem_total=128e6, mem_avail=4e6)
+    full = mesh_diagnostics.run_health_check(hours=24)
+    assert any(f['category'] == 'resources' for f in full['findings'])
+    # Not infrastructure: the Infrastructure filter drops it, summary counts follow.
+    scoped = mesh_diagnostics.run_health_check(hours=24, node_filter='infrastructure-connected')
+    assert not any(f['category'] == 'resources' for f in scoped['findings'])
+    assert scoped['summary']['total'] == len(scoped['findings']) == scoped['filter']['shown']
+    assert scoped['filter']['total'] == full['summary']['total']
+    mesh.infra('w0aa-col-sq', 'COL')
+    again = mesh_diagnostics.run_health_check(hours=24, node_filter='infrastructure-connected')
+    assert any(f['category'] == 'resources' for f in again['findings'])

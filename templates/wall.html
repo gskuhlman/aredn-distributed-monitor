@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesh Wall - AREDN Network Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="wall-body">
+    <div class="wall">
+        <header class="wall-head">
+            <div class="wall-title">AREDN mesh <span id="wall-headline" class="wall-headline"></span></div>
+            <div class="wall-right">
+                <span id="wall-storm" class="wall-storm" hidden></span>
+                <span id="wall-live" class="wall-live" title="Time since the last update">●</span>
+                <span id="wall-clock" class="wall-clock"></span>
+                <span class="wall-tz">{{ tz_abbr }}</span>
+            </div>
+        </header>
+        <section class="wall-agencies ag-tiles" id="wall-agencies"></section>
+        <div class="wall-grid">
+            <section class="wall-panel">
+                <h2>What's happening</h2>
+                <ul id="wall-ticker" class="wall-ticker"></ul>
+            </section>
+            <section class="wall-panel">
+                <h2>Mesh</h2>
+                <svg id="wall-plot" class="wall-plot" viewBox="0 0 600 400" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Located nodes and links"></svg>
+            </section>
+            <section class="wall-panel wall-tape-panel">
+                <h2>On the air, last 24 h <small>(infrastructure + neighbours)</small></h2>
+                <div id="wall-tape" class="wall-tape"></div>
+            </section>
+        </div>
+        <footer class="wall-foot">F = full screen · <a href="/">monitor</a> · <a href="/board/agencies">agencies</a></footer>
+    </div>
+    <script src="{{ url_for('static', filename='js/agencies.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/wall.js') }}"></script>
+</body>
+</html>

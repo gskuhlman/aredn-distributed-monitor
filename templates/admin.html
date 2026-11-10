@@ -14,6 +14,7 @@
                 <h1>Admin</h1>
             </div>
             <div class="header-controls">
+                <span class="tz-label" title="All times shown are local {{ tz_name }} time">{{ tz_label }}</span>
                 <span id="admin-auth-badge" class="form-hint"></span>
             </div>
         </header>
@@ -76,9 +77,21 @@
                 </div>
                 <div id="ds-nodes"></div>
             </section>
+
+            <section class="node-page-section">
+                <h2>Audit log <button id="au-refresh" class="btn btn-small btn-secondary">Refresh</button></h2>
+                <p class="form-hint">Every change made through this monitor (deletes, excludes, maintenance, rollouts, settings,
+                    password changes) with the client address and login session. Passwords, keys and tokens in a request are masked;
+                    login requests are never recorded.</p>
+                <div class="admin-form"><input id="au-q" class="form-input" placeholder="Search action, path, user, address"></div>
+                <div id="au-list"><p class="loading">Loading...</p></div>
+                <p id="au-rollup" class="form-hint"></p>
+            </section>
         </main>
     </div>
     <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
     <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/r7-util.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/admin-audit.js') }}"></script>
 </body>
 </html>

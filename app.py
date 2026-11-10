@@ -16,7 +16,7 @@ os.environ.setdefault('EVENTLET_NO_GREENDNS', 'yes')
 import eventlet
 eventlet.monkey_patch()
 
-from flask import Flask, render_template, jsonify, request, send_from_directory, abort
+from flask import Flask, render_template, jsonify, request, send_from_directory, abort, Response
 from flask_socketio import SocketIO, emit
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
@@ -93,6 +93,25 @@ import link_potential
 import ssh_collect
 import ssh_traffic
 import embeds
+# Round 7
+import rollup
+import audit
+import incidents
+import suppressions
+import acks
+import degradation
+import storm
+import noise_source
+import tunnels
+import tape
+import call_quality
+import iface_traffic
+import services_catalog
+import syslog_rx
+import boards
+import public_status
+import local_time
+import node_clock
 
 # Configure logging
 logging.basicConfig(
@@ -103,10 +122,13 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
+app.context_processor(local_time.template_globals)
 app.config['SECRET_KEY'] = 'aredn-monitor-secret-key'
 # Login for changes (auth.py): random per-install session key, and a guard
 # that asks for a login on actions once a password is set.
 auth.install(app)
+# Audit log of every change made through the API (audit.py).
+audit.install(app)
 
 # Initialize SocketIO
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
@@ -295,7 +317,9 @@ def scheduled_scan():
         # --- end Link Watch ---
 
         # Channel-plan rollouts, new-node welcomes and per-link alert rules, from what this scan stored.
-        for task in (rollout.check, welcome.after_scan, link_alerts.evaluate):
+        for task in (rollout.check, welcome.after_scan, link_alerts.evaluate,
+                     incidents.after_scan, tunnels.check, call_quality.check, noise_source.check,
+                     _sync_services_catalog):
             try:
                 for event in task():
                     socketio.emit('new_event', event)
@@ -413,6 +437,38 @@ def admin_page():
 @app.route('/report/club')
 def club_report_page():
     return render_template('club_report.html', r=club_report.build(request.args.get('days', 30, type=int)))
+
+
+def _club_status_args():
+    a = request.args
+    flag = lambda k: a.get(k) == '1' if a.get('set') else k != 'ips'  # VoIP and checklist on, IPs off by default
+    days = min(max(a.get('days', 30, type=int), 1), 31)
+    return days, flag('voip'), flag('hygiene'), flag('ips')
+
+
+@app.route('/export/club-status')
+def club_status_page():
+    """Preview of the club website status fragment with Copy / Download."""
+    days, voip, hyg, ips = _club_status_args()
+    frag = public_status.render(public_status.build(days, include_ips=ips), hygiene_details=hyg, voip=voip)
+    q = request.query_string.decode()
+    return render_template('club_status.html', fragment=frag, days=days, voip=voip, hygiene=hyg, ips=ips,
+                           download_url='/export/club-status.html?download=1' + ('&' + q if q else ''))
+
+
+@app.route('/export/club-status.html')
+def club_status_fragment():
+    """The bare HTML fragment (inline styles, no scripts) for pasting into a CMS."""
+    days, voip, hyg, ips = _club_status_args()
+    frag = public_status.render(public_status.build(days, include_ips=ips), hygiene_details=hyg, voip=voip)
+    headers = {'Content-Disposition': 'attachment; filename="mesh-status.html"'} if request.args.get('download') else {}
+    return Response(frag, mimetype='text/html', headers=headers)
+
+
+@app.route('/api/reports/club-status')
+def api_club_status():
+    days, _, _, ips = _club_status_args()
+    return jsonify(public_status.build(days, include_ips=ips))
 
 
 # ============ API Routes ============
@@ -673,6 +729,31 @@ def api_babel_view():
 def api_hygiene():
     return jsonify(hygiene.report(node=request.args.get('node') or None,
                                   include_inactive=request.args.get('inactive') == '1'))
+
+
+def run_node_clock_task(names=None):
+    try:
+        result = node_clock.check_all(names)
+        if result.get('aborted'):
+            logger.info("Node clock check skipped: %s", result['aborted'])
+        return result
+    except Exception as exc:
+        logger.error("Node clock check error: %s", exc)
+        return {'aborted': str(exc), 'checked': 0}
+
+
+@app.route('/api/node-clock')
+def api_node_clock():
+    return jsonify({'nodes': node_clock.states(), 'tz': local_time.label(),
+                    'max_offset_minutes': config.NODE_CLOCK_MAX_OFFSET_MINUTES})
+
+
+@app.route('/api/node-clock/run', methods=['POST'])
+def api_node_clock_run():
+    """Read the clock of every active node now, or of `{nodes: [...]}`."""
+    names = (request.get_json(silent=True) or {}).get('nodes') or None
+    result = run_node_clock_task(names)
+    return jsonify(result), (503 if result.get('aborted') == 'starting node unreachable' else 200)
 
 
 @app.route('/api/services/checks')
@@ -2423,7 +2504,7 @@ def api_report_mesh_health():
     """
     hours = request.args.get('hours', 24, type=int)
     try:
-        return jsonify(mesh_diagnostics.run_health_check(hours=hours))
+        return jsonify(mesh_diagnostics.run_health_check(hours=hours, node_filter=request.args.get('scope', 'all')))
     except Exception as e:
         logger.exception("Mesh health check failed")
         return jsonify({'error': str(e)}), 500
@@ -3099,11 +3180,285 @@ def api_notifications_log():
 # ============ End notifications ============
 
 
+# ============ Round 7: incidents, suppressions, acks, audit, history, boards ============
+
+def _author(data=None):
+    return (data or {}).get('author') or auth.current_user() or None
+
+
+def _hours_arg(default=24, cap=24 * 31):
+    return max(1, min(cap, request.args.get('hours', default, type=int) or default))
+
+
+@app.route('/api/incidents', methods=['GET'])
+def api_incidents():
+    return jsonify(incidents.list_incidents(request.args.get('status') or None,
+                                            request.args.get('days', 30, type=int),
+                                            request.args.get('limit', 200, type=int)))
+
+
+@app.route('/api/incidents', methods=['POST'])
+def api_incident_create():
+    data = request.get_json(silent=True) or {}
+    data.setdefault('owner', _author(data))
+    try:
+        return jsonify({'success': True, 'incident': incidents.create(data)})
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/incidents/<int:iid>', methods=['GET'])
+def api_incident_get(iid):
+    inc = incidents.get(iid)
+    return (jsonify(inc), 200) if inc else (jsonify({'error': 'Incident not found'}), 404)
+
+
+@app.route('/api/incidents/<int:iid>', methods=['PATCH'])
+def api_incident_update(iid):
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'success': True, 'incident': incidents.update(iid, data, _author(data))})
+    except LookupError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/incidents/<int:iid>', methods=['DELETE'])
+def api_incident_delete(iid):
+    return jsonify({'success': bool(incidents.delete(iid))})
+
+
+@app.route('/api/incidents/<int:iid>/notes', methods=['POST'])
+def api_incident_note(iid):
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'success': True, 'incident': incidents.add_note(iid, data.get('text'), _author(data))})
+    except LookupError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/incidents/<int:iid>/links', methods=['POST'])
+def api_incident_link(iid):
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'success': True, 'incident': incidents.link_ref(
+            iid, data.get('ref_type'), data.get('ref_id'), bool(data.get('remove')))})
+    except LookupError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/suppressions', methods=['GET'])
+def api_suppressions():
+    return jsonify(suppressions.list_all(request.args.get('all') in ('1', 'true')))
+
+
+@app.route('/api/suppressions', methods=['POST'])
+def api_suppression_create():
+    data = request.get_json(silent=True) or {}
+    data.setdefault('author', _author(data))
+    try:
+        return jsonify({'success': True, 'suppression': suppressions.create(data)})
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/suppressions/<int:sid>', methods=['PATCH'])
+def api_suppression_update(sid):
+    """{review_date, note?} = reviewed, keep until then; {end: true, note?} = stop suppressing."""
+    data = request.get_json(silent=True) or {}
+    try:
+        if data.get('end'):
+            item = suppressions.end(sid, data.get('note'))
+        else:
+            item = suppressions.review(sid, data.get('review_date'), data.get('note'))
+        return jsonify({'success': True, 'suppression': item})
+    except LookupError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/alerts')
+def api_alerts():
+    out = acks.list_alerts(_hours_arg(72), request.args.get('open') in ('1', 'true'))
+    out['escalation'] = notify.masked_config().get('escalation')
+    return jsonify(out)
+
+
+@app.route('/api/alerts/ack/<token>', methods=['POST'])
+def api_alert_ack_token(token):
+    """Acknowledge from the link in a notification (the token is the credential)."""
+    data = request.get_json(silent=True) or request.form or {}
+    alert = acks.acknowledge(token=token, by=(data.get('by') or auth.current_user() or 'link')[:60],
+                             note=(data.get('note') or '')[:300] or None)
+    return (jsonify({'success': True, 'alert': alert}), 200) if alert else (jsonify({'error': 'Unknown alert'}), 404)
+
+
+@app.route('/api/alerts/<int:ack_id>/ack', methods=['POST'])
+def api_alert_ack(ack_id):
+    data = request.get_json(silent=True) or {}
+    alert = acks.acknowledge(ack_id=ack_id, by=_author(data) or 'operator', note=data.get('note'))
+    return (jsonify({'success': True, 'alert': alert}), 200) if alert else (jsonify({'error': 'Unknown alert'}), 404)
+
+
+@app.route('/ack/<token>', methods=['GET', 'POST'])
+def ack_page(token):
+    alert = acks.by_token(token)
+    if alert is None:
+        abort(404)
+    done = None
+    if request.method == 'POST':
+        done = acks.acknowledge(token=token, by=(request.form.get('by') or 'link')[:60],
+                                note=(request.form.get('note') or '')[:300] or None)
+        alert = done or alert
+    return render_template('ack.html', alert=alert, token=token, done=bool(done))
+
+
+@app.route('/api/audit')
+def api_audit():
+    return jsonify({'entries': audit.list_entries(request.args.get('limit', 200, type=int),
+                                                  request.args.get('q') or None, request.args.get('since') or None)})
+
+
+@app.route('/api/admin/rollup')
+def api_rollup_status():
+    return jsonify(rollup.status())
+
+
+@app.route('/api/reports/degradation')
+def api_degradation():
+    days = max(3, min(90, request.args.get('days', config.DEGRADE_DAYS, type=int)))
+    return jsonify(degradation.report(days))
+
+
+@app.route('/api/weather/storm')
+def api_storm():
+    return jsonify(storm.assess())
+
+
+@app.route('/api/reports/noise-sources')
+def api_noise_sources():
+    return jsonify(noise_source.report(_hours_arg(24)))
+
+
+@app.route('/api/tunnels')
+def api_tunnels():
+    return jsonify(tunnels.report(_hours_arg(24)))
+
+
+@app.route('/api/reports/tape')
+def api_tape():
+    return jsonify(tape.report(_hours_arg(24), request.args.get('scope', 'all'), request.args.get('link_type', 'all'),
+                               request.args.get('search', ''), request.args.get('node') or None))
+
+
+@app.route('/api/reports/call-quality')
+def api_call_quality():
+    return jsonify(call_quality.report(_hours_arg(24), request.args.get('node') or None))
+
+
+@app.route('/api/ssh/iface/<path:node_name>')
+def api_ssh_iface(node_name):
+    return jsonify(iface_traffic.report(node_name.strip().lower(), _hours_arg(24, 24 * 14)))
+
+
+@app.route('/api/services/catalog')
+def api_services_catalog():
+    return jsonify(services_catalog.catalog(search=request.args.get('q', '')))
+
+
+@app.route('/api/devices')
+def api_devices():
+    return jsonify(services_catalog.devices(request.args.get('node') or None, request.args.get('q', '')))
+
+
+def _syslog_filters():
+    a = request.args
+    chips = [c for c in (a.get('chips') or '').split(',') if c]
+    return dict(node=a.get('node') or None, max_severity=a.get('severity'), program=a.get('program') or None,
+                chips=chips, q=a.get('q') or None, since=a.get('since') or None, until=a.get('until') or None,
+                source=a.get('source') or None, collapse=a.get('collapse') in ('1', 'true'),
+                limit=a.get('limit', 500, type=int))
+
+
+@app.route('/api/syslog')
+def api_syslog():
+    return jsonify(syslog_rx.query(**_syslog_filters()))
+
+
+@app.route('/api/syslog/rate')
+def api_syslog_rate():
+    return jsonify(syslog_rx.rate(_hours_arg(24), request.args.get('node') or None))
+
+
+@app.route('/api/syslog/status')
+def api_syslog_status():
+    return jsonify(syslog_rx.status())
+
+
+@app.route('/api/syslog/export.csv')
+def api_syslog_csv():
+    return Response(syslog_rx.csv_text(**_syslog_filters()), mimetype='text/csv',
+                    headers={'Content-Disposition': 'attachment; filename=syslog.csv'})
+
+
+@app.route('/api/syslog/import', methods=['POST'])
+def api_syslog_import():
+    """Import the SSH collector's logread snapshots of the last `hours` (default 48)."""
+    data = request.get_json(silent=True) or {}
+    return jsonify({'success': True, 'added': syslog_rx.import_snapshots(int(data.get('hours') or 48))})
+
+
+@app.route('/api/boards/agencies', methods=['GET'])
+def api_board_agencies():
+    return jsonify(boards.agencies())
+
+
+@app.route('/api/boards/agencies/config', methods=['GET', 'POST'])
+def api_board_agencies_config():
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        return jsonify({'success': True, 'agencies': boards.save_config(data.get('agencies'))})
+    return jsonify({'agencies': boards.agencies_config()})
+
+
+@app.route('/api/ticker')
+def api_ticker():
+    return jsonify(boards.ticker(request.args.get('limit', 20, type=int), _hours_arg(24)))
+
+
+@app.route('/board/agencies')
+def agencies_board_page():
+    return render_template('agencies.html')
+
+
+@app.route('/wall')
+def wall_page():
+    return render_template('wall.html')
+
+# ============ End Round 7 ============
+
+
+def _sync_services_catalog():
+    services_catalog.sync()
+    return []
+
+
 def cleanup_history_task():
     """Background task for cleaning up old history"""
     rf_stats.cleanup_old_history()
     capacity.cleanup()
     phones.cleanup()
+    for task in (audit.cleanup, acks.cleanup, syslog_rx.cleanup):
+        try:
+            task()
+        except Exception as exc:
+            logger.warning('%s cleanup failed: %s', task.__module__, exc)
 
 
 def start_scheduler():
@@ -3168,6 +3523,11 @@ def start_scheduler():
     link_potential.install(scheduler)
     # Radio details over SSH from infrastructure nodes (once the key exists).
     ssh_collect.install(scheduler, run_ssh_collect_task)
+    # Round 7: hourly scan-sample rollups, slow-degradation watch, storm forecast.
+    rollup.install(scheduler)
+    degradation.install(scheduler)
+    node_clock.install(scheduler, run_node_clock_task)
+    storm.install(scheduler)
 
     scheduler.start()
     logger.info("Scheduler started")
@@ -3201,6 +3561,9 @@ if __name__ == '__main__':
 
         # Notifications: listen to logged events (sends only when enabled)
         notify.install(socketio.start_background_task)
+        # Automatic incidents from starting-node events; syslog receiver (only when SYSLOG_ENABLED).
+        incidents.install()
+        syslog_rx.install(socketio.start_background_task)
 
         if auto_scan_enabled():
             logger.info("Initial scan scheduled to run in 5 seconds...")

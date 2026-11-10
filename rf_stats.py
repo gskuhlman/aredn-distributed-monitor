@@ -824,8 +824,9 @@ def process_iperf_queue(socketio=None):
 
 def cleanup_old_history():
     """Clean up old link history, node health, and link state-log records"""
-    hours = config.HISTORY_RETENTION_HOURS
-    count = database.cleanup_link_history(hours=hours)
+    # Raw link_history goes after LINK_HISTORY_RAW_DAYS, once rolled up into hourly rows (rollup.py).
+    import rollup
+    count = rollup.cleanup()['raw_deleted']
     if count > 0:
         logger.info(f"Cleaned up {count} old link history records")
 

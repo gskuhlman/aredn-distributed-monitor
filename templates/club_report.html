@@ -36,7 +36,7 @@
         <a href="/">Back to the monitor</a>
     </div>
     <h1>AREDN mesh report</h1>
-    <div class="muted">{{ r.start[:10] }} – {{ r.end[:10] }} ({{ r.days }} days) · generated {{ r.generated_at }}</div>
+    <div class="muted">{{ r.start[:10] }} – {{ r.end[:10] }} ({{ r.days }} days) · generated {{ r.generated_at }} {{ tz_abbr }} · all times {{ tz_label }}</div>
 
     {% set h = r.headline %}
     {% if h.error %}<p class="muted">Headline unavailable: {{ h.error }}</p>{% else %}

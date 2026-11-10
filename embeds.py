@@ -20,6 +20,7 @@ from html import escape
 
 import config
 import database
+import local_time
 import site_dashboard
 
 TS_FMT = '%Y-%m-%d %H:%M:%S'
@@ -199,5 +200,5 @@ def render(card, base_url, refresh=120, theme='light'):
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">{meta}
 <title>{escape(str(title))}</title><style>{css}</style></head><body>{body}
-<footer class="muted">Updated {escape(card['generated_at'][11:16])} · <a href="{full}" target="_blank" rel="noopener">Details</a>{grafana}</footer>
+<footer class="muted">Updated {escape(card['generated_at'][11:16])} {local_time.abbr(card['generated_at'])} · <a href="{full}" target="_blank" rel="noopener">Details</a>{grafana}</footer>
 </body></html>'''

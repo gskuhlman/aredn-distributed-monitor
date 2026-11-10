@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Club Status Page</title>
+<style>
+  body { margin: 0; background: #f6f8fa; color: #1f2328; font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+  .bar { position: sticky; top: 0; z-index: 2; background: #fff; border-bottom: 1px solid #d0d7de; padding: 10px 16px;
+         display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 13px; }
+  .bar h1 { font-size: 16px; margin: 0 12px 0 0; }
+  .bar label { display: inline-flex; gap: 4px; align-items: center; }
+  .bar button, .bar a.btn { font: inherit; padding: 5px 12px; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa;
+         color: inherit; cursor: pointer; text-decoration: none; }
+  .bar button.primary { background: #1f883d; border-color: #1f883d; color: #fff; }
+  .hint { color: #57606a; }
+  .preview { background: #fff; margin: 16px; padding: 16px; border: 1px solid #d0d7de; border-radius: 8px; }
+  textarea { position: absolute; left: -9999px; }
+</style>
+</head>
+<body>
+<form class="bar" method="get">
+  <h1>Club status page</h1>
+  <label>Availability over
+    <select name="days" onchange="this.form.submit()">
+      {% for d in (7, 14, 30) %}<option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }} days</option>{% endfor %}
+    </select></label>
+  <label><input type="checkbox" name="voip" value="1" {% if voip %}checked{% endif %} onchange="this.form.submit()"> VoIP</label>
+  <label><input type="checkbox" name="hygiene" value="1" {% if hygiene %}checked{% endif %} onchange="this.form.submit()"> Setup checklist</label>
+  <label><input type="checkbox" name="ips" value="1" {% if ips %}checked{% endif %} onchange="this.form.submit()"> Phone IPs</label>
+  <input type="hidden" name="set" value="1">
+  <button type="button" class="primary" id="copy">Copy HTML</button>
+  <a class="btn" href="{{ download_url }}">Download .html</a>
+  <span class="hint" id="msg">Paste into your CMS's HTML / source view. Inline styles only, no scripts.</span>
+</form>
+<div class="preview">{{ fragment | safe }}</div>
+<textarea id="src" readonly>{{ fragment }}</textarea>
+<script>
+document.getElementById('copy').addEventListener('click', async () => {
+  const text = document.getElementById('src').value;
+  const msg = document.getElementById('msg');
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) { const t = document.getElementById('src'); t.select(); document.execCommand('copy'); }
+  msg.textContent = 'Copied ' + text.length.toLocaleString() + ' characters of HTML.';
+});
+</script>
+</body>
+</html>

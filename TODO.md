@@ -161,36 +161,37 @@ arrive as many separate events.
 - [ ] 47. **Live check of Round 2 radio features.** With the operator present: find which WiFi scan
       page the firmware offers (#34), watch alignment readings update during a real adjustment
       (#31), and confirm service probes against a few known services (#36). Fix what differs.
-- [ ] 48. **History rollup.** Keep raw link_history scan samples for 7 days, then hourly
+- [x] 48. **History rollup.** Keep raw link_history scan samples for 7 days, then hourly
       aggregates (median/p10/p90 SNR, LQ, counters) for the rest of the retention, so the database
       stops growing ~15 MB/day and old Reports windows load faster.
+      *Built with 30 days of raw scan samples (`LINK_HISTORY_RAW_DAYS`), then hourly rollups kept 400 days (rollup.py).*
 - [ ] 49. **Second collector kit.** A setup page and script for another PC: `COLLECTOR_ID`,
       `COUCH_URL`, CouchDB replication check, clock skew check, and a "collectors agree?" view, so
       distributed status (#44) can say LOCALLY_UNREACHABLE / PARTITIONED / DOWN_CONFIRMED for real.
-- [ ] 50. **Audit log.** Who did what and when: deletes, excludes, maintenance, rollouts,
+- [x] 50. **Audit log.** Who did what and when: deletes, excludes, maintenance, rollouts,
       settings, password changes, with the client address and (once logged in) the session.
 
 ### Smarter alarms
 
-- [ ] 51. **Incident grouping.** Fold events that share one cause into one incident with a root
+- [x] 51. **Incident grouping.** Fold events that share one cause into one incident with a root
       cause and a timeline: starting node lost, a site where every radio dropped at once, a
       backbone link whose loss cut off the nodes behind it (spof). One notification per incident.
-- [ ] 52. **Site power outage detection.** All radios at a site unreachable together, then all
+- [x] 52. **Site power outage detection.** All radios at a site unreachable together, then all
       back with uptime reset = power, not RF. Say so in the alarm and in the weekly report.
-- [ ] 53. **Slow degradation watch.** Per RF link direction, the 30-day SNR/LQ trend and the gap
+- [x] 53. **Slow degradation watch.** Per RF link direction, the 30-day SNR/LQ trend and the gap
       to the link budget prediction (#26); flag links slipping a few dB per month (antenna
       moving, corrosion, foliage) before they fail.
-- [ ] 54. **Storm warning.** Use the NWS forecast with the measured rain fade per link (#13):
+- [x] 54. **Storm warning.** Use the NWS forecast with the measured rain fade per link (#13):
       "heavy rain expected at 18:00; these 3 links lost 6+ dB in the last rain".
-- [ ] 55. **Notification acknowledgement.** Ack an alert from the page or a link in the message;
+- [x] 55. **Notification acknowledgement.** Ack an alert from the page or a link in the message;
       unacknowledged critical alerts repeat or escalate to a second channel after N minutes.
 
 ### Troubleshooting
 
-- [ ] 56. **Noise source finder.** When noise jumps on several directional radios at about the
+- [x] 56. **Noise source finder.** When noise jumps on several directional radios at about the
       same time, intersect their antenna beams on the Channel Map to point at the likely
       interference area.
-- [ ] 57. **Tunnel health.** Per tunnel (legacy and WireGuard): up time, flaps, latency, which
+- [x] 57. **Tunnel health.** Per tunnel (legacy and WireGuard): up time, flaps, latency, which
       nodes reach the mesh only through it, and what loses the mesh if the internet goes down.
 - [ ] 58. **Firmware upgrade planner.** Order upgrades far ends first so no node loses its path
       mid-upgrade, tracked like a rollout (#29) and ticked off when the scanner sees the new
@@ -201,7 +202,7 @@ arrive as many separate events.
 - [ ] 59. **"Can I reach the mesh from here?"** Enter an address or click the map: nearest sites in
       view, predicted signal per sector from the link budget and terrain, suggested antenna and
       aim bearing. For new members.
-- [ ] 60. **Served-agency status board.** Big tiles for the EOC, hospital and other served
+- [x] 60. **Served-agency status board.** Big tiles for the EOC, hospital and other served
       agencies: their nodes and services, path health to them, uptime this month. For use during
       an activation.
 - [ ] 61. **Prometheus / Grafana export.** Read-only `/metrics` (node up, link SNR/LQ, noise, scan
@@ -265,6 +266,71 @@ captured); the metrics page has everything else, at ~60 KB a poll. Our own polli
 - [x] 74. **Resource alarms.** Memory low / falling for days (leak before a reboot), conntrack near
       limit, root FS full, using the metrics from #64.
       *Built: memory low / leak trend, flash, /tmp, CPU (prom_watch.py). No conntrack metric to alarm on.*
+
+## Round 5 ideas (2026-11-09, from MeshWatch at meshwatch.hosted-by.me)
+
+MeshWatch (v3.3.0) runs on ct-meshwatch behind kd0cgn-prox; its PyCams viewer (port 15001)
+pulls the RTSP camera streams seen crossing the MMC tunnel.
+
+- [ ] 75. **MeshWatch as a second collector.** It sees the mesh from kd0cgn-prox's side; feed its
+      node view into distributed_status (UP / LOCALLY_UNREACHABLE / DOWN_CONFIRMED). Needs a
+      readable API and the owner's agreement.
+- [x] 76. **24 h reachability tape per node.** One slot per poll (heard / degraded / missed) on
+      the Nodes list and node page, grouped by callsign, "N of M on the air" headline.
+- [x] 77. **Wall display for an operations room.** 1080p page: every node as a tile with its tape,
+      needs attention, activity, offline mesh plot; live indicator red when data stops, full
+      screen with F, wake lock, reloads itself after an update.
+      *Built: /wall (agency tiles, ticker, located mesh plot, 24 h tape, storm banner); every node as its own tile was left out in favour of the tape rows.*
+- [x] 78. **Continuous call quality per node.** Jitter (ping mdev) and E-model MOS from each poll,
+      alerts at jitter > 20 / 50 ms and MOS <= 3.6 / 3.1; pairs with Route Watch flapping.
+- [ ] 79. **Asterisk PBX status over SSH.** Active calls, registered vs unreachable peers
+      (`core show channels concise`, `pjsip show endpoints`), alert when a phone drops off.
+- [x] 80. **Interface traffic history.** Store per-interface counters (tunnel, WAN, DtD) from the
+      SSH fast runs and chart 1 h .. 7 d, e.g. how much went over the MMC tunnel this week.
+- [x] 81. **Services catalog and devices.** Every advertised service grouped by category
+      (cameras, weather, phones, Winlink, chat, time), "new today" badge, services that left
+      listed for a week; devices = hosts plugged into each node.
+- [x] 82. **Tunnel dependency.** RF native vs needs a tunnel vs off air summary (spof with tunnels
+      removed), plus an alert when a node loses its last RF path.
+- [ ] 83. **Smaller ones.** "Stored" state for retired nodes (not counted as down); "polled 5 min
+      ago, next in 4" in the header; CSV export of the node list; long-term rollups (monthly
+      kept forever); in-app "What changed" release notes; audit log of who changed what.
+- [ ] 84. **Cross-check MeshWatch's findings.** w0gq-col-rkt-w 86 failed TX/min and
+      w0gq-col-sq-2mmc 61/min; KD0CGN nodes with 25-40 ms jitter (route flapping?).
+
+## Round 6 ideas (2026-11-09, from NM5PB's CommDeck at meshnoc-nm5pb-lin01.local.mesh)
+
+CommDeck runs on NM5PB-VM: workstation (map, inventory by Babel metric, iperf3 box, services,
+attached devices), Link Health map, Log Viewer (syslog), Incidents, Changes, Alignment (login).
+
+- [x] 85. **Central syslog receiver.** Nodes send AREDN "Remote logging" (UDP 514) to us; log page
+      with node / level / service filters, WireGuard / Network / Auth / Kernel chips, collapse
+      duplicates, saved views, event-rate chart, CSV export. Today we only read logread over SSH daily.
+      *Built: Node Logs page fed by the SSH logread snapshots now; the UDP receiver exists but is off (`SYSLOG_ENABLED`) until nodes are pointed at this PC, since they send to NM5PB today.*
+- [x] 86. **Incidents.** An investigation record: symptoms, suspected cause, current action,
+      owner contacted, resolution, status open / monitoring / resolved / closed, timeline, linked
+      changes and notes (e.g. their INC-2026-0001 Collins South / KF9MT location, = our TODO).
+- [x] 87. **Suppressions with a review date.** Muting an alert for a node/link needs a reason and
+      a review date; "review overdue" banner when it passes (their CHG-2026-0001).
+- [x] 88. **Tunnel health.** Measured RTT and loss per tunnel, a tunnel-health % next to RF link
+      health, "tunnel health degraded" per pair (they flag KD0CGN-Prox -- W0GQ-MMC-AC2), and
+      dependency lines: "25 nodes, 32 services depend on this tunnel".
+- [x] 89. **Live insight ticker.** A scrolling line of the newest findings (high loss, low SNR
+      unchanged for 1 h, tunnel degraded, dependencies) for the Status page or wall (#77).
+- [ ] 90. **Weather radar overlay on the map** (RainViewer tiles) to set beside rain fade (#weather).
+- [ ] 91. **Quick iperf3 box** on the home page: pick two nodes, TCP/UDP, Run test, last result
+      and history (we have iPerf in Links; this is just faster to reach).
+- [ ] 92. **Our SSH collector in their syslog.** NM5PB's log viewer (all W0GQ nodes already send
+      syslog to nm5pb-lin01, 10.246.137.98:514) shows this PC (10.42.92.116) logging in to every
+      infrastructure radio every 15 min (3 dropbear lines each), sometimes "Connection reset by
+      peer". On W0GQ-COL-RKT-S every run also logs "ath10k_pci: failed to request fw stats: -145"
+      (timeout): stop reading fw_stats on a radio once it times out there (Collins South has
+      "ath10k mesh unresponsive" resets, their INC-2026-0001), and close sessions cleanly.
+- [ ] 93. **Read NM5PB's log collector instead of running our own** (#85), if it has an API and
+      NM5PB agrees. Seen there now: KD0CGN-Prox (starting node) babeld "kernel_route(ADD):
+      Operation not permitted" for 192.168.1.214/32 x191 in 3 h; KF0JCL-QTH lan_monitor ucode
+      exception (services.uc:259) every 2 min and a LAN WiFi client re-joining 78 times;
+      W0GQ-MMC-AC2 firewall reload on each guest-WiFi reconnect.
 
 ## Pending radio work (outside the app)
 

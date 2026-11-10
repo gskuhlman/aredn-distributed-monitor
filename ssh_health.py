@@ -26,6 +26,12 @@ Per radio / node:
               rounds down, so most links are a little past it (listed in
               Settings Drift); alarmed only while that link also has heavy retries
   clock       node clock SSH_CLOCK_SKEW_SECONDS+ off this PC's
+  fw_crash    the radio firmware crashed or needed a cold restart in the last
+              24 h (ath10k fw_reset_stats, kept by the driver; warm restarts
+              are not counted: every normal interface restart is one)
+  phy_resets  the firmware resets the radio's PHY SSH_PHY_RESETS_PER_HOUR+
+              times an hour (ath10k fw_stats "PDEV resets"; median of the
+              last intervals, or the last two reads of a backed-off radio)
   memory      MemAvailable under RESOURCE_MEM_LOW_PCT, only for nodes
               Prometheus doesn't cover (same events as prom_watch)
 """
@@ -51,12 +57,14 @@ KINDS = {
     'coverage': ('radio_distance_short', 'radio_distance_ok', 'ACK window covers the longest RF link again'),
     'clock': ('node_clock_skew', 'node_clock_ok', 'node clock back in step'),
     'memory': ('resource_alarm', 'resource_cleared', 'memory back to normal (SSH)'),
+    'fw_crash': ('radio_fw_crash', 'radio_fw_crash_cleared', 'no radio firmware crash in 24 h'),
+    'phy_resets': ('radio_phy_resets', 'radio_phy_resets_cleared', 'PHY resets back to normal'),
 }
 LINK_KINDS = {'chain', 'retries', 'reconnects'}
 # Mesh Health category per kind
 CATEGORY = {'chain': 'chains', 'retries': 'retries', 'reconnects': 'reconnects', 'interference': 'airtime',
             'rx_errors': 'rx_errors', 'ethernet': 'ethernet', 'coverage': 'radio_settings', 'clock': 'clock',
-            'memory': 'resources'}
+            'memory': 'resources', 'fw_crash': 'radio_log', 'phy_resets': 'radio_settings'}
 ADVICE = {
     'retries': ("Frames are resent far more than the SNR explains. Compare both directions and the missing-ACK "
                 "share: a short ACK window (radio distance), interference only the far end hears, or a "
@@ -72,6 +80,13 @@ ADVICE = {
                  "the location so LQM's distance is right; then watch the retries."),
     'clock': 'Check NTP on the node (Basic setup: time server) and that it can reach one.',
     'memory': 'Reboot to recover; look for a leaking package or too many services.',
+    'fw_crash': ('Note the firmware version and the dmesg lines around the crash (node page, Radio Details '
+                 '(SSH) snapshots). Repeated crashes are worth a report to the AREDN team; check power and '
+                 'temperature, and whether a WiFi scan or a settings change came just before.'),
+    'phy_resets': ("The radio's firmware keeps resetting its transmit/receive chain. On these radios it follows "
+                   "excessive retries: frames to a peer that stops answering (one-way or near-far link, wrong "
+                   "distance setting) or interference. Check the radio's weakest or one-way client first, then "
+                   "the channel (Spectrum, WiFi scan)."),
     'chain': ('Check the aim at both ends, then each chain: connectors, cables and water in either polarisation; '
               'swap the cables at the radio to see whether the weak chain follows the cable.'),
 }
@@ -392,6 +407,77 @@ def memory_conditions(conn, now):
     return bad, evaluated
 
 
+def _fw_rows(conn, since):
+    rows = {}
+    for r in conn.execute('SELECT * FROM ssh_fw_samples WHERE timestamp >= ? ORDER BY timestamp', (since,)):
+        rows.setdefault((r['node_name'], r['phy']), []).append(dict(r))
+    return rows
+
+
+def fw_crash_conditions(conn, now):
+    """Radios whose firmware crash or cold-restart counter went up in 24 h."""
+    rows = _fw_rows(conn, (now - timedelta(hours=24, minutes=5)).strftime(TS_FMT))
+    fresh = _fresh(now)
+    bad, evaluated = {}, set()
+    for (node, phy), rs in rows.items():
+        rs = [r for r in rs if r.get('fw_crashes') is not None]
+        if not rs or rs[-1]['timestamp'] < fresh:
+            continue
+        evaluated.add((node, phy))
+        crashes = cold = warm = 0
+        for p, q in zip(rs, rs[1:]):
+            if q['fw_crashes'] < p['fw_crashes']:
+                continue  # rebooted
+            crashes += q['fw_crashes'] - p['fw_crashes']
+            cold += max(0, (q['fw_cold_resets'] or 0) - (p['fw_cold_resets'] or 0))
+            warm += max(0, (q['fw_warm_resets'] or 0) - (p['fw_warm_resets'] or 0))
+        if crashes or cold:
+            last = rs[-1]
+            bad[(node, phy)] = (
+                f"{node}: radio firmware crashed {crashes} time(s)" + (f", {cold} cold restart(s)" if cold else '')
+                + (f" and {warm} warm restart(s)" if warm else '') + f" in 24 h ({last['fw_crashes']} crashes, "
+                f"{last['fw_warm_resets']} warm restarts since boot)", 'warning')
+    return bad, evaluated
+
+
+def phy_reset_rates(rows):
+    """[(t, resets/h, excessive retries/h)] from consecutive fw_stats reads."""
+    out = []
+    for d in _deltas(rows, ('pdev_resets',)):
+        if d['dt'] >= 300:
+            out.append((d['t'], 3600 * d['pdev_resets'] / d['dt'], None))
+    retries = {d['t']: 3600 * d['excessive_retries'] / d['dt'] for d in _deltas(rows, ('pdev_resets', 'excessive_retries'))}
+    return [(t, r, retries.get(t)) for t, r, _ in out]
+
+
+def phy_reset_conditions(conn, now):
+    """Radios resetting their PHY SSH_PHY_RESETS_PER_HOUR+ times an hour:
+    median over the last ALARM_SAMPLES intervals of the last 26 h (a radio
+    backed off to daily fw_stats reads is judged on its last two reads)."""
+    rows = _fw_rows(conn, (now - timedelta(hours=26)).strftime(TS_FMT))
+    bad, evaluated = {}, set()
+    for (node, phy), rs in rows.items():
+        rs = [r for r in rs if r.get('pdev_resets') is not None]
+        rates = phy_reset_rates(rs)[-sc.ALARM_SAMPLES:]
+        if not rates:
+            continue
+        evaluated.add((node, phy))
+        per_h = median(r for _, r, _ in rates)
+        if per_h >= config.SSH_PHY_RESETS_PER_HOUR:
+            retries = [x for _, _, x in rates if x is not None]
+            bad[(node, phy)] = (
+                f"{node}: the radio firmware resets its PHY about {per_h:.0f} times an hour"
+                + (f" ({median(retries):.0f} frames an hour given up after excessive retries)" if retries else '')
+                + (f"; read over {len(rates)} interval(s) to {rates[-1][0]}"), 'warning')
+    return bad, evaluated
+
+
+def fw_stats_status(conn):
+    """{node: timeouts in a row} for nodes whose fw_stats read is failing."""
+    sc.ensure_tables()
+    return {r[0]: r[1] for r in conn.execute('SELECT node_name, fw_stats_fails FROM ssh_status WHERE fw_stats_fails > 0')}
+
+
 def conditions(conn, now):
     """{kind: (bad {(node, subject): (detail, severity)}, evaluated keys)}."""
     retries = retry_conditions(conn, now)
@@ -399,7 +485,8 @@ def conditions(conn, now):
             'reconnects': reconnect_conditions(conn, now), 'interference': interference_conditions(conn, now),
             'rx_errors': rx_error_conditions(conn, now), 'ethernet': ethernet_conditions(conn, now),
             'coverage': coverage_conditions(conn, now, retries[0]), 'clock': clock_conditions(conn, now),
-            'memory': memory_conditions(conn, now)}
+            'memory': memory_conditions(conn, now), 'fw_crash': fw_crash_conditions(conn, now),
+            'phy_resets': phy_reset_conditions(conn, now)}
 
 
 # --------------------------------------------------------------- readers --

@@ -35,6 +35,9 @@
                         <div class="nav-group">
                             <div class="nav-group-title">Overview</div>
                             <button class="tab-btn active" data-tab="status">Status</button>
+                            <button class="tab-btn" data-tab="incidents" title="Outages and investigations with cause and timeline">Incidents</button>
+                            <a class="nav-link" href="/board/agencies">Agencies board</a>
+                            <a class="nav-link" href="/wall" target="_blank" rel="noopener">Wall display</a>
                         </div>
                         <div class="nav-group">
                             <div class="nav-group-title">Network</div>
@@ -49,6 +52,7 @@
                             <button class="tab-btn" data-tab="nodes">Nodes</button>
                             <button class="tab-btn" data-tab="rf-stats" title="RF links, pair diagnosis, and Link Stability (flapping and asymmetric links) at the bottom">Links</button>
                             <button class="tab-btn" data-tab="voip">VoIP &amp; Phones</button>
+                            <button class="tab-btn" data-tab="services" title="Every advertised service by category, and the devices on each node">Services &amp; Devices</button>
                         </div>
                         <div class="nav-group">
                             <div class="nav-group-title">Checks</div>
@@ -64,8 +68,10 @@
                             <div class="nav-group-title">History</div>
                             <button class="tab-btn" data-tab="reports">Reports</button>
                             <button class="tab-btn" data-tab="changes">Changes</button>
+                            <button class="tab-btn" data-tab="syslog" title="The nodes' own syslog">Node Logs</button>
                             <a class="nav-link" href="#/reports/weekly">Weekly report</a>
                             <a class="nav-link" href="/report/club" target="_blank" rel="noopener">Club report</a>
+                            <a class="nav-link" href="/export/club-status" target="_blank" rel="noopener" title="HTML for the club website">Club status page</a>
                         </div>
                         <div class="nav-group">
                             <div class="nav-group-title">Admin</div>
@@ -518,6 +524,23 @@
                     <div class="diag-scroll">
                         <!-- Needs-attention tiles (status-tiles.js); each opens its section or page -->
                         <div id="status-tiles" class="rpt-summary status-tiles" aria-label="What needs attention"></div>
+                        <div id="tk-banners"></div>
+                        <!-- What's happening (ticker.js) -->
+                        <div class="diag-section">
+                            <h3>What's Happening <small class="form-hint">open incidents, maintenance and the newest warnings and recoveries</small>
+                                <button id="tk-refresh" class="btn btn-secondary btn-small">Refresh</button></h3>
+                            <div id="tk-scroll" class="tk-scroll"></div>
+                            <ul id="tk-list" class="ticker-list"><li>Loading…</li></ul>
+                        </div>
+                        <!-- On the air tape (tape.js) -->
+                        <div class="diag-section">
+                            <h3>On the Air <small id="tape-headline" class="form-hint"></small></h3>
+                            <div class="mh-controls">
+                                <label class="checkbox-label"><input type="checkbox" id="tape-group" checked> Group by callsign</label>
+                                <button id="tape-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                            </div>
+                            <div id="tape-report"><p class="log-empty">Loading…</p></div>
+                        </div>
                         <div class="diag-section">
                             <h3>Mesh Health Check <small class="form-hint">network-wide problem finder, scoped by scan boundaries</small></h3>
                             <div class="mh-controls">
@@ -622,6 +645,8 @@
                         <button class="subnav-btn" data-sub="budget">Link Budget &amp; Potential</button>
                         <button class="subnav-btn" data-sub="ghosts">Ghost Trackers</button>
                         <button class="subnav-btn" data-sub="alerts">Link Alerts</button>
+                        <button class="subnav-btn" data-sub="degradation">Slow Degradation</button>
+                        <button class="subnav-btn" data-sub="noise">Noise Sources</button>
                     </nav>
                     <div class="diag-scroll subnav-body">
                         <div class="subpage" data-sub="sectors">
@@ -762,6 +787,28 @@
                                 <div id="la-clients" class="la-clients"></div>
                             </div>
                         </div>
+                        <div class="subpage" data-sub="degradation">
+                            <!-- Slow degradation (#53, rf-trends.js) -->
+                            <div class="diag-section">
+                                <h3>Slow Degradation <small class="form-hint">RF links losing a few dB a month (antenna moving, corrosion, foliage) before they fail</small></h3>
+                                <div class="mh-controls">
+                                    <select id="dg-days" class="form-input"><option value="14">14 days</option><option value="30" selected>30 days</option><option value="60">60 days</option><option value="90">90 days</option></select>
+                                    <button id="dg-run" class="btn btn-primary">Check trends</button>
+                                    <label class="checkbox-label"><input type="checkbox" id="dg-all"> Show every link</label>
+                                    <span id="dg-status" class="form-hint"></span>
+                                </div>
+                                <div id="dg-report"><p class="log-empty">Loading…</p></div>
+                                <p class="health-footnote">Daily medians from the hourly rollups; Theil-Sen slope, only since the last channel / antenna / power change on either end. A daily watch logs <code>link_degrading</code>.</p>
+                            </div>
+                        </div>
+                        <div class="subpage" data-sub="noise">
+                            <!-- Noise source finder (#56, rf-trends.js) -->
+                            <div class="diag-section">
+                                <h3>Noise Sources <small class="form-hint">radios whose noise floor jumped together, and where their beams cross</small>
+                                    <button id="ns-refresh" class="btn btn-secondary btn-small">Refresh</button></h3>
+                                <div id="ns-report"><p class="log-empty">Loading…</p></div>
+                            </div>
+                        </div>
                     </div>
                     </div>
                 </div>
@@ -776,6 +823,7 @@
                         <button class="subnav-btn" data-sub="path">Path View</button>
                         <button class="subnav-btn" data-sub="spof">Single Points of Failure</button>
                         <button class="subnav-btn" data-sub="babel">Babel Costs</button>
+                        <button class="subnav-btn" data-sub="tunnels">Tunnels</button>
                     </nav>
                     <div class="diag-scroll subnav-body">
                         <div class="subpage" data-sub="route-watch">
@@ -844,6 +892,18 @@
                                 </div>
                                 <div id="bv-report"><p class="log-empty">Press Check Babel costs to run.</p></div>
                                 <div id="bv-detail"></div>
+                            </div>
+                        </div>
+                        <div class="subpage" data-sub="tunnels">
+                            <!-- Tunnel health and dependency (#57/#82/#88, tunnels.js) -->
+                            <div class="diag-section">
+                                <h3>Tunnels <small class="form-hint">up time, RTT, loss and health per tunnel, and what depends on them</small></h3>
+                                <div class="mh-controls">
+                                    <label class="checkbox-label"><input type="checkbox" id="tn-all"> Show every tunnel</label>
+                                    <button id="tn-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                    <span id="tn-status" class="form-hint"></span>
+                                </div>
+                                <div id="tn-report"><p class="log-empty">Loading…</p></div>
                             </div>
                         </div>
                     </div>
@@ -956,7 +1016,133 @@
                                 <span id="notify-badge" class="notify-badge"></span></h3>
                             <div id="notify-panel"><p class="log-empty">Loading…</p></div>
                         </div>
+                        <!-- Suppressions, acknowledgement, escalation (#55/#87, alert-handling.js) -->
+                        <div class="diag-section">
+                            <h3>Suppressions <small class="form-hint">mute one node or link, with a reason and a date to review it</small></h3>
+                            <div id="sup-banner"></div>
+                            <div id="sup-list"><p class="log-empty">Loading…</p></div>
+                            <div class="mh-controls">
+                                <input id="sup-node" class="form-input" placeholder="Node">
+                                <input id="sup-peer" class="form-input" placeholder="Peer (link only)">
+                                <input id="sup-types" class="form-input" placeholder="Event types (empty = all)">
+                                <input id="sup-reason" class="form-input" placeholder="Reason (required)">
+                                <label>Review by <input id="sup-review" type="date" class="form-input"></label>
+                                <button id="sup-add" class="btn btn-primary">Add suppression</button>
+                                <label class="checkbox-label"><input type="checkbox" id="sup-ended"> Show ended</label>
+                                <span id="sup-msg" class="form-hint"></span>
+                            </div>
+                        </div>
+                        <div class="diag-section">
+                            <h3>Alerts Sent <small id="al-count" class="form-hint"></small></h3>
+                            <div class="mh-controls"><label class="checkbox-label"><input type="checkbox" id="al-open"> Only unacknowledged</label></div>
+                            <div id="al-list"><p class="log-empty">Loading…</p></div>
+                        </div>
+                        <div class="diag-section">
+                            <h3>Escalation <small class="form-hint">repeat unacknowledged alerts, then send them to another channel</small></h3>
+                            <div class="mh-controls">
+                                <label class="checkbox-label"><input type="checkbox" id="esc-enabled"> On</label>
+                                <label>For <select id="esc-sev" class="form-input"><option value="critical">critical</option><option value="warning">warning and critical</option></select></label>
+                                <label>repeat every <input id="esc-repeat" type="number" min="0" class="form-input lp-num"> min</label>
+                                <label>up to <input id="esc-max" type="number" min="0" class="form-input lp-num"> times</label>
+                                <label>escalate after <input id="esc-after" type="number" min="0" class="form-input lp-num"> min to</label>
+                                <span id="esc-channels"></span>
+                            </div>
+                            <div class="mh-controls">
+                                <label>Acknowledge link base <input id="esc-base" class="form-input" placeholder="http://this-pc:5000 (empty = this PC's name)"></label>
+                                <button id="esc-save" class="btn btn-primary">Save escalation</button>
+                                <span id="esc-msg" class="form-hint"></span>
+                            </div>
+                            <p class="health-footnote">Each sent alert carries an Acknowledge link. Acknowledging (here or from the link) stops repeats and escalation; a recovery acknowledges it too.</p>
+                        </div>
                         <!-- End notifications -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Incidents View (incidents.js) -->
+            <div id="incidents-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="diag-scroll">
+                        <div class="diag-section">
+                            <h3>Incidents <small class="form-hint">one record per outage or investigation: cause, timeline, what was done</small></h3>
+                            <div class="mh-controls">
+                                <select id="inc-status-filter" class="form-input">
+                                    <option value="">All (90 days)</option><option value="active" selected>Open + monitoring</option>
+                                    <option value="open">Open</option><option value="monitoring">Monitoring</option>
+                                    <option value="resolved">Resolved</option><option value="closed">Closed</option>
+                                </select>
+                                <button id="inc-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                <span id="inc-counts" class="form-hint"></span>
+                            </div>
+                            <div id="inc-list"><p class="log-empty">Loading…</p></div>
+                            <details class="health-footnote">
+                                <summary>Open an investigation</summary>
+                                <div class="inc-fields">
+                                    <label>Title <input id="inc-new-title" class="form-input" placeholder="Collins South: kf9mt one-way"></label>
+                                    <label>Nodes <input id="inc-new-nodes" class="form-input" placeholder="w0gq-col-rkt-s kf9mt-home-litebeam"></label>
+                                    <label>Symptoms <textarea id="inc-new-symptoms" class="form-input" rows="2"></textarea></label>
+                                </div>
+                                <div class="mh-controls"><button id="inc-new" class="btn btn-primary">Open incident</button><span id="inc-new-status" class="form-hint"></span></div>
+                            </details>
+                            <p class="form-hint">Automatic incidents: starting node lost (one incident instead of every node going down), every radio at a site down together
+                                (power when they come back rebooted, else network), nodes cut off behind one backbone link, or several nodes down together.
+                                Their notifications go out once per incident; the members' own alarms are held while it is open.</p>
+                        </div>
+                        <div id="inc-detail"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Services & Devices View (services-catalog.js) -->
+            <div id="services-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="diag-scroll">
+                        <div class="mh-controls">
+                            <input id="svc-q" class="form-input" placeholder="Search services, nodes, addresses…">
+                            <button id="svc-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                            <span id="svc-status" class="form-hint"></span>
+                        </div>
+                        <div id="svc-catalog"><p class="log-empty">Loading…</p></div>
+                        <div class="diag-section">
+                            <h3>Devices <small class="form-hint">hosts on each node's LAN, from the mesh host list</small></h3>
+                            <div id="svc-devices"><p class="log-empty">Loading…</p></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Node Logs View (syslog.js) -->
+            <div id="syslog-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="diag-scroll">
+                        <div class="diag-section">
+                            <h3>Node Logs <small class="form-hint">the nodes' own syslog</small></h3>
+                            <p id="sl-receiver" class="form-hint"></p>
+                            <div class="mh-controls">
+                                <input id="sl-node" class="form-input" placeholder="Node(s), comma separated">
+                                <select id="sl-severity" class="form-input">
+                                    <option value="">All levels</option><option value="3">Errors and worse</option>
+                                    <option value="4">Warnings and worse</option><option value="5">Notice and worse</option><option value="6">Info and worse</option>
+                                </select>
+                                <input id="sl-program" class="form-input" placeholder="Program">
+                                <input id="sl-q" class="form-input" placeholder="Text">
+                                <select id="sl-source" class="form-input"><option value="">Any source</option><option value="udp">Syslog receiver</option><option value="ssh">SSH logread</option></select>
+                                <select id="sl-hours" class="form-input"><option value="1">1 h</option><option value="6">6 h</option><option value="24" selected>24 h</option><option value="72">3 days</option><option value="168">7 days</option><option value="744">31 days</option></select>
+                                <label class="checkbox-label"><input type="checkbox" id="sl-collapse" checked> Collapse repeats</label>
+                                <button id="sl-run" class="btn btn-primary">Show logs</button>
+                            </div>
+                            <div id="sl-chips" class="syslog-chips"></div>
+                            <div class="mh-controls">
+                                <select id="sl-views" class="form-input"></select>
+                                <input id="sl-view-name" class="form-input" placeholder="View name">
+                                <button id="sl-save-view" class="btn btn-secondary btn-small">Save view</button>
+                                <button id="sl-csv" class="btn btn-secondary btn-small">Export CSV</button>
+                                <button id="sl-import" class="btn btn-secondary btn-small">Import SSH logread now</button>
+                                <span id="sl-status" class="form-hint"></span>
+                            </div>
+                            <div class="chart-container" style="height:160px"><canvas id="sl-rate"></canvas></div>
+                            <div id="sl-list"><p class="log-empty">Loading…</p></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1640,6 +1826,16 @@
                                 </div>
                             </details>
                         </div>
+                        <!-- Continuous call quality (#78, call-quality.js) -->
+                        <div class="diag-section">
+                            <h3>Call Quality per Node <small class="form-hint">jitter and estimated MOS from this PC to each node, from the ping rounds</small></h3>
+                            <div class="mh-controls">
+                                <label class="checkbox-label"><input type="checkbox" id="cq-all"> Show all nodes</label>
+                                <button id="cq-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                <span id="cq-status" class="form-hint"></span>
+                            </div>
+                            <div id="cq-report"><p class="log-empty">Loading…</p></div>
+                        </div>
                         <div class="diag-section">
                             <h3>Call quality <small class="form-hint">live end-to-end test between two endpoints</small></h3>
                             <div id="voip-result"><p class="log-empty">Pick a source and target endpoint, then Run Call Test.</p></div>
@@ -1832,6 +2028,7 @@
                 <span id="footer-scan-status" class="scan-status"></span>
             </div>
             <div class="footer-right">
+                <span class="tz-label" title="All times shown are local {{ tz_name }} time">{{ tz_label }}</span>
                 <span>Next scan: <span id="footer-countdown">--</span></span>
                 <span>Last scan: <span id="footer-last-scan">Never</span></span>
             </div>
@@ -1975,5 +2172,15 @@
     <script src="{{ url_for('static', filename='js/geo-map-extras.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-potential.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-alerts.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/r7-util.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ticker.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tape.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/incidents.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/syslog.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/services-catalog.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tunnels.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/rf-trends.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/call-quality.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/alert-handling.js') }}"></script>
 </body>
 </html>

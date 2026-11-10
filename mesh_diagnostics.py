@@ -1041,7 +1041,8 @@ def _check_ssh(f, scope, hours):
     import ssh_health
     titles = {'chain': 'Chain / stream problem', 'retries': 'Heavy retries', 'reconnects': 'Link reconnects',
               'interference': 'Airtime used by others', 'rx_errors': 'Receive errors', 'ethernet': 'Ethernet port',
-              'coverage': 'ACK window shorter than the link', 'clock': 'Node clock off', 'memory': 'Memory low'}
+              'coverage': 'ACK window shorter than the link', 'clock': 'Node clock off', 'memory': 'Memory low',
+              'fw_crash': 'Radio firmware crash', 'phy_resets': 'Radio PHY resets'}
     for a in ssh_collect.active_alarms():
         kind = a['kind']
         if a['node_name'] not in scope or kind not in ssh_health.KINDS:
@@ -1064,8 +1065,14 @@ def _check_ssh(f, scope, hours):
               {'lines': x['lines'], 'source': 'ssh'})
 
 
-def run_health_check(hours=24):
-    """Diagnose the in-scope mesh and return a findings report."""
+def run_health_check(hours=24, node_filter='all'):
+    """Diagnose the in-scope mesh and return a findings report.
+
+    `node_filter` is the shared filter bar's Nodes value (reports.resolve_scope:
+    all, infrastructure[-connected], selected[-connected], ...): the whole mesh
+    is still checked, then only findings naming a node in that set are kept,
+    and the summary counts those.
+    """
     hours = max(1, min(int(hours or 24), 24 * 30))
     nodes = database.get_all_nodes()
     nodes_by_name = {n['name']: n for n in nodes}
@@ -1161,6 +1168,14 @@ def run_health_check(hours=24):
         logger.warning("Mesh health channel check failed: %s", exc)
 
     findings = sorted(f.items, key=lambda x: (SEVERITY_ORDER.get(x['severity'], 9), x['category'], x['subject']))
+    total_unfiltered = len(findings)
+    node_filter = node_filter or 'all'
+    if node_filter != 'all':
+        import reports
+        with database.get_connection() as conn:
+            allowed = reports.resolve_scope(conn, node_filter)
+        if allowed is not None:
+            findings = [x for x in findings if any(n in allowed for n in (x.get('nodes') or []))]
     by_severity = defaultdict(int)
     by_category = defaultdict(int)
     for item in findings:
@@ -1178,6 +1193,7 @@ def run_health_check(hours=24):
             'boundaries': boundaries,
             'out_of_scope_active': out_of_scope,
         },
+        'filter': {'scope': node_filter, 'shown': len(findings), 'total': total_unfiltered},
         'key_nodes': sorted(key_nodes, key=lambda n: -len(impact[n])),
         'summary': {
             'total': len(findings),

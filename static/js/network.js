@@ -1707,6 +1707,23 @@ const EVENT_ICONS = {
     'radio_interference_cleared': { icon: '&#128246;', label: 'Airtime Normal', class: 'event-success' },
     'radio_rx_errors': { icon: '&#9888;', label: 'Receive Errors', class: 'event-warning' },
     'radio_rx_errors_cleared': { icon: '&#9888;', label: 'Receive Errors Normal', class: 'event-success' },
+    'radio_fw_crash': { icon: '&#128165;', label: 'Radio Firmware Crash', class: 'event-warning' },
+    'radio_fw_crash_cleared': { icon: '&#128165;', label: 'Radio Firmware Stable', class: 'event-success' },
+    'radio_phy_resets': { icon: '&#128260;', label: 'Radio PHY Resets', class: 'event-warning' },
+    'radio_phy_resets_cleared': { icon: '&#128260;', label: 'PHY Resets Normal', class: 'event-success' },
+    'incident_opened': { icon: '&#128680;', label: 'Incident Opened', class: 'event-error' },
+    'incident_resolved': { icon: '&#9989;', label: 'Incident Resolved', class: 'event-success' },
+    'link_degrading': { icon: '&#128201;', label: 'Link Slowly Degrading', class: 'event-warning' },
+    'link_degrading_cleared': { icon: '&#128200;', label: 'Link Trend Normal', class: 'event-success' },
+    'storm_warning': { icon: '&#9928;', label: 'Storm Warning', class: 'event-warning' },
+    'storm_warning_cleared': { icon: '&#9728;', label: 'Storm Warning Over', class: 'event-success' },
+    'noise_source': { icon: '&#128225;', label: 'Noise Source', class: 'event-warning' },
+    'tunnel_degraded': { icon: '&#128279;', label: 'Tunnel Degraded', class: 'event-warning' },
+    'tunnel_restored': { icon: '&#128279;', label: 'Tunnel Healthy', class: 'event-success' },
+    'rf_path_lost': { icon: '&#128225;', label: 'Lost Last RF Path', class: 'event-warning' },
+    'rf_path_restored': { icon: '&#128225;', label: 'RF Path Back', class: 'event-success' },
+    'call_quality_poor': { icon: '&#128222;', label: 'Call Quality Poor', class: 'event-warning' },
+    'call_quality_ok': { icon: '&#128222;', label: 'Call Quality OK', class: 'event-success' },
     'ethernet_problem': { icon: '&#128268;', label: 'Ethernet Port Problem', class: 'event-warning' },
     'ethernet_cleared': { icon: '&#128268;', label: 'Ethernet Port OK', class: 'event-success' },
     'radio_distance_short': { icon: '&#128207;', label: 'ACK Window Too Short', class: 'event-warning' },
@@ -1833,7 +1850,8 @@ function addEventToLog(event) {
         node_name: event.node,
         details: event.details,
         severity: event.severity,
-        timestamp: new Date().toISOString()
+        // Local time, like the server's timestamps (YYYY-MM-DD HH:MM:SS).
+        timestamp: new Date().toLocaleString('sv-SE')
     });
 
     // Keep only last 200 events in memory

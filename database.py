@@ -5,7 +5,7 @@ SQLite database setup and CRUD operations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 import config
 
@@ -21,6 +21,15 @@ def _parse_local_timestamp(timestamp):
         return datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
     except (TypeError, ValueError):
         return None
+
+
+def _utc_to_local(value):
+    """'YYYY-MM-DD HH:MM:SS' in UTC -> the same instant in local time, or None."""
+    try:
+        dt = datetime.strptime(str(value)[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return dt.astimezone().strftime('%Y-%m-%d %H:%M:%S')
 
 
 def get_db_path():
@@ -113,9 +122,9 @@ def init_db():
                 quality INTEGER DEFAULT 0,
                 snr INTEGER,
                 distance INTEGER,
-                first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                stable_since DATETIME DEFAULT CURRENT_TIMESTAMP,
+                first_seen DATETIME DEFAULT (datetime('now', 'localtime')),
+                last_seen DATETIME DEFAULT (datetime('now', 'localtime')),
+                stable_since DATETIME DEFAULT (datetime('now', 'localtime')),
                 drop_count INTEGER DEFAULT 0,
                 status TEXT DEFAULT 'good',
                 UNIQUE(source_node, target_node)
@@ -146,7 +155,7 @@ def init_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS selected_nodes (
                 node_name TEXT PRIMARY KEY,
-                selected_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                selected_at DATETIME DEFAULT (datetime('now', 'localtime'))
             )
         ''')
 
@@ -157,7 +166,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS infrastructure_nodes (
                 node_name TEXT PRIMARY KEY,
                 site TEXT,
-                marked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                marked_at DATETIME DEFAULT (datetime('now', 'localtime'))
             )
         ''')
 
@@ -176,7 +185,7 @@ def init_db():
                 source TEXT NOT NULL DEFAULT 'manual',
                 author TEXT,
                 event_id INTEGER UNIQUE,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT (datetime('now', 'localtime'))
             )
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_change_log_node ON change_log(node_name, timestamp)')
@@ -190,7 +199,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS scan_boundaries (
                 node_name TEXT PRIMARY KEY,
                 mode TEXT NOT NULL DEFAULT 'exclude',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT (datetime('now', 'localtime'))
             )
         ''')
 
@@ -200,7 +209,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS node_tags (
                 node_name TEXT NOT NULL,
                 tag TEXT NOT NULL,
-                tagged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                tagged_at DATETIME DEFAULT (datetime('now', 'localtime')),
                 PRIMARY KEY (node_name, tag)
             )
         ''')
@@ -211,7 +220,7 @@ def init_db():
                 node_name TEXT PRIMARY KEY,
                 x REAL NOT NULL,
                 y REAL NOT NULL,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                updated_at DATETIME DEFAULT (datetime('now', 'localtime'))
             )
         ''')
 
@@ -219,7 +228,7 @@ def init_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                timestamp DATETIME DEFAULT (datetime('now', 'localtime')),
                 event_type TEXT NOT NULL,
                 node_name TEXT,
                 details TEXT,
@@ -450,6 +459,16 @@ def init_db():
             )
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_voip_routes_session ON voip_routes(session_id, ts, direction, hop)')
+
+        # change_log.created_at used SQLite's CURRENT_TIMESTAMP (UTC) until 2026-11,
+        # while every other stored time is local: convert the old rows once.
+        if not cursor.execute("SELECT 1 FROM settings WHERE key = 'created_at_local'").fetchone():
+            for row_id, value in cursor.execute('SELECT id, created_at FROM change_log '
+                                                'WHERE created_at IS NOT NULL').fetchall():
+                local = _utc_to_local(value)
+                if local:
+                    cursor.execute('UPDATE change_log SET created_at = ? WHERE id = ?', (local, row_id))
+            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('created_at_local', '1')")
 
 
 def delete_node(name):

@@ -71,7 +71,10 @@ const DiagnosticsModule = {
         const container = document.getElementById('mh-findings');
         if (btn) btn.disabled = true;
         try {
-            const resp = await fetch(`/api/reports/mesh-health?hours=${encodeURIComponent(hours)}`);
+            // The shared filter bar's Nodes value scopes the findings on the server,
+            // so the list, the counts and the Status tiles agree.
+            const scope = (typeof GlobalFilter !== 'undefined') ? GlobalFilter.scope() : 'all';
+            const resp = await fetch(`/api/reports/mesh-health?hours=${encodeURIComponent(hours)}&scope=${encodeURIComponent(scope)}`);
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
             this.health = data;
@@ -110,6 +113,7 @@ const DiagnosticsModule = {
             scopeEl.textContent = `Seed ${scope.seed || 'unknown'} · ${scope.nodes_in_scope || 0} nodes in scope`
                 + (boundaryNames.length ? ` · ${boundaryNames.length} boundary node(s)` : '')
                 + ((scope.out_of_scope_active || []).length ? ` · ${scope.out_of_scope_active.length} active node(s) outside scope ignored` : '')
+                + (h.filter && h.filter.scope !== 'all' ? ` · ${h.filter.shown} of ${h.filter.total} findings match the Nodes filter` : '')
                 + ` · ${h.hours}h window · ${h.generated_at}`;
         }
 
@@ -333,10 +337,9 @@ const DiagnosticsModule = {
         this.renderFlaps(flaps);
         this.renderAsymmetry(asym);
         const mhSearch = (document.getElementById('mh-search')?.value || '').trim().toLowerCase();
-        // Mesh Health findings follow the shared bar's Nodes filter (a finding
-        // stays when any of its nodes matches).
-        const mhScope = (typeof GlobalFilter !== 'undefined') ? GlobalFilter.scope() : 'all';
-        this.renderHealth(mhSearch, mhScope, ctx);
+        // Nodes scope is applied by the server (loadHealth); search, severity
+        // and category only narrow the list.
+        this.renderHealth(mhSearch, 'all', ctx);
     },
 
     renderFlaps(links) {

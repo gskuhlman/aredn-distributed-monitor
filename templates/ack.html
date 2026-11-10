@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex">
+    <title>Acknowledge alert - AREDN Network Monitor</title>
+    <style>
+        :root { --bg: #f4f6f8; --card: #fff; --text: #1d2733; --muted: #5d6b7a; --line: #d6dde4; --ok: #1e8449; --warn: #b9770e; --crit: #c0392b; --accent: #2471a3; }
+        @media (prefers-color-scheme: dark) { :root { --bg: #11161c; --card: #1b232c; --text: #e3e9ef; --muted: #98a6b4; --line: #2c3742; --ok: #52be80; --warn: #f0b429; --crit: #ec7063; --accent: #5dade2; } }
+        body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+        main { max-width: 560px; margin: 0 auto; padding: 24px 16px; }
+        .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+        h1 { font-size: 1.2rem; margin: 0 0 12px; }
+        .sev { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .8rem; font-weight: 600; color: #fff; background: var(--warn); }
+        .sev.critical { background: var(--crit); } .sev.info { background: var(--accent); }
+        .line { margin: 12px 0; white-space: pre-wrap; }
+        .meta { color: var(--muted); font-size: .9rem; }
+        label { display: block; margin: 12px 0 4px; font-size: .9rem; color: var(--muted); }
+        input { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 1rem; }
+        button { margin-top: 16px; width: 100%; padding: 12px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer; }
+        .done { color: var(--ok); font-weight: 600; margin-top: 14px; }
+        a { color: var(--accent); }
+    </style>
+</head>
+<body>
+<main>
+    <div class="card">
+        <h1>{{ alert.title or 'Alert' }}</h1>
+        <span class="sev {{ alert.severity }}">{{ alert.severity or 'warning' }}</span>
+        <div class="line">{{ alert.line }}</div>
+        <div class="meta">Sent {{ alert.sent_at }} {{ tz_abbr }}{% if alert.repeats %} · repeated {{ alert.repeats }}×{% endif %}{% if alert.escalated_at %} · escalated {{ alert.escalated_at }}{% endif %}</div>
+        {% if alert.acked %}
+            <div class="done">{% if done %}Acknowledged. Repeats and escalation stop.{% else %}Already acknowledged{% endif %}
+                by {{ alert.acked_by }} at {{ alert.acked_at }} {{ tz_abbr }}{% if alert.ack_note %}: {{ alert.ack_note }}{% endif %}</div>
+        {% else %}
+            <form method="post">
+                <label for="by">Your name or callsign</label>
+                <input id="by" name="by" maxlength="60" autocomplete="nickname">
+                <label for="note">Note (optional)</label>
+                <input id="note" name="note" maxlength="300" placeholder="On my way / known, waiting for power ...">
+                <button type="submit">Acknowledge</button>
+            </form>
+        {% endif %}
+        <p class="meta"><a href="/#/status">Open the monitor</a></p>
+    </div>
+</main>
+</body>
+</html>

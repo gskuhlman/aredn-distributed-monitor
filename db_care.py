@@ -94,7 +94,11 @@ def report():
                               if t['rows'] and t['rows_per_day_7d'] else None)
     retention = [
         {'key': 'HISTORY_RETENTION_HOURS', 'value': config.HISTORY_RETENTION_HOURS, 'unit': 'hours',
-         'applies': 'link_history, weather observations'},
+         'applies': 'weather observations, Prometheus and SSH samples'},
+        {'key': 'LINK_HISTORY_RAW_DAYS', 'value': config.LINK_HISTORY_RAW_DAYS, 'unit': 'days',
+         'applies': 'raw link_history samples (rolled up hourly first)'},
+        {'key': 'ROLLUP_RETENTION_DAYS', 'value': config.ROLLUP_RETENTION_DAYS, 'unit': 'days',
+         'applies': 'link_history_hourly (0 = forever)'},
         {'key': 'RAW_TRACKER_RETENTION_HOURS', 'value': config.RAW_TRACKER_RETENTION_HOURS, 'unit': 'hours',
          'applies': 'raw LQM tracker JSON in link_history'},
         {'key': 'NODE_HEALTH_RETENTION_HOURS', 'value': config.NODE_HEALTH_RETENTION_HOURS, 'unit': 'hours',

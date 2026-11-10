@@ -37,7 +37,9 @@ EVENT_CATEGORIES = {
              'route_count_drop', 'route_count_restored', 'phone_unreachable', 'phone_restored',
              'radio_interference', 'radio_interference_cleared', 'radio_rx_errors', 'radio_rx_errors_cleared',
              'ethernet_problem', 'ethernet_cleared', 'radio_distance_short', 'radio_distance_ok',
-             'node_clock_skew', 'node_clock_ok'),
+             'node_clock_skew', 'node_clock_ok', 'radio_fw_crash', 'radio_fw_crash_cleared',
+             'radio_phy_resets', 'radio_phy_resets_cleared', 'call_quality_poor', 'call_quality_ok',
+             'service_down', 'service_restored'),
     'link': ('link_new', 'link_dropped', 'link_removed', 'link_restored',
              'link_blocked', 'link_unblocked',
              'one_way_link', 'one_way_link_cleared',
@@ -45,10 +47,13 @@ EVENT_CATEGORIES = {
              'mcs_drop', 'mcs_restored', 'link_alert', 'link_alert_cleared',
              'link_underperforming', 'link_underperforming_cleared',
              'radio_chain_alarm', 'radio_chain_cleared',
-             'radio_retries_high', 'radio_retries_cleared', 'radio_reconnects', 'radio_reconnects_cleared'),
-    'freq': ('frequency_change',),
+             'radio_retries_high', 'radio_retries_cleared', 'radio_reconnects', 'radio_reconnects_cleared',
+             'link_degrading', 'link_degrading_cleared', 'tunnel_degraded', 'tunnel_restored',
+             'rf_path_lost', 'rf_path_restored'),
+    'freq': ('frequency_change', 'noise_source'),
     'system': ('gateway_lost', 'gateway_restored', 'scan_incomplete', 'scan_complete_again',
-               'maintenance_scheduled', 'maintenance_started', 'maintenance_ended'),
+               'maintenance_scheduled', 'maintenance_started', 'maintenance_ended',
+               'incident_opened', 'incident_resolved', 'storm_warning', 'storm_warning_cleared'),
 }
 
 # Link state-log states that mean the link was impaired.

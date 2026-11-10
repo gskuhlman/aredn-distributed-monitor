@@ -36,10 +36,13 @@ const GlobalFilter = {
             uses: { nodes: true, nb: true, time: true, search: true },
             set(st, live, gf) {
                 const hoursChanged = gf.put('mh-hours', st.hours);
+                // Mesh Health is scoped on the server: reload when Nodes changes too.
+                const scopeChanged = this.lastScope !== undefined && this.lastScope !== gf.scope(st);
+                this.lastScope = gf.scope(st);
                 gf.put('mh-search', st.q);
                 if (live && typeof NodeUptime !== 'undefined') NodeUptime.load();
                 if (!live || typeof DiagnosticsModule === 'undefined' || !DiagnosticsModule.initialized) return;
-                if (hoursChanged) DiagnosticsModule.loadHealth(); else DiagnosticsModule.applyView();
+                if (hoursChanged || scopeChanged) DiagnosticsModule.loadHealth(); else DiagnosticsModule.applyView();
                 if (hoursChanged && typeof LinkWatch !== 'undefined') LinkWatch.load();
             }
         },

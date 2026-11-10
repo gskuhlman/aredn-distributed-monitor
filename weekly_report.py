@@ -29,6 +29,7 @@ from datetime import datetime, timedelta
 
 import config
 import database
+import local_time
 
 logger = logging.getLogger(__name__)
 TS_FMT = '%Y-%m-%d %H:%M:%S'
@@ -214,6 +215,13 @@ def _weather(start, end):
     return [{'link': f"{x['source']} → {x['target']}", 'verdicts': x['verdicts']} for x in r.get('flagged', [])][:8]
 
 
+def _site_outages(start, end):
+    import incidents
+    return [{'site': i.get('site'), 'title': i['title'], 'opened_at': i['opened_at'], 'resolved_at': i.get('resolved_at'),
+             'cause': i.get('cause'), 'root_cause': i.get('root_cause'), 'nodes': len(i.get('nodes') or [])}
+            for i in incidents.site_outages(_fmt(start), _fmt(end))]
+
+
 def build(end=None, days=7):
     end = end or datetime.now().replace(second=0, microsecond=0)
     start = end - timedelta(days=days)
@@ -222,6 +230,7 @@ def build(end=None, days=7):
     _section(out, 'worst_links', lambda: _worst(start, end, 'link'))
     _section(out, 'worst_nodes', lambda: _worst(start, end, 'node'))
     _section(out, 'new_problems', lambda: _new_problems(start, end))
+    _section(out, 'site_outages', lambda: _site_outages(start, end))
     _section(out, 'infrastructure', _infrastructure)
     _section(out, 'changes', lambda: _changes(start, end))
     _section(out, 'change_verdicts', lambda: _verdicts(start, end))
@@ -237,7 +246,7 @@ def _err(section):
 
 def render_text(r, short=False):
     """Plain text for email/webhook (short=True: chat-sized summary)."""
-    lines = [f"AREDN weekly report {r['start'][:10]} – {r['end'][:10]}"]
+    lines = [f"AREDN weekly report {r['start'][:10]} – {r['end'][:10]} (times are {local_time.label(r['end'])})"]
     h = r.get('headline') or {}
     if not _err(h):
         lines.append(f"Starting node: {h['starting_node_availability_pct'] if h['starting_node_availability_pct'] is not None else '?'}% available, "
@@ -256,6 +265,12 @@ def render_text(r, short=False):
             lines.append('  - ' + fmt(i))
 
     lim = 4 if short else 10
+    block('Site outages', r.get('site_outages'),
+          lambda o: f"{o['site'] or o['title']} {o['opened_at'][5:16]}"
+                    + (f" – {o['resolved_at'][5:16]}" if o.get('resolved_at') else ' (still down)')
+                    + f": {o['nodes']} radio(s), " + ({'power': 'power outage (radios came back rebooted)',
+                                                      'network': 'network (radios kept running)'}.get(o.get('cause'))
+                                                     or 'cause not known yet'), 4 if short else 10)
     block('Worst links', r.get('worst_links'), lambda i: f"{i['name']}: avg {i['avg']}, min {i['min']}"
           + (f", dropped {i['drop']['points']} at {i['drop']['at'][5:16]}" if i['drop'] else ''), lim)
     block('Worst nodes', r.get('worst_nodes'), lambda i: f"{i['name']}: avg {i['avg']}, min {i['min']}", lim)

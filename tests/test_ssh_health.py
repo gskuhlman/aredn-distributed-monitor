@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+import database
 import ssh_collect as sc
 import ssh_health
 
@@ -266,3 +267,98 @@ def test_too_few_samples_keep_an_alarm(mesh):
                      "mpdu_no_ack) VALUES ('ap', ?, 'phy0', 1000, 9000, 0, 0)", (now.strftime(sc.TS_FMT),))
         bad, evaluated = ssh_health.rx_error_conditions(conn, now)
     assert bad == {} and evaluated == set()   # one sample: not judged, so an active alarm isn't cleared
+
+
+# ------------------------------------------- fw_reset_stats, PHY resets --
+
+RESET = "fw_crash_counter\t\t{crash}\nfw_warm_reset_counter\t\t{warm}\nfw_cold_reset_counter\t\t{cold}\n"
+TIMEOUT = "cat: can't open '/sys/kernel/debug/ieee80211/phy0/ath10k/fw_stats': Operation timed out\n"
+
+
+def fw_output(i, crash=lambda i: 0, warm=lambda i: 2, cold=lambda i: 0, pdev=lambda i: 0, fw_ok=lambda i: True,
+              slow=False):
+    """output() with fw_reset_stats added, PDEV resets / excessive retries in
+    fw_stats, and fw_stats timing out where fw_ok(i) is false."""
+    out = output(i, slow=slow)[:-len(f"{M} end\n")]
+    head, tail = out.split(f"{M} fw_stats ", 1)
+    path, rest = tail.split('\n', 1)
+    body, after = (rest.split(f"{M} phy\n", 1) + [''])[:2]
+    after = f"{M} phy\n{after}" if after else ''
+    body = (body.rstrip('\n') + f"\n                   PDEV resets     {pdev(i)}\n"
+            f"             Excessive retries     {50 * pdev(i)}\n") if fw_ok(i) else TIMEOUT
+    return (head + f"{M} fw_reset /sys/kernel/debug/ieee80211/phy0/ath10k/fw_reset_stats\n"
+            + RESET.format(crash=crash(i), warm=warm(i), cold=cold(i))
+            + f"{M} fw_stats {path}\n{body}{after}{M} end\n")
+
+
+def test_fw_reset_parsers_and_script():
+    assert sc.parse_fw_reset_stats(RESET.format(crash=3, warm=14, cold=0)) == {
+        'fw_crashes': 3, 'fw_warm_resets': 14, 'fw_cold_resets': 0}
+    assert sc.parse_fw_reset_stats('') == {'fw_crashes': None, 'fw_warm_resets': None, 'fw_cold_resets': None}
+    assert sc.fw_stats_failed(TIMEOUT)
+    assert not sc.fw_stats_failed(FW.format(rx_ok=1, rx_err=0, txq=1, noack=0))
+    fast = sc.node_script(False)
+    assert 'fw_reset_stats' in fast and sc.FW_STATS_SCRIPT in fast and sc.SLOW_SCRIPT not in fast
+    assert sc.FW_STATS_SCRIPT not in sc.node_script(False, fw_stats=False)
+    assert sc.FW_STATS_SCRIPT in sc.node_script(True, fw_stats=False)
+    assert sc.node_script(True).endswith(f'echo "{M} end"\nexit 0\n')
+
+
+def test_fw_stats_backoff(ssh, monkeypatch):
+    scripts = []
+    fake = sc._run_ssh
+
+    def spy(node, script):
+        scripts.append(script)
+        code, out, err = fake(node, script)
+        if sc.FW_STATS_SCRIPT not in script:  # a backed-off run doesn't read fw_stats
+            head, tail = out.split(f"{M} fw_stats ", 1)
+            out = head + tail[tail.index(M):]
+        return code, out, err
+    monkeypatch.setattr(sc, '_run_ssh', spy)
+    # fw_stats times out on runs 1-4; the reset counters still get stored
+    ssh(6, out=lambda i: fw_output(i, slow=i == 0, fw_ok=lambda j: j not in (1, 2, 3, 4)))
+    has_fw = [sc.FW_STATS_SCRIPT in s for s in scripts]
+    # run 0 ok, 1-3 fail (3 in a row -> backed off), 4 and 5 skip it
+    assert has_fw == [True, True, True, True, False, False]
+    with database.get_connection() as conn:
+        assert ssh_health.fw_stats_status(conn) == {'w0aa-col-sq-2mmc': 3}
+        rows = conn.execute('SELECT fw_crashes, pdev_resets FROM ssh_fw_samples ORDER BY timestamp').fetchall()
+        assert len(rows) == 6 and all(r[0] == 0 for r in rows)
+        assert [r[1] is None for r in rows] == [False, True, True, True, True, True]
+    # a slow run reads it again; a good read ends the back-off
+    scripts.clear()
+    fake.out = lambda i: fw_output(i, slow=True)
+    fake.i = 6
+    sc.collect_node('w0aa-col-sq-2mmc', slow=True, now=time_of(6))
+    assert sc.FW_STATS_SCRIPT in scripts[0]
+    with database.get_connection() as conn:
+        assert ssh_health.fw_stats_status(conn) == {}
+
+
+def test_fw_crash_alarm(ssh):
+    # warm restarts alone never alarm
+    events = ssh(3, out=lambda i: fw_output(i, slow=i == 0, warm=lambda j: 2 + j))
+    assert 'radio_fw_crash' not in kinds(events)
+    # a crash raises after two runs that still see it in the 24 h window
+    events = ssh(5, out=lambda i: fw_output(i, slow=i == 0, crash=lambda j: 1 if j >= 2 else 0))
+    crash = [e for e in events if e['event_type'] == 'radio_fw_crash']
+    assert len(crash) == 1 and 'crashed 1 time' in crash[0]['details']
+
+
+def test_fw_crash_after_reboot_ignored(ssh):
+    # counters reset by a reboot are not a crash
+    events = ssh(5, out=lambda i: fw_output(i, slow=i == 0, crash=lambda j: 4 if j < 2 else 0))
+    assert 'radio_fw_crash' not in kinds(events)
+
+
+def test_phy_resets_alarm(ssh, monkeypatch):
+    monkeypatch.setattr(sc.config, 'SSH_PHY_RESETS_PER_HOUR', 30)
+    # 5 resets per 15 min = 20/h: fine
+    events = ssh(5, out=lambda i: fw_output(i, slow=i == 0, pdev=lambda j: 5 * j))
+    assert 'radio_phy_resets' not in kinds(events)
+    # 25 per 15 min = 100/h
+    events = ssh(5, out=lambda i: fw_output(i, slow=i == 0, pdev=lambda j: 100 + 25 * j))
+    phy = [e for e in events if e['event_type'] == 'radio_phy_resets']
+    assert len(phy) == 1 and 'about 100 times an hour' in phy[0]['details']
+    assert 'excessive retries' in phy[0]['details']

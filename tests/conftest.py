@@ -27,7 +27,8 @@ TS_FMT = '%Y-%m-%d %H:%M:%S'
 TABLE_FLAGS = ('notes', 'rollout', 'change_verdict', 'service_check', 'welcome', 'wifi_survey', 'auth',
                'route_watch', 'weekly_report', 'capacity', 'link_watch', 'collector_health', 'link_budget',
                'maintenance', 'notify', 'weather', 'routing_errors', 'prom_source', 'prom_watch',
-               'link_alerts', 'phones')
+               'link_alerts', 'phones', 'rollup', 'audit', 'incidents', 'suppressions', 'acks', 'degradation',
+               'storm', 'tunnels', 'call_quality', 'iface_traffic', 'services_catalog', 'syslog_rx', 'node_clock')
 
 
 def ts(minutes_ago=0):

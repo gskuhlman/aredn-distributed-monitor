@@ -43,7 +43,9 @@ OPEN_POSTS = [re.compile(p) for p in (
     r'^/api/weather/refresh$',
     r'^/api/routes/\d+/run$',
     r'^/api/voip/phones/run$',
+    r'^/api/node-clock/run$',
     r'^/api/voip/phones/\d+/ping$',
+    r'^/api/alerts/ack/[^/]+$',   # the token in the notification link is the credential
 )]
 MAX_FAILS = 5
 FAIL_WINDOW_S = 300

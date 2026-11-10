@@ -40,6 +40,7 @@ import requests
 
 import config
 import database
+import local_time
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +73,14 @@ EVENT_TYPES = [
     'radio_retries_high', 'radio_retries_cleared', 'radio_reconnects', 'radio_reconnects_cleared',
     'radio_interference', 'radio_interference_cleared', 'radio_rx_errors', 'radio_rx_errors_cleared',
     'ethernet_problem', 'ethernet_cleared', 'radio_distance_short', 'radio_distance_ok',
-    'node_clock_skew', 'node_clock_ok',
+    'node_clock_skew', 'node_clock_ok', 'radio_fw_crash', 'radio_fw_crash_cleared',
+    'radio_phy_resets', 'radio_phy_resets_cleared',
     # Phone connectivity (phones.py)
     'phone_unreachable', 'phone_restored',
+    # Round 7: incidents, slow degradation, storm warning, noise source, tunnels, RF paths, call quality
+    'incident_opened', 'incident_resolved', 'link_degrading', 'link_degrading_cleared',
+    'storm_warning', 'storm_warning_cleared', 'noise_source', 'tunnel_degraded', 'tunnel_restored',
+    'rf_path_lost', 'rf_path_restored', 'call_quality_poor', 'call_quality_ok',
 ]
 
 # problem event -> its recovery event (flap pairing and "recovery only if alerted")
@@ -98,9 +104,17 @@ RECOVERY_OF = {
     'radio_interference': 'radio_interference_cleared',
     'radio_rx_errors': 'radio_rx_errors_cleared',
     'ethernet_problem': 'ethernet_cleared',
+    'radio_fw_crash': 'radio_fw_crash_cleared',
+    'radio_phy_resets': 'radio_phy_resets_cleared',
     'radio_distance_short': 'radio_distance_ok',
     'node_clock_skew': 'node_clock_ok',
     'phone_unreachable': 'phone_restored',
+    'incident_opened': 'incident_resolved',
+    'link_degrading': 'link_degrading_cleared',
+    'storm_warning': 'storm_warning_cleared',
+    'tunnel_degraded': 'tunnel_restored',
+    'rf_path_lost': 'rf_path_restored',
+    'call_quality_poor': 'call_quality_ok',
 }
 PROBLEM_OF = {v: k for k, v in RECOVERY_OF.items()}
 
@@ -124,6 +138,9 @@ DEFAULT_CONFIG = {
     'flap_minutes': 5,
     'mute_until': None,
     'quiet_hours': {'enabled': False, 'start': '22:00', 'end': '07:00', 'allow_critical': True},
+    # Unacknowledged alerts (acks.py): repeat, then escalate to other channels.
+    'escalation': {'enabled': False, 'min_severity': 'critical', 'repeat_minutes': 30, 'max_repeats': 3,
+                   'escalate_minutes': 60, 'channels': [], 'ack_base_url': ''},
     'channels': {
         'email': {'enabled': False, 'host': '', 'port': 587, 'tls': 'starttls',
                   'user': '', 'password': '', 'from': '', 'to': ''},
@@ -154,6 +171,14 @@ DEFAULT_RULES = [
     {'name': 'Node resources / routes', 'event_types': ['resource_alarm', 'resource_cleared', 'route_count_drop',
                                                          'route_count_restored'],
      'min_severity': 'info', 'scope': 'infrastructure'},
+]
+
+# Rules added once to existing installs too (DEFAULT_RULES are seeded only on new ones).
+LATE_RULES = [
+    {'name': 'Incidents', 'event_types': ['incident_opened', 'incident_resolved'],
+     'min_severity': 'info', 'scope': 'any'},
+    {'name': 'Lost last RF path', 'event_types': ['rf_path_lost', 'rf_path_restored'],
+     'min_severity': 'info', 'scope': 'any'},
 ]
 
 LINK_DETAIL_RE = re.compile(r'^(?P<type>[\w-]+) link to (?P<peer>\S+)')
@@ -205,6 +230,17 @@ def ensure_schema():
                             (rule['name'], json.dumps(rule['event_types']), rule['min_severity'],
                              rule['scope'], now))
             cur.execute("INSERT OR REPLACE INTO notification_config (key, value) VALUES ('rules_seeded', '1')")
+        for rule in LATE_RULES:
+            key = f"rule_added:{rule['name']}"
+            if cur.execute('SELECT 1 FROM notification_config WHERE key = ?', (key,)).fetchone():
+                continue
+            if not cur.execute('SELECT 1 FROM notification_rules WHERE name = ?', (rule['name'],)).fetchone():
+                cur.execute('''INSERT INTO notification_rules
+                    (name, enabled, event_types, min_severity, scope, nodes, channels, created_at)
+                    VALUES (?, 1, ?, ?, ?, '[]', '[]', ?)''',
+                            (rule['name'], json.dumps(rule['event_types']), rule['min_severity'],
+                             rule['scope'], _now_str()))
+            cur.execute("INSERT OR REPLACE INTO notification_config (key, value) VALUES (?, '1')", (key,))
     _schema_ready = True
 
 
@@ -299,6 +335,27 @@ def update_config(data):
         for key in ('enabled', 'allow_critical'):
             if key in qh:
                 out['quiet_hours'][key] = bool(qh[key])
+    if isinstance(data.get('escalation'), dict):
+        esc, e = data['escalation'], out.setdefault('escalation', dict(DEFAULT_CONFIG['escalation']))
+        if 'enabled' in esc:
+            e['enabled'] = bool(esc['enabled'])
+        for key in ('repeat_minutes', 'max_repeats', 'escalate_minutes'):
+            if key in esc:
+                try:
+                    e[key] = max(0, int(esc[key]))
+                except (TypeError, ValueError):
+                    raise ValueError(f'escalation.{key} must be a whole number')
+        if 'min_severity' in esc:
+            if esc['min_severity'] not in SEVERITY_RANK:
+                raise ValueError('Unknown severity')
+            e['min_severity'] = esc['min_severity']
+        if 'channels' in esc:
+            e['channels'] = [c for c in (esc['channels'] or []) if c in CHANNELS]
+        if 'ack_base_url' in esc:
+            url = str(esc['ack_base_url'] or '').strip()
+            if url and not re.match(r'^https?://', url):
+                raise ValueError('The acknowledge link base must start with http:// or https://')
+            e['ack_base_url'] = url
     for channel, values in (data.get('channels') or {}).items():
         if channel not in CHANNELS or not isinstance(values, dict):
             continue
@@ -479,7 +536,8 @@ def describe(event):
             title = f"Sector lost a client: {node} lost {peer}"
         elif peer in infra and node not in infra:
             title = f"Sector lost a client: {peer} lost {node}"
-    when = (event.get('timestamp') or _now_str())[11:16]
+    stamp = event.get('timestamp') or _now_str()
+    when = f"{stamp[11:16]} {local_time.abbr(stamp)}"
     sev = event.get('severity') or 'info'
     return title, f"[{sev}] {when} {title}" + (f" - {details}" if details else '')
 
@@ -495,10 +553,19 @@ def is_suppressed(event):
         node = (event.get('node_name') or '').lower() or None
         _, peer = event_subject(event)
         w = maintenance.covering_window(node, event.get('timestamp'), peer)
+        if w:
+            return maintenance.describe_window(w)
     except Exception as exc:   # never let the hook break the pipeline
         logger.debug("maintenance check failed: %s", exc)
+    # Suppressions with a review date (#87), then open incidents (#51): one
+    # notification per incident, not one per member node.
+    try:
+        import suppressions
+        import incidents
+        return suppressions.covering(event) or incidents.covering(event)
+    except Exception as exc:
+        logger.debug("suppression check failed: %s", exc)
         return None
-    return maintenance.describe_window(w) if w else None
 
 
 def _in_quiet_hours(cfg, now=None):
@@ -723,13 +790,19 @@ class Dispatcher:
                 held = self.held.pop(key)
                 minutes = max(1, round((now - held['at']) / 60))
                 ftitle = f"Flapped: {held['title'].split(': ', 1)[-1]}"
-                fline = (f"[{event.get('severity') or 'info'}] {(event.get('timestamp') or _now_str())[11:16]} "
+                stamp = event.get('timestamp') or _now_str()
+                fline = (f"[{event.get('severity') or 'info'}] {stamp[11:16]} {local_time.abbr(stamp)} "
                          f"{ftitle} - {problem.replace('_', ' ')} then {etype.replace('_', ' ')} "
                          f"within {minutes} min")
                 return self._enqueue(rule, [held['event'], event], ftitle, fline, cfg, 'flap',
                                      cooldown_key=(rid, subject, 'flap'))
             if key in self.alerted:
                 self.alerted.discard(key)
+                try:
+                    import acks
+                    acks.recovered(subject, problem)
+                except Exception:
+                    pass
                 return self._enqueue(rule, [event], title, line, cfg, 'recovery')
             return ('dropped', 'recovery for a problem that was not alerted')
 
@@ -762,6 +835,7 @@ class Dispatcher:
                              'suppressed', 'no enabled channel')
             return ('suppressed', 'no enabled channel')
         alert = {'rule': rule['name'], 'title': title, 'line': line, 'kind': kind,
+                 'subject': event_subject(events[0])[0],
                  'event_ids': [e.get('id') for e in events],
                  'critical': any(SEVERITY_RANK.get(e.get('severity'), 1) >= SEVERITY_RANK['critical']
                                  for e in events),
@@ -782,9 +856,51 @@ class Dispatcher:
         for key, held in list(self.held.items()):
             if now - held['at'] >= flap:
                 self.held.pop(key)
+                # An incident opened while it was held covers it now (#51).
+                reason = is_suppressed(held['event'])
+                if reason:
+                    log_notification(held['rule']['name'], None, [held['event'].get('id')], held['title'],
+                                     'suppressed', reason)
+                    continue
                 self._enqueue(held['rule'], [held['event']], held['title'], held['line'], cfg, 'alert',
                               cooldown_key=key)
         self.flush(cfg)
+        if now - getattr(self, '_ack_checked', -1e18) >= 60:
+            self._ack_checked = now
+            self.escalate(cfg)
+
+    def escalate(self, cfg=None, now=None):
+        """Repeat / escalate unacknowledged alerts (acks.py). Returns sends."""
+        cfg = cfg or get_config(raw=True)
+        if not cfg.get('enabled'):
+            return 0
+        try:
+            import acks
+            due = acks.due(cfg, now)
+        except Exception as exc:
+            logger.debug('ack check failed: %s', exc)
+            return 0
+        sent = 0
+        for row, action in due:
+            if _muted(cfg) or (_in_quiet_hours(cfg) and not (row.get('severity') == 'critical'
+                                                             and cfg['quiet_hours'].get('allow_critical'))):
+                continue
+            channels = (cfg['escalation'].get('channels') if action == 'escalate' else row['channels']) or []
+            channels = [c for c in channels if cfg['channels'].get(c, {}).get('enabled')]
+            label = 'Escalated' if action == 'escalate' else 'Unacknowledged'
+            title = f"AREDN: {label}: {row['title']}"
+            body = (f"{row['line']}\nFirst sent {row['sent_at'][11:16]} {local_time.abbr(row['sent_at'])}, not acknowledged.\n"
+                    f"Acknowledge: {acks.ack_url(row['token'], cfg)}")
+            for channel in channels:
+                try:
+                    self.sender(channel, title, body, cfg=cfg, alerts=None, critical=row.get('severity') == 'critical')
+                    log_notification(row.get('rule'), channel, [], title, 'sent')
+                    sent += 1
+                except Exception as exc:
+                    log_notification(row.get('rule'), channel, [], title, 'failed',
+                                     _scrub(exc, cfg['channels'].get(channel, {})))
+            acks.mark(row['id'], action, now)
+        return sent
 
     def flush(self, cfg=None, force=False):
         cfg = cfg or get_config(raw=True)
@@ -796,11 +912,21 @@ class Dispatcher:
                 continue
             self.batches.pop(channel)
             items = batch['items']
+            ack_lines = {}
+            try:
+                import acks
+                for a in items:
+                    if a['kind'] == 'alert':
+                        chans = [c for c, b in list(self.batches.items()) + [(channel, batch)]
+                                 if any(x is a for x in b['items'])]
+                        ack_lines[id(a)] = f"  Acknowledge: {acks.ack_url(acks.register(a, chans), cfg)}"
+            except Exception as exc:
+                logger.debug('ack register failed: %s', exc)
             if len(items) == 1:
                 title = f"AREDN: {items[0]['title']}"
             else:
                 title = f"AREDN: {len(items)} alerts"
-            body = '\n'.join(a['line'] for a in items)
+            body = '\n'.join(a['line'] + ('\n' + ack_lines[id(a)] if id(a) in ack_lines else '') for a in items)
             event_ids = [i for a in items for i in a['event_ids']]
             rules = ', '.join(sorted({a['rule'] for a in items}))
             try:

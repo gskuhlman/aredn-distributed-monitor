@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agencies - AREDN Network Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container node-page agencies-page">
+        <header class="header">
+            <div class="header-left">
+                <a href="/" class="btn btn-secondary">&larr; Monitor</a>
+                <h1>Served agencies</h1>
+            </div>
+            <div class="header-controls">
+                <span id="ag-updated" class="form-hint"></span>
+                <span class="tz-label" title="All times shown are local {{ tz_name }} time">{{ tz_label }}</span>
+                <a href="/wall" class="btn btn-secondary btn-small">Wall display</a>
+                <button id="ag-edit-btn" class="btn btn-secondary btn-small">Edit agencies</button>
+            </div>
+        </header>
+        <main class="node-page-content">
+            <p class="form-hint">Is the mesh serving each agency right now? Nodes answering the scanner, service checks,
+                watched paths from the starting node, and uptime since the 1st of the month. Refreshes every minute.</p>
+            <div id="ag-tiles" class="ag-tiles">Loading…</div>
+            <section id="ag-edit" class="node-page-section" hidden>
+                <h2>Agencies on this board</h2>
+                <p class="form-hint">One per line: <code>Name | SITE | extra-node another-node</code>. SITE is an
+                    infrastructure site code (its radios count); extra nodes are optional. Empty = one tile per
+                    infrastructure site.</p>
+                <textarea id="ag-edit-text" class="form-input" rows="6" spellcheck="false"></textarea>
+                <div class="admin-form"><button id="ag-save" class="btn btn-primary">Save</button>
+                    <span id="ag-edit-status" class="form-hint"></span></div>
+            </section>
+        </main>
+    </div>
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/agencies.js') }}"></script>
+</body>
+</html>

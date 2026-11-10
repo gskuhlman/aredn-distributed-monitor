@@ -87,10 +87,10 @@ def sync_from_events():
         for r in rows:
             cursor.execute('''
                 INSERT OR IGNORE INTO change_log
-                    (timestamp, node_name, category, description, source, event_id)
-                VALUES (?, ?, ?, ?, 'auto', ?)
+                    (timestamp, node_name, category, description, source, event_id, created_at)
+                VALUES (?, ?, ?, ?, 'auto', ?, ?)
             ''', (r['timestamp'], r['node_name'], _event_category(r['event_type'], r['details']),
-                  r['details'], r['id']))
+                  r['details'], r['id'], database.local_timestamp()))
         return len(rows)
 
 
@@ -135,10 +135,11 @@ def add_change(node_name, description, category='other', timestamp=None,
     with database.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO change_log (timestamp, node_name, peer_node, category, description, source, author)
-            VALUES (?, ?, ?, ?, ?, 'manual', ?)
+            INSERT INTO change_log (timestamp, node_name, peer_node, category, description, source, author,
+                                    created_at)
+            VALUES (?, ?, ?, ?, ?, 'manual', ?, ?)
         ''', (when.strftime(TS_FMT), node_name, peer_node, category,
-              (description or '').strip() or None, (author or '').strip() or None))
+              (description or '').strip() or None, (author or '').strip() or None, database.local_timestamp()))
         change_id = cursor.lastrowid
     return get_change(change_id)
 

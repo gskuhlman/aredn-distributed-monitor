@@ -76,7 +76,7 @@ def _node_notes():
     return out
 
 
-def score_node(n, latest, now, bad_location, notes=()):
+def score_node(n, latest, now, bad_location, notes=(), clock=None):
     checks = []
 
     def check(key, points, ok, fix, partial=None):
@@ -113,6 +113,10 @@ def score_node(n, latest, now, bad_location, notes=()):
     seen = n.get('last_seen')
     polled = bool(n.get('is_active')) and bool(seen) and seen[:19] >= (now - timedelta(days=1)).strftime(TS_FMT)
     check('polled', 10, polled, 'The scanner could not read this node in the last day.')
+    # Central time (node_clock.py): only judged once the node's clock was read.
+    if clock and clock.get('central') is not None:
+        import node_clock
+        check('timezone', 5, bool(clock['central']), node_clock.describe(clock))
     total = sum(c['points'] for c in checks)
     got = sum(c['got'] for c in checks)
     return {'name': n['name'], 'owner': owner_of(n['name']), 'score': round(100 * got / total) if total else None,
@@ -132,13 +136,18 @@ def report(node=None, include_inactive=False):
     latest = _latest(nodes)
     bad = _location_problems()
     notes = _node_notes()
+    try:
+        import node_clock
+        clocks = node_clock.states()
+    except Exception:
+        clocks = {}
     rows = []
     for n in nodes:
         if node and n['name'] != node:
             continue
         if not node and (n['name'].startswith('mac-') or (not include_inactive and not n.get('is_active'))):
             continue
-        rows.append(score_node(n, latest, now, bad, notes.get(n['name'], ())))
+        rows.append(score_node(n, latest, now, bad, notes.get(n['name'], ()), clocks.get(n['name'])))
     rows.sort(key=lambda r: (r['score'] if r['score'] is not None else 999, r['name']))
     owners = defaultdict(list)
     for r in rows:

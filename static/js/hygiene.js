@@ -63,6 +63,8 @@ const Hygiene = {
         try {
             const resp = await fetch(`/api/nodes/scan/${encodeURIComponent(name)}`, { method: 'POST' });
             const scan = await resp.json().catch(() => ({}));
+            await fetch('/api/node-clock/run', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ nodes: [name] }) }).catch(() => null);
             const d = await (await fetch(`/api/reports/hygiene?node=${encodeURIComponent(name)}`)).json();
             const row = d.nodes[0];
             if (row) {

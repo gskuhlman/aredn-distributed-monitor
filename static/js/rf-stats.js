@@ -827,7 +827,8 @@ function initTabSwitching() {
     const legend = document.querySelector('.legend');
     const allViews = [networkView, rfStatsView, nodesView, voipView, reportsView];
     // Pages that only need their view shown (plus the start-up below).
-    const simpleViews = ['status', 'radio', 'routing', 'setup', 'maintenance', 'notifications', 'sites'];
+    const simpleViews = ['status', 'radio', 'routing', 'setup', 'maintenance', 'notifications', 'sites',
+        'incidents', 'services', 'syslog'];
     let graphShown = false;
 
     tabBtns.forEach(btn => {

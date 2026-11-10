@@ -360,6 +360,9 @@ SSH_EXT_BUSY_PCT = env_int("SSH_EXT_BUSY_PCT", 20)                  # airtime bu
 SSH_RX_ERROR_PCT = env_int("SSH_RX_ERROR_PCT", 20)                  # received MPDUs failing FCS / MIC / decrypt
 SSH_ETH_FLAPS_PER_HOUR = env_int("SSH_ETH_FLAPS_PER_HOUR", 2)
 SSH_CLOCK_SKEW_SECONDS = env_int("SSH_CLOCK_SKEW_SECONDS", 120)
+SSH_PHY_RESETS_PER_HOUR = env_int("SSH_PHY_RESETS_PER_HOUR", 30)    # ath10k "PDEV resets" (firmware resets the PHY)
+# fw_stats timeouts in a row before a radio's fw_stats is read only on slow runs
+SSH_FW_STATS_BACKOFF_FAILS = env_int("SSH_FW_STATS_BACKOFF_FAILS", 3)
 # A TDWR airport weather radar (5600-5650 MHz) within range of the mesh. The
 # nearest to Cedar Rapids are Chicago, Milwaukee and Minneapolis (300+ km), so
 # off: 5600-5650 is then only "below the ham band" and 5650-5660 is not penalised.
@@ -369,6 +372,55 @@ PHONE_PING_ENABLED = env_bool("PHONE_PING_ENABLED", True)
 PHONE_PING_COUNT = env_int("PHONE_PING_COUNT", 3)
 PHONE_PING_TIMEOUT_SECONDS = env_int("PHONE_PING_TIMEOUT_SECONDS", 2)
 PHONE_PING_FAILS = env_int("PHONE_PING_FAILS", 2)
+
+# ---- Round 7 ----
+# History rollup (rollup.py): raw link_history scan samples kept this many days,
+# hourly aggregates this many (0 = forever).
+LINK_HISTORY_RAW_DAYS = env_int("LINK_HISTORY_RAW_DAYS", 30)
+ROLLUP_RETENTION_DAYS = env_int("ROLLUP_RETENTION_DAYS", 400)
+# Audit log of changes made through the API (audit.py).
+AUDIT_RETENTION_DAYS = env_int("AUDIT_RETENTION_DAYS", 365)
+# Incidents (incidents.py): group events that share one cause.
+INCIDENTS_ENABLED = env_bool("INCIDENTS_ENABLED", True)
+INCIDENT_SITE_MIN_RADIOS = env_int("INCIDENT_SITE_MIN_RADIOS", 2)
+INCIDENT_CUTOFF_MIN_NODES = env_int("INCIDENT_CUTOFF_MIN_NODES", 3)
+# Slow degradation watch (degradation.py): daily trend of SNR / LQ per RF direction.
+DEGRADE_WATCH_ENABLED = env_bool("DEGRADE_WATCH_ENABLED", True)
+DEGRADE_DAYS = env_int("DEGRADE_DAYS", 30)
+DEGRADE_MIN_DAYS = env_int("DEGRADE_MIN_DAYS", 10)
+DEGRADE_DB_PER_MONTH = float(os.environ.get("DEGRADE_DB_PER_MONTH", "3"))
+DEGRADE_LQ_PER_MONTH = float(os.environ.get("DEGRADE_LQ_PER_MONTH", "10"))
+DEGRADE_MIN_R2 = float(os.environ.get("DEGRADE_MIN_R2", "0.4"))
+# Storm warning (storm.py): NWS hourly forecast vs measured rain fade.
+STORM_WARNING_ENABLED = env_bool("STORM_WARNING_ENABLED", True)
+STORM_HOURS_AHEAD = env_int("STORM_HOURS_AHEAD", 12)
+STORM_POP_PCT = env_int("STORM_POP_PCT", 60)
+STORM_FADE_DB = float(os.environ.get("STORM_FADE_DB", "3"))
+STORM_FADE_DAYS = env_int("STORM_FADE_DAYS", 30)
+# Noise source finder (noise_source.py).
+NOISE_SOURCE_WINDOW_MINUTES = env_int("NOISE_SOURCE_WINDOW_MINUTES", 30)
+NOISE_SOURCE_RADIUS_KM = env_int("NOISE_SOURCE_RADIUS_KM", 30)
+# Tunnel health (tunnels.py): below this health % over an hour = tunnel_degraded.
+TUNNEL_HEALTH_PCT = env_int("TUNNEL_HEALTH_PCT", 80)
+# Call quality per node from the ping rounds (call_quality.py).
+CALL_JITTER_WARN_MS = env_int("CALL_JITTER_WARN_MS", 20)
+CALL_JITTER_CRIT_MS = env_int("CALL_JITTER_CRIT_MS", 50)
+CALL_MOS_WARN = float(os.environ.get("CALL_MOS_WARN", "3.6"))
+CALL_MOS_CRIT = float(os.environ.get("CALL_MOS_CRIT", "3.1"))
+# Syslog receiver (syslog_rx.py). Off by default: AREDN nodes send to one log
+# server ("Remote logging" in Advanced Configuration), today NM5PB's.
+SYSLOG_ENABLED = env_bool("SYSLOG_ENABLED", False)
+SYSLOG_HOST = os.environ.get("SYSLOG_HOST", "0.0.0.0")
+SYSLOG_PORT = env_int("SYSLOG_PORT", 514)
+SYSLOG_RETENTION_DAYS = env_int("SYSLOG_RETENTION_DAYS", 31)
+# Time zone labels (local_time.py): every stored and shown time is this PC's local time.
+TIME_ZONE_NAME = os.environ.get("TIME_ZONE_NAME", "Central")
+TIME_ZONE_ABBRS = tuple((os.environ.get("TIME_ZONE_ABBRS") or "CST,CDT").split(",")[:2])
+# Node clock / time-zone check (node_clock.py, hygiene "Central time").
+NODE_CLOCK_ENABLED = env_bool("NODE_CLOCK_ENABLED", True)
+NODE_CLOCK_HOURS = env_int("NODE_CLOCK_HOURS", 6)
+NODE_CLOCK_MAX_OFFSET_MINUTES = env_int("NODE_CLOCK_MAX_OFFSET_MINUTES", 10)
+# end Round 7
 
 
 def is_watched_node(node_name):
