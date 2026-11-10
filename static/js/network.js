@@ -1681,6 +1681,8 @@ const EVENT_ICONS = {
     'route_changed': { icon: '&#128256;', label: 'Route Changed', class: 'event-info' },
     'route_detour': { icon: '&#8618;', label: 'Route Detour', class: 'event-warning' },
     'route_restored': { icon: '&#128257;', label: 'Route Restored', class: 'event-success' },
+    'route_flapping': { icon: '&#128256;', label: 'Route Flapping', class: 'event-warning' },
+    'route_steady': { icon: '&#128257;', label: 'Route Steady', class: 'event-success' },
     // Prometheus alarms (prom_watch.py) and per-link alerts (link_alerts.py)
     'resource_alarm': { icon: '&#128202;', label: 'Node Resources', class: 'event-warning' },
     'resource_cleared': { icon: '&#10004;', label: 'Node Resources OK', class: 'event-success' },

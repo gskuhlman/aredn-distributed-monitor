@@ -41,7 +41,7 @@ EVENT_CATEGORIES = {
     'link': ('link_new', 'link_dropped', 'link_removed', 'link_restored',
              'link_blocked', 'link_unblocked',
              'one_way_link', 'one_way_link_cleared',
-             'route_changed', 'route_detour', 'route_restored',
+             'route_changed', 'route_detour', 'route_restored', 'route_flapping', 'route_steady',
              'mcs_drop', 'mcs_restored', 'link_alert', 'link_alert_cleared',
              'link_underperforming', 'link_underperforming_cleared',
              'radio_chain_alarm', 'radio_chain_cleared',

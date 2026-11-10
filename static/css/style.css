@@ -2368,6 +2368,12 @@ tr.pa-marginal td { background: #fef5e7; }
 .rw-spark-fail { fill: #c0392b; }
 .rw-add { margin-top: 8px; }
 .rw-history-row td { background: #f8f9f9; }
+.rw-group { margin: 14px 0 2px; }
+.rw-history-row h5 { margin: 12px 0 4px; }
+.rw-notes { margin: 4px 0 6px 18px; padding: 0; font-size: 0.9em; }
+.rw-causes { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.rw-evidence { margin: 0; padding-left: 16px; font-size: 0.85em; }
+.rw-changes td { vertical-align: top; }
 /* ---- Weather (#13, weather.js) ---- */
 .wx-inline { font-size: 0.55em; font-weight: normal; margin-left: 12px; vertical-align: middle; }
 /* ---- Health score (#5, health-score.js, Reports tab) ---- */

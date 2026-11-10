@@ -60,7 +60,7 @@ EVENT_TYPES = [
     'frequency_change', 'radio_config_change',
     EVENT_ONE_WAY_LINK, EVENT_ONE_WAY_LINK_CLEARED,
     EVENT_NOISE_JUMP, EVENT_NOISE_CLEARED,
-    'route_changed', EVENT_ROUTE_DETOUR, EVENT_ROUTE_RESTORED,
+    'route_changed', EVENT_ROUTE_DETOUR, EVENT_ROUTE_RESTORED, 'route_flapping', 'route_steady',
     # Round 4: Prometheus alarms (prom_watch.py) and per-link alerts (link_alerts.py)
     'resource_alarm', 'resource_cleared', 'route_count_drop', 'route_count_restored',
     'mcs_drop', 'mcs_restored', 'link_alert', 'link_alert_cleared',
@@ -86,6 +86,7 @@ RECOVERY_OF = {
     EVENT_ONE_WAY_LINK: EVENT_ONE_WAY_LINK_CLEARED,
     EVENT_NOISE_JUMP: EVENT_NOISE_CLEARED,
     EVENT_ROUTE_DETOUR: EVENT_ROUTE_RESTORED,
+    'route_flapping': 'route_steady',
     'resource_alarm': 'resource_cleared',
     'route_count_drop': 'route_count_restored',
     'mcs_drop': 'mcs_restored',

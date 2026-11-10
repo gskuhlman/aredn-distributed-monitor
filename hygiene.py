@@ -10,8 +10,9 @@ Checks (points):
   firmware      current release or recent nightly (20; older point release 12,
                 previous line 6, very old 0) against the newest release seen
                 (drift.classify_firmware);
-  description   node description set (10) with a way to reach the owner
-                (5: e-mail, phone or callsign in it);
+  description   node description set (10); a way to reach the owner (5:
+                an e-mail, phone or callsign in the description or in an
+                operator note on the node, notes.py);
   name          starts with a callsign (5);
   radio         for a node with its radio on: antenna azimuth set unless it
                 is an omni (10), antenna described (5), antenna height (5);
@@ -63,7 +64,19 @@ def _location_problems():
         return {}
 
 
-def score_node(n, latest, now, bad_location):
+def _node_notes():
+    """{node: [note text]} of operator notes on nodes (notes.py)."""
+    out = defaultdict(list)
+    try:
+        with database.get_connection() as conn:
+            for name, text in conn.execute("SELECT node_name, text FROM notes WHERE target_type = 'node'"):
+                out[name].append(text or '')
+    except Exception:   # notes table not created yet
+        pass
+    return out
+
+
+def score_node(n, latest, now, bad_location, notes=()):
     checks = []
 
     def check(key, points, ok, fix, partial=None):
@@ -81,8 +94,13 @@ def score_node(n, latest, now, bad_location):
     check('firmware', 20, cls in ('current', 'nightly'),
           f"Update firmware ({n.get('firmware_version') or 'unknown'}: {reason}).", FW_POINTS.get(cls, 0))
     desc = (n.get('description') or '').strip()
-    check('description', 10, bool(desc), 'Add a node description (what it is, where, who to contact).')
-    check('contact', 5, bool(desc and CONTACT.search(desc)), 'Put a way to reach the owner in the description.')
+    check('description', 10, bool(desc), 'Add a node description (what it is and where).')
+    in_desc = bool(desc and CONTACT.search(desc))
+    in_note = any(CONTACT.search(t) for t in notes)
+    check('contact', 5, in_desc or in_note,
+          'Add a way to reach the owner (e-mail, phone or callsign): in the node description, '
+          "or as a note on this node's page here.")
+    checks[-1]['source'] = 'description' if in_desc else 'note' if in_note else None
     first = (n.get('name') or '').split('-')[0]
     check('name', 5, bool(CALLSIGN.match(first)), 'Start the node name with the owner\'s callsign.')
     radio_on = str(n.get('rf_status') or '').lower() != 'off' and _num(n.get('rf_frequency'))
@@ -113,13 +131,14 @@ def report(node=None, include_inactive=False):
     nodes = database.get_all_nodes()
     latest = _latest(nodes)
     bad = _location_problems()
+    notes = _node_notes()
     rows = []
     for n in nodes:
         if node and n['name'] != node:
             continue
         if not node and (n['name'].startswith('mac-') or (not include_inactive and not n.get('is_active'))):
             continue
-        rows.append(score_node(n, latest, now, bad))
+        rows.append(score_node(n, latest, now, bad, notes.get(n['name'], ())))
     rows.sort(key=lambda r: (r['score'] if r['score'] is not None else 999, r['name']))
     owners = defaultdict(list)
     for r in rows:

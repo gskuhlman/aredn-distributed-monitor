@@ -91,8 +91,11 @@ const StatusTiles = {
         const noisy = d.noise ? (d.noise.radios || []).filter(r => r.alarm).length : null;
         add('Noise alarms', count(noisy), level(noisy), 'section:Link Watch', 'Link Watch noise-floor alarms');
 
-        const detours = d.routes ? (d.routes.paths || []).filter(p => p.status === 'detour').length : null;
-        add('Route detours', count(detours), level(detours), 'routing/route-watch', 'Route Watch paths off their usual route');
+        // Site-to-site paths only: the starting node's own paths are context.
+        const routes = d.routes ? (d.routes.paths || []).filter(p => p.enabled && p.role !== 'access'
+            && (p.status === 'detour' || p.flapping)).length : null;
+        add('Route problems', count(routes), level(routes), 'routing/route-watch',
+            'Site-to-site Route Watch paths on a detour or switching routes often');
 
         const radio = (d.ssh || d.prom)
             ? (d.ssh?.alarms || []).filter(a => a.active).length + (d.prom?.alarms || []).length : null;

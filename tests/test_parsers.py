@@ -77,6 +77,16 @@ def test_hygiene_score():
     assert bare['score'] < 70 and len(bare['fixes']) >= 4
 
 
+def test_hygiene_contact_in_note():
+    n = {'name': 'k1aa-home', 'description': 'Shack node on the garage', 'is_active': 1}
+    contact = lambda r: next(c for c in r['checks'] if c['key'] == 'contact')
+    no_note = hygiene.score_node(n, (4, 26, 7, 0), datetime.now(), {})
+    assert not contact(no_note)['ok']
+    with_note = hygiene.score_node(n, (4, 26, 7, 0), datetime.now(), {}, ['Call KF9MT first, 319-555-0100'])
+    assert contact(with_note)['ok'] and contact(with_note)['source'] == 'note'
+    assert with_note['score'] > no_note['score']
+
+
 IW_WIDE = """BSS 32:74:c5:4f:5e:4d(on wlan0)
 	freq: 5680
 	signal: -81.00 dBm

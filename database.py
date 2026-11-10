@@ -1518,6 +1518,8 @@ EVENT_MAINTENANCE_ENDED = 'maintenance_ended'
 EVENT_ROUTE_CHANGED = 'route_changed'
 EVENT_ROUTE_DETOUR = 'route_detour'
 EVENT_ROUTE_RESTORED = 'route_restored'
+EVENT_ROUTE_FLAPPING = 'route_flapping'
+EVENT_ROUTE_STEADY = 'route_steady'
 
 
 def trim_connectivity_log(days=None):

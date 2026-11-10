@@ -191,6 +191,7 @@ ROUTE_BASELINE_MIN_RUNS = env_int("ROUTE_BASELINE_MIN_RUNS", 3)  # runs before a
 ROUTE_CHANGE_RUNS = env_int("ROUTE_CHANGE_RUNS", 2)              # runs in a row to raise / clear
 ROUTE_DETOUR_HOPS = env_int("ROUTE_DETOUR_HOPS", 2)              # this many more hops = detour
 ROUTE_HISTORY_RETENTION_DAYS = env_int("ROUTE_HISTORY_RETENTION_DAYS", 31)
+ROUTE_FLAP_CHANGES = env_int("ROUTE_FLAP_CHANGES", 8)            # route switches in 24 h = a flapping site-to-site path
 # --- end Route Watch ---
 
 # --- Weather (weather.py): NWS observations to correlate with SNR/LQ ---

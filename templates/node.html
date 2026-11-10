@@ -180,6 +180,16 @@
                 <div id="node-notes"><p class="loading">Loading...</p></div>
             </section>
 
+            <!-- Traffic over SSH (ssh_traffic.py, node-traffic.js) -->
+            <section class="node-page-section" data-group="tools" id="node-traffic-section">
+                <h2>Traffic (SSH)</h2>
+                <p class="health-footnote">Reads this node's interface counters, WireGuard tunnels and connection table over SSH, a few seconds apart (read-only; nothing is changed on the node or stored here). Shows how busy each interface is and which hosts are talking through it.</p>
+                <div class="report-actions"><button type="button" id="nt-run" class="btn btn-primary">Pull traffic</button>
+                    <label class="form-hint">over <select id="nt-seconds" class="form-input"><option value="3">3 s</option><option value="5" selected>5 s</option><option value="10">10 s</option><option value="15">15 s</option></select></label>
+                    <span id="nt-status" class="form-hint"></span></div>
+                <div id="node-traffic"><p class="log-empty">Press Pull traffic to run.</p></div>
+            </section>
+
             <section class="node-page-section" data-group="tools">
                 <h2>Incident Probes</h2>
                 <p class="health-footnote">High-rate bidirectional pings captured automatically while a watched link is dropped, LQM-blocked, or marginal. Forward and reverse rows isolate which direction is failing.</p>
@@ -249,6 +259,7 @@
     <script src="{{ url_for('static', filename='js/node-extras.js') }}"></script>
     <script src="{{ url_for('static', filename='js/node-prom.js') }}"></script>
     <script src="{{ url_for('static', filename='js/node-ssh.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/node-traffic.js') }}"></script>
     <script src="{{ url_for('static', filename='js/node-tabs.js') }}"></script>
 </body>
 </html>

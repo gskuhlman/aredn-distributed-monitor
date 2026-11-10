@@ -1,14 +1,23 @@
 /**
- * Route Watch section on the Diagnostics tab: periodic traceroutes along key
- * paths from /api/routes (route_watch.py). Shows each path's status, current
- * route against its usual one, a hop-count sparkline, and per path the routes
- * it took (hops not on the usual route highlighted, how each hop was reached).
- * All change/detour rules live in route_watch.py; this only renders them.
+ * Route Watch (Routing page): periodic traceroutes along key paths from
+ * /api/routes (route_watch.py). Site-to-site paths (and operator paths) come
+ * first; the starting node's own paths are listed after them as context (they
+ * never raise warnings). Each row shows the status, current route against its
+ * usual one, route switches in 24 h and a hop-count sparkline; "Why changed?"
+ * opens /api/routes/<id>/why: the routes the path used (share, delay), where
+ * they part, and each switch with its likely cause. All change/detour/flap
+ * rules live in route_watch.py; this only renders them.
  */
 const RouteWatch = {
     initialized: false,
     data: null,
     open: new Set(),
+    showAll: new Set(),
+    CAUSE_CLS: {
+        maintenance: 'info', node_rebooted: 'critical', link_failed: 'critical', node_trouble: 'warning',
+        link_degraded: 'warning', link_restored: 'ok', better_route: 'ok', trace_incomplete: 'info',
+        site_internal: 'info', near_tie: 'info', unknown: 'info'
+    },
 
     STATUS: {
         learning: { label: 'learning', cls: 'info' },
@@ -30,6 +39,7 @@ const RouteWatch = {
                 if (btn.dataset.rwAction === 'run') this.runPath(id, btn);
                 if (btn.dataset.rwAction === 'delete') this.deletePath(id, btn);
                 if (btn.dataset.rwAction === 'history') this.toggleHistory(id);
+                if (btn.dataset.rwAction === 'all') { this.showAll.add(id); this.loadHistory(id); }
                 if (btn.dataset.rwAction === 'path' && typeof PathView !== 'undefined') {
                     const p = this.data.paths.find(x => x.id === id);
                     if (p) PathView.open(p.source || '', p.target);
@@ -63,10 +73,20 @@ const RouteWatch = {
                 site (and site to site) are added on the first run; add your own below.</p>`;
             return;
         }
-        el.innerHTML = `<div class="table-scroll-wrapper"><table class="info-table diag-table rw-table">
+        const backbone = paths.filter(p => p.role !== 'access');
+        const access = paths.filter(p => p.role === 'access');
+        const table = (rows) => `<div class="table-scroll-wrapper"><table class="info-table diag-table rw-table">
             <thead><tr><th>Status</th><th>Path</th><th>Route now</th><th>Hops</th><th>Usual</th>
             <th>Last 24 h</th><th>Last change</th><th></th></tr></thead>
-            <tbody>${paths.map(p => this.renderRow(p)).join('')}</tbody></table></div>`;
+            <tbody>${rows.map(p => this.renderRow(p)).join('')}</tbody></table></div>`;
+        el.innerHTML = `<h4 class="rw-group">Site to site</h4>
+            <p class="form-hint">Paths between infrastructure sites (and paths you added). A detour, or a path that keeps
+            switching routes (${this.data.flap_changes}+ switches in 24 h, even between equally good routes), raises a
+            warning: each switch can cost a voice call a short gap or reordered packets.</p>
+            ${backbone.length ? table(backbone) : '<p class="log-empty">No site-to-site paths yet.</p>'}
+            ${access.length ? `<h4 class="rw-group">From the starting node <small class="form-hint">context</small></h4>
+            <p class="form-hint">How this monitor reaches each site. These change often (the starting node picks between
+            tunnels) and only matter for this PC, so they never raise warnings.</p>${table(access)}` : ''}`;
     },
 
     renderRow(p) {
@@ -81,18 +101,28 @@ const RouteWatch = {
         }
         const off = last?.ok && last.off_backbone?.length
             ? `<div class="rw-off">off backbone: ${last.off_backbone.map(n => this.esc(n)).join(', ')}</div>` : '';
-        const reasons = p.reasons?.length ? `<div class="rw-off">${p.reasons.map(r => this.esc(r)).join('; ')}</div>` : '';
+        const reasons = p.reasons?.length
+            ? `<div class="rw-off">${p.back_on_usual ? 'was: ' : ''}${p.reasons.map(r => this.esc(r)).join('; ')}</div>` : '';
+        const back = p.back_on_usual ? '<div class="form-hint">back on the usual route; clears after the next trace</div>' : '';
+        const internal = p.flaps_internal_24h ? `, plus ${p.flaps_internal_24h} between radios of one site` : '';
+        let flaps = '';
+        if (p.flapping) {
+            flaps = `<br><span class="diag-badge infra-badge-warning" title="Route switches in the last 24 h${internal}">flapping: ${p.flaps_24h} switches</span>`;
+        } else if (p.flaps_24h) {
+            flaps = `<br><small class="form-hint" title="Route switches in the last 24 h${internal}">${p.flaps_24h} switch${p.flaps_24h === 1 ? '' : 'es'} / 24 h</small>`;
+        }
         const from = p.source ? this.esc(p.source) : 'starting node';
-        return `<tr class="${p.status === 'detour' ? 'rw-row-detour' : ''}">
-            <td><span class="diag-badge infra-badge-${st.cls}">${this.esc(st.label)}</span></td>
+        return `<tr class="${(p.status === 'detour' || p.flapping) && p.role !== 'access' ? 'rw-row-detour' : ''}">
+            <td><span class="diag-badge infra-badge-${st.cls}">${this.esc(st.label)}</span>${flaps}</td>
             <td><strong>${this.esc(p.label)}</strong><br><small>${from} → ${this.esc(p.target)}${p.kind === 'auto' ? ' · auto' : ''}</small></td>
-            <td class="rw-route">${route}${off}${reasons}</td>
+            <td class="rw-route">${route}${off}${reasons}${back}</td>
             <td>${last?.ok ? last.hop_count : '-'}${last?.rtt_ms != null ? `<br><small>${last.rtt_ms} ms</small>` : ''}</td>
             <td>${p.baseline_hops ?? '-'}</td>
             <td>${this.sparkline(p.series)}</td>
             <td><small>${this.esc(p.last_change || '-')}</small></td>
             <td class="rw-actions">
-                <button class="btn btn-small btn-secondary" data-rw-action="history" data-id="${p.id}">${this.open.has(p.id) ? 'Hide' : 'Routes'}</button>
+                <button class="btn btn-small btn-secondary" data-rw-action="history" data-id="${p.id}"
+                    title="Routes used, where they part, and the likely cause of each switch (last 3 days)">${this.open.has(p.id) ? 'Hide' : 'Why changed?'}</button>
                 <button class="btn btn-small btn-secondary" data-rw-action="path" data-id="${p.id}" title="Each hop coloured by link quality (Path View)">Path</button>
                 <button class="btn btn-small btn-secondary" data-rw-action="run" data-id="${p.id}">Trace now</button>
                 <button class="btn btn-small btn-secondary" data-rw-action="delete" data-id="${p.id}"
@@ -143,24 +173,76 @@ const RouteWatch = {
         const el = document.getElementById(`rw-history-${id}`);
         if (!el) return;
         try {
-            const d = await (await fetch(`/api/routes/${id}/history?hours=72`)).json();
-            if (!d.changes?.length) {
-                el.innerHTML = '<p class="log-empty">No successful traces in the last 3 days.</p>';
-                return;
-            }
-            const failed = d.runs.filter(r => !r.ok).length;
-            el.innerHTML = `<p class="form-hint">${d.runs.length} trace(s) in the last 3 days${failed ? `, ${failed} failed` : ''}.
-                Each row is a route the path switched to; highlighted hops are not on the usual route.</p>
-                <table class="info-table diag-table rw-changes"><thead><tr><th>From</th><th>Hops</th><th>Route</th></tr></thead>
-                <tbody>${d.changes.slice().reverse().map(c => `<tr>
-                    <td><small>${this.esc(c.timestamp)}</small>${c.baseline ? '<br><span class="diag-badge infra-badge-ok">usual</span>' : ''}</td>
-                    <td>${c.hop_count}${c.rtt_ms != null ? `<br><small>${c.rtt_ms} ms</small>` : ''}</td>
-                    <td>${this.renderHops(c.hops)}${c.off_backbone?.length ? `<div class="rw-off">off backbone: ${c.off_backbone.map(n => this.esc(n)).join(', ')}</div>` : ''}</td>
-                </tr>`).join('')}</tbody></table>`;
+            const resp = await fetch(`/api/routes/${id}/why?hours=72`);
+            const d = await resp.json();
+            if (!resp.ok) throw new Error(d.error || `HTTP ${resp.status}`);
+            el.innerHTML = this.renderWhy(d, id);
         } catch (error) {
-            console.error('Route history error:', error);
-            el.innerHTML = '<p class="log-empty">Failed to load routes.</p>';
+            console.error('Route why error:', error);
+            el.innerHTML = '<p class="log-empty">Failed to load the route history.</p>';
         }
+    },
+
+    /** "Why did it change?" panel: summary, routes used, where they part, switches with causes. */
+    renderWhy(d, id) {
+        if (!d.routes.length) return '<p class="log-empty">No successful traces in the last 3 days.</p>';
+        const counted = d.switches - (d.switches_internal || 0);
+        const summary = `${d.runs} trace(s) in the last ${d.hours / 24} days${d.failed_runs ? `, ${d.failed_runs} failed` : ''};
+            ${d.routes.length} route(s); ${counted} switch${counted === 1 ? '' : 'es'} (${d.flaps_per_day} a day)${d.switches_internal
+                ? ` plus ${d.switches_internal} between radios of one site` : ''};
+            delay spread between routes ${d.rtt_spread_ms} ms.`;
+        const voip = d.voip_risk
+            ? '<span class="diag-badge infra-badge-warning">VoIP: route switches will be heard</span>'
+            : '<span class="diag-badge infra-badge-ok">VoIP: steady enough</span>';
+        const notes = d.notes.length ? `<ul class="rw-notes">${d.notes.map(n => `<li>${this.esc(n)}</li>`).join('')}</ul>` : '';
+        const causes = d.causes.length ? `<div class="rw-causes">${d.causes.map(c =>
+            `<span class="diag-badge infra-badge-${this.CAUSE_CLS[c.cause] || 'info'}">${this.esc(c.label)}: ${c.count}</span>`).join(' ')}</div>` : '';
+        const name = (g) => (g == null ? '?' : `R${g + 1}`);
+        const routes = `<table class="info-table diag-table rw-changes"><thead><tr><th></th><th>Used</th><th>Delay (median / 90%)</th>
+            <th>Hops</th><th>Route</th><th>Last used</th></tr></thead><tbody>${d.routes.map(g => `<tr>
+                <td><strong>${name(g.id)}</strong>${g.usual ? '<br><span class="diag-badge infra-badge-ok">usual</span>' : ''}</td>
+                <td>${g.share_pct}%<br><small>${g.runs} trace(s)</small></td>
+                <td>${g.rtt_median ?? '-'} / ${g.rtt_p90 ?? '-'} ms</td>
+                <td>${g.hop_count}</td>
+                <td>${this.renderRoute(g.route, d.baseline)}</td>
+                <td><small>${this.esc(g.last_seen)}</small></td></tr>`).join('')}</tbody></table>`;
+        const seg = (s) => (s.length ? s.map(n => this.esc(n)).join(' → ') : '<em>direct</em>');
+        const hotspots = d.hotspots.length ? `<h5>Where the routes part</h5><table class="info-table diag-table rw-changes">
+            <thead><tr><th>At</th><th>One way</th><th>Other way</th><th>Switches</th></tr></thead><tbody>${d.hotspots.map(h => `<tr>
+                <td><strong>${this.esc(h.node)}</strong></td><td>${seg(h.old)}</td><td>${seg(h.new)}</td><td>${h.count}</td></tr>`).join('')}
+            </tbody></table>` : '';
+        const all = this.showAll.has(id);
+        const shown = all ? d.changes : d.changes.slice(0, 15);
+        const delta = (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${v} ms`);
+        const switches = d.changes.length ? `<h5>Switches, newest first</h5><table class="info-table diag-table rw-changes">
+            <thead><tr><th>When</th><th>Cause</th><th>Change</th><th>Where they part</th><th>Delay</th><th>Evidence</th></tr></thead>
+            <tbody>${shown.map(c => `<tr>
+                <td><small>${this.esc(c.at)}</small><br><small class="form-hint">last old trace ${this.esc(c.prev_at.slice(11, 16))}</small></td>
+                <td><span class="diag-badge infra-badge-${this.CAUSE_CLS[c.cause] || 'info'}">${this.esc(c.cause_label)}</span></td>
+                <td>${name(c.from_group)} → ${name(c.to_group)}${c.to_usual ? ' <small>(usual)</small>' : ''}</td>
+                <td><strong>${this.esc(c.divergence.node || '?')}</strong>: was ${seg(c.divergence.old)}
+                    <br>now ${seg(c.divergence.new)}${c.divergence.rejoin ? ` <small>→ ${this.esc(c.divergence.rejoin)}</small>` : ''}</td>
+                <td>${delta(c.rtt_delta_ms)}</td>
+                <td>${c.evidence.length ? `<ul class="rw-evidence">${c.evidence.map(e => `<li>${this.esc(e)}</li>`).join('')}</ul>` : '-'}</td>
+            </tr>`).join('')}</tbody></table>
+            ${!all && d.changes.length > shown.length
+                ? `<button class="btn btn-small btn-secondary" data-rw-action="all" data-id="${id}">Show all ${d.changes.length} switches</button>` : ''}`
+            : '<p class="log-empty">No route switches in the last 3 days.</p>';
+        return `<p class="form-hint">${summary} ${voip}</p>${notes}${causes}
+            <h5>Routes used</h5>${routes}${hotspots}${switches}
+            <p class="form-hint">Causes are looked up around each switch, from 10 min before the last trace on the old route
+            to 5 min after the first trace on the new one: maintenance, reboots, node and link state changes on the old route,
+            and each hop's quality, SNR and Babel cost from the scans (RF links only: DtD and tunnel hops have no cost
+            history). A near-tie is a switch with nothing behind it.</p>`;
+    },
+
+    /** A route as hop chips; hops not on the usual route highlighted. */
+    renderRoute(route, base) {
+        const usual = new Set(base || []);
+        return `<div class="rw-hops">${route.map((n, i) => {
+            const cls = n === '*' ? ' rw-hop-timeout' : (base && !usual.has(n) ? ' rw-hop-new' : '');
+            return `${i ? '<span class="rw-via">→</span>' : ''}<span class="rw-hop${cls}">${this.esc(n)}</span>`;
+        }).join('')}</div>`;
     },
 
     async runPath(id, button) {

@@ -53,6 +53,7 @@ CHANGE_EVENTS = {
     'noise_jump': 'noise', 'noise_cleared': 'noise',
     'one_way_link': 'one_way', 'one_way_link_cleared': 'one_way',
     'route_changed': 'route', 'route_detour': 'route', 'route_restored': 'route',
+    'route_flapping': 'route', 'route_steady': 'route',
     'link_new': 'neighbor', 'link_removed': 'neighbor',
     'link_dropped': 'link', 'link_restored': 'link', 'link_blocked': 'link', 'link_unblocked': 'link',
     'node_offline': 'reachability', 'node_online': 'reachability', 'node_degraded': 'reachability',

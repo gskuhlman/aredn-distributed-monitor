@@ -91,6 +91,7 @@ import link_alerts
 import phones
 import link_potential
 import ssh_collect
+import ssh_traffic
 import embeds
 
 # Configure logging
@@ -1559,6 +1560,24 @@ def api_ssh_node(name):
     return jsonify(ssh_collect.node_details(name, hours=max(1, min(_hours_arg(24), 24 * 31))))
 
 
+@app.route('/api/ssh/traffic/<path:name>', methods=['POST'])
+def api_ssh_traffic(name):
+    """Node traffic now over SSH (read-only script; nothing stored). A POST,
+    so it needs the login when a password is set: it names hosts and addresses."""
+    body = request.get_json(silent=True) or {}
+    node = database.get_node(name.lower())
+    if not node:
+        return jsonify({'error': 'Node not found'}), 404
+    try:
+        seconds = int(body.get('seconds') or ssh_traffic.DEFAULT_SECONDS)
+    except (TypeError, ValueError):
+        seconds = ssh_traffic.DEFAULT_SECONDS
+    result = ssh_traffic.traffic(node['name'], seconds)
+    if result.get('error'):
+        return jsonify(result), 409 if result.get('error_kind') == 'no_key' else 502
+    return jsonify(result)
+
+
 @app.route('/api/ssh/snapshot/<int:snap_id>')
 def api_ssh_snapshot(snap_id):
     # Logs and settings: behind the login when one is set (uci secrets are already removed).
@@ -1721,6 +1740,15 @@ def api_routes_delete(path_id):
 @app.route('/api/routes/<int:path_id>/history')
 def api_routes_history(path_id):
     result = route_watch.path_history(path_id, hours=_hours_arg())
+    if result is None:
+        return jsonify({'error': 'Path not found'}), 404
+    return jsonify(result)
+
+
+@app.route('/api/routes/<int:path_id>/why')
+def api_routes_why(path_id):
+    """Why did the route change: routes used, each switch with its likely cause, flaps per day."""
+    result = route_watch.why_changed(path_id, hours=_hours_arg(default=72))
     if result is None:
         return jsonify({'error': 'Path not found'}), 404
     return jsonify(result)
