@@ -79,3 +79,13 @@ def test_flows_classified_and_named():
 def test_no_key(monkeypatch):
     monkeypatch.setattr(ssh_collect, 'key_present', lambda: False)
     assert t.traffic('x')['error_kind'] == 'no_key'
+
+
+def test_explain_lines():
+    r = _run()
+    homes = [(t.ipaddress.ip_address('10.10.20.25'), 'pbx-node')]
+    lines = t.explain(r, 'mmc', homes)
+    assert any(l.startswith('WireGuard tunnel wg0 to 203.0.113.5:5525') for l in lines)
+    assert any('LAN host MercyPhone talks to pbx' in l and "pbx-node's LAN" in l for l in lines)
+    assert any('leave through this node' in l for l in lines)
+    assert t.home_of('10.10.21.30', homes) is None

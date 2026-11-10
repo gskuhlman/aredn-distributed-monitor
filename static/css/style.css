@@ -2782,3 +2782,6 @@ tr.site-down td { opacity: 0.65; }
 .nu-bad { color: #c0392b; }
 .nu-na { color: #95a5a6; }
 .nu-stale { color: #8e44ad; }
+
+.nt-explain { margin: 0.25rem 0 0.75rem 1.2rem; padding: 0; }
+.nt-explain li { margin: 0.2rem 0; line-height: 1.4; }

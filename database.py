@@ -1292,6 +1292,8 @@ RADIO_CONFIG_COLUMNS = (
     ('antenna_gain', 'REAL'), ('antenna_beamwidth', 'REAL'), ('antenna_desc', 'TEXT'),
     ('lqm_user_blocks', 'TEXT'), ('lqm_hidden_nodes', 'TEXT'), ('rf_txpower', 'REAL'),
     ('radio_config_at', 'TEXT'),
+    # node_details.mesh_gateway: the node shares its WAN (internet) with the mesh.
+    ('mesh_gateway', 'INTEGER'),
 )
 
 
@@ -1312,7 +1314,10 @@ def radio_config_from_sysinfo(data):
     # LQM's own hidden-node list: stations its RF neighbours hear but this
     # radio doesn't (JSON list of {hostname, ip, distance}).
     hidden = lqm_info.get('hidden_nodes') if isinstance(lqm_info.get('hidden_nodes'), list) else None
+    details = data.get('node_details') or {}
+    gateway = details.get('mesh_gateway')
     return {
+        'mesh_gateway': (1 if gateway in (True, 1, '1', 'true') else 0) if gateway is not None else None,
         'rf_status': meshrf.get('status'),
         'rf_mode': meshrf.get('mode'),
         'rf_ssid': meshrf.get('ssid'),

@@ -76,7 +76,9 @@ const NodeTraffic = {
                 ${ct.accounting ? `<td>${this.size(s.bytes)}</td>` : ''}<td><small>${this.esc(s.services.join(', '))}</small></td></tr>`).join('')}
             </tbody></table></div>` : '';
         const hosts = d.lan_hosts.length ? `<p class="form-hint">LAN hosts (DHCP): ${d.lan_hosts.map(h => `${this.esc(h.name)} ${this.esc(h.ip)}`).join(', ')}</p>` : '';
-        el.innerHTML = `${ifTable}${wg}${ctNote}${summary}
+        const explain = (d.explain || []).length ? `<h3 class="subsection-heading">What this means</h3>
+            <ul class="nt-explain">${d.explain.map(t => `<li>${this.esc(t)}</li>`).join('')}</ul>` : '';
+        el.innerHTML = `${explain}${ifTable}${wg}${ctNote}${summary}
             ${d.flows.length ? `<h3 class="subsection-heading">Connections</h3>
             <input type="search" id="nt-filter" class="form-input" placeholder="Filter by name, address, port, service">
             <div id="nt-flows"></div>` : ''}${hosts}

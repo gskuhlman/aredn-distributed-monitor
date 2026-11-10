@@ -347,6 +347,101 @@ def analyse(sections, seconds, names=None):
     }
 
 
+def _home_nodes():
+    """[(ip, node name)] sorted, to guess which node's LAN a host is on."""
+    with database.get_connection() as conn:
+        rows = conn.execute("SELECT ip, name FROM nodes WHERE ip IS NOT NULL AND name NOT LIKE 'mac-%'").fetchall()
+    out = []
+    for ip, name in rows:
+        try:
+            out.append((ipaddress.ip_address(ip), name))
+        except ValueError:
+            pass
+    return sorted(out)
+
+
+def home_of(ip, homes):
+    """The node whose LAN probably holds `ip`: the nearest node address at or
+    below it in the same /24, within 64 addresses (AREDN LANs are /29-/26)."""
+    try:
+        a = ipaddress.ip_address(ip)
+    except (TypeError, ValueError):
+        return None
+    best = None
+    for nip, name in homes:
+        if nip <= a and int(a) - int(nip) < 64 and str(nip).rsplit('.', 1)[0] == str(a).rsplit('.', 1)[0]:
+            best = name
+    return best
+
+
+def _fmt_rate(bps):
+    if bps is None:
+        return '?'
+    return f'{bps / 1e6:.1f} Mbps' if bps >= 1e6 else f'{bps / 1e3:.0f} kbps' if bps >= 1e3 else f'{bps} bps'
+
+
+def _fmt_size(b):
+    if b is None:
+        return '?'
+    return f'{b / 1e9:.2f} GB' if b >= 1e9 else f'{b / 1e6:.1f} MB' if b >= 1e6 else f'{b / 1e3:.0f} kB'
+
+
+def explain(r, node, homes=None):
+    """Plain-language findings from one traffic reading, most useful first."""
+    homes = _home_nodes() if homes is None else homes
+    out = []
+    label = lambda f, side: f[f'{side}_name'] or f[side]
+    where = lambda ip: (lambda h: f" (on {h}'s LAN)" if h and h != node else '')(home_of(ip, homes))
+    wan = next((i for i in r['interfaces'] if i['role'] == 'wan'), None)
+    wg_total_tx = sum(w['tx_total_bytes'] or 0 for w in r['wireguard'])
+    wg_rate = sum((w['rx_bps'] or 0) + (w['tx_bps'] or 0) for w in r['wireguard'])
+    for w in r['wireguard']:
+        out.append(f"WireGuard tunnel {w['iface']} to {w['endpoint'] or '?'}: sent {_fmt_size(w['tx_total_bytes'])} and "
+                   f"received {_fmt_size(w['rx_total_bytes'])} since it came up; right now "
+                   f"{_fmt_rate(w['tx_bps'])} out, {_fmt_rate(w['rx_bps'])} in.")
+    if wan and r['wireguard'] and wan['tx_total_bytes']:
+        share = 100.0 * wg_total_tx / wan['tx_total_bytes']
+        if share > 100:
+            out.append(f"The tunnel has sent more ({_fmt_size(wg_total_tx)}) than the WAN ({wan['name']}) counter shows "
+                       f"({_fmt_size(wan['tx_total_bytes'])}): the WAN interface was reset or reconnected since the tunnel came up, "
+                       f"so nearly all WAN traffic is the tunnel.")
+        elif share >= 50:
+            out.append(f"Most of what this node sends over its WAN ({wan['name']}) is the tunnel "
+                       f"({_fmt_size(wg_total_tx)} of {_fmt_size(wan['tx_total_bytes'])} since boot).")
+    if wan and wan['rx_bps'] > max(4 * wg_rate, 50000):
+        out.append(f"The WAN network itself is sending this node {_fmt_rate(wan['rx_bps'])} that isn't tunnel traffic "
+                   f"(background broadcasts from the network it is connected to).")
+    # Traffic passing through between two other mesh hosts, grouped by host pair.
+    transit = {}
+    for f in r['flows']:
+        if f['src_class'] in ('mesh', 'tunnel', 'dtdlink') and f['dst_class'] in ('mesh', 'tunnel', 'dtdlink'):
+            t = transit.setdefault((label(f, 'src'), f['src'], label(f, 'dst'), f['dst']), {'bytes': 0, 'n': 0, 'svc': {}})
+            t['bytes'] += f['bytes'] or 0
+            t['n'] += 1
+            svc = f['service'] or f['proto'].upper()
+            t['svc'][svc] = t['svc'].get(svc, 0) + (f['bytes'] or 0)
+    for (sn, sip, dn, dip), t in sorted(transit.items(), key=lambda kv: -kv[1]['bytes'])[:4]:
+        if t['bytes'] >= 1e6:
+            svcs = ', '.join(k for k, _ in sorted(t['svc'].items(), key=lambda kv: -kv[1]))
+            out.append(f"Traffic between {sn}{where(sip)} and {dn}{where(dip)} passes through this node: "
+                       f"{svcs}, {t['n']} connection(s), {_fmt_size(t['bytes'])} so far.")
+    lan = {}
+    for f in r['flows']:
+        if f['src_class'] == 'lan' and f['dst_class'] not in ('node', 'lan', 'broadcast'):
+            key = (label(f, 'src'), f['src'], label(f, 'dst'), f['dst'], f['service'] or f['proto'], bool(f.get('via')))
+            lan[key] = lan.get(key, 0) + (f['bytes'] or 0)
+    for (sn, sip, dn, dip, svc, via), b in sorted(lan.items(), key=lambda kv: -kv[1])[:4]:
+        out.append(f"LAN host {sn} talks to {dn}{where(dip)} ({svc}"
+                   + (f', {_fmt_size(b)}' if b else '') + ')'
+                   + (" through this node's internet connection" if via else '') + '.')
+    nat = [f for f in r['flows'] if f.get('via') and f['src_class'] not in ('lan', 'node')]
+    if nat:
+        out.append(f"{len(nat)} connection(s) from other mesh hosts leave through this node's internet connection.")
+    if not r['conntrack']['available']:
+        out.append('The node did not give its connection table, so only the interface rates are known.')
+    return out
+
+
 def traffic(node, seconds=DEFAULT_SECONDS):
     """Run the traffic script on `node` and return the analysis, or {error}."""
     if not ssh_collect.key_present():
@@ -364,4 +459,9 @@ def traffic(node, seconds=DEFAULT_SECONDS):
         kind = ssh_collect.classify_error(err)
         return {'node': node, 'error': ssh_collect.ERROR_HINTS.get(kind) or (err.strip()[:300] or 'no answer'),
                 'error_kind': kind}
-    return {'node': node, **analyse(sections, seconds)}
+    result = {'node': node, **analyse(sections, seconds)}
+    try:
+        result['explain'] = explain(result, node)
+    except Exception:   # the plain-language lines are extra; never lose the reading
+        result['explain'] = []
+    return result

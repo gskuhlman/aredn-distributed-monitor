@@ -306,7 +306,7 @@ const NodesModule = {
         if (!tbody) return;
 
         if (this.filteredNodes.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="nodes-empty">No nodes found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" class="nodes-empty">No nodes found</td></tr>';
             return;
         }
 
@@ -325,6 +325,7 @@ const NodesModule = {
             const nameLink = this.getQRZLink(nodeName);
             const modelText = node.is_link_only ? 'Not polled' : (node.model || 'Unknown');
             const firmwareText = node.is_link_only ? 'Not polled' : (node.firmware_version || 'Unknown');
+            const wanText = node.is_link_only || node.mesh_gateway == null ? '-' : (node.mesh_gateway ? 'Yes' : 'No');
             const deleteButton = node.is_link_only
                 ? ''
                 : `<button class="btn btn-small btn-danger" data-node-action="delete" data-node-name="${encodedName}">Delete</button>`;
@@ -339,6 +340,7 @@ const NodesModule = {
                     <td>${this.escapeHtml(lastSeen)}</td>
                     <td>${node.links_count || 0}</td>
                     <td>${servicesCount}</td>
+                    <td title="Shares its internet (WAN) connection with the mesh (AREDN mesh gateway)">${wanText}</td>
                     <td>
                         <button class="btn btn-small btn-secondary" data-node-action="details" data-node-name="${encodedName}">Details</button>
                         <a class="btn btn-small btn-secondary" href="/nodes/${encodedName}">Full</a>
@@ -442,6 +444,7 @@ const NodesModule = {
                         <tr><td>Last Seen:</td><td>${node.last_seen ? new Date(node.last_seen).toLocaleString() : 'N/A'}</td></tr>
                         <tr><td>Status:</td><td>${this.getNodeStatusText(node)}</td></tr>
                         <tr><td>Supernode:</td><td>${node.is_supernode === 1 ? 'Yes' : 'No'}</td></tr>
+                        <tr><td>Shares WAN with mesh:</td><td>${node.mesh_gateway == null ? 'Not read yet' : (node.mesh_gateway ? 'Yes' : 'No')}</td></tr>
                         ${node.is_link_only ? `<tr><td>Reported By:</td><td>${this.escapeHtml((node.reporters || []).join(', ') || 'N/A')}</td></tr>` : ''}
                     </table>
                 </div>

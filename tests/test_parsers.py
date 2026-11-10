@@ -142,3 +142,11 @@ def test_health_reads_aredn_freememory():
     h = observations.node_health_fields({'sysinfo': {'uptime': '0 days, 14:43', 'loads': [0.1, 0.0, 0.0],
                                                      'freememory': '439568'}})
     assert h['mem_free'] == 439568 and h['mem_total'] is None
+
+
+def test_mesh_gateway_from_sysinfo():
+    import database
+    get = lambda d: database.radio_config_from_sysinfo(d)['mesh_gateway']
+    assert get({'node_details': {'mesh_gateway': True}}) == 1
+    assert get({'node_details': {'mesh_gateway': False}}) == 0
+    assert get({'node_details': {}}) is None

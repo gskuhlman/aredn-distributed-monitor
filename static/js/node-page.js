@@ -242,6 +242,7 @@ const NodePage = {
                 <tr><td>Last Seen:</td><td>${this.formatDate(node.last_seen)}</td></tr>
                 <tr><td>Status:</td><td>${this.getNodeStatusText(node)}</td></tr>
                 <tr><td>Supernode:</td><td>${node.is_supernode === 1 ? 'Yes' : 'No'}</td></tr>
+                <tr><td>Shares WAN with mesh:</td><td>${node.mesh_gateway == null ? 'Not read yet' : (node.mesh_gateway ? 'Yes' : 'No')}</td></tr>
                 <tr><td>Latitude:</td><td>${this.escapeHtml(node.lat || 'N/A')}</td></tr>
                 <tr><td>Longitude:</td><td>${this.escapeHtml(node.lon || 'N/A')}</td></tr>
                 ${node.is_link_only ? `<tr><td>Reported By:</td><td>${this.escapeHtml((node.reporters || []).join(', ') || 'N/A')}</td></tr>` : ''}
