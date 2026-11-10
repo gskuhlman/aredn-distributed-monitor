@@ -37,7 +37,7 @@ NEW_NODE_DAYS = env_int("NEW_NODE_DAYS", 30)  # Announce nodes as new only when 
 DATABASE_RETENTION_DAYS = env_int("DATABASE_RETENTION_DAYS", 90)  # Keep inactive node records this many days
 
 # Connectivity event log
-CONNECTIVITY_LOG_PATH = "connectivity.log"
+CONNECTIVITY_LOG_PATH = os.environ.get("CONNECTIVITY_LOG_PATH", "connectivity.log")
 CONNECTIVITY_LOG_RETENTION_DAYS = env_int("CONNECTIVITY_LOG_RETENTION_DAYS", 31)
 
 # Link quality thresholds (0-100)

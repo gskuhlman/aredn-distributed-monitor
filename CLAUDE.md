@@ -22,6 +22,9 @@ python app.py
 systemctl --user daemon-reload
 systemctl --user enable --now aredn-monitor
 
+# Docker on a Linux workstation on the mesh (host networking, data in ./data; docs/DOCKER.md)
+docker compose up -d --build
+
 # Validate Python syntax
 python -m py_compile app.py scanner.py config.py database.py rf_stats.py observations.py couch_client.py voip.py voip_proto.py voip_session.py agent.py mesh_diagnostics.py gateway.py reports.py link_diagnostics.py infra_audit.py change_log.py channel_map.py notify.py unreachable.py link_watch.py fetch_offline_map.py drift.py cleanup.py collector_health.py maintenance.py channel_planner.py notes.py aim_check.py site_matrix.py airtime.py power_advisor.py route_watch.py weather.py health_score.py heatmap.py swimlanes.py path_view.py spof.py site_dashboard.py capacity.py weekly_report.py link_budget.py rollout.py change_verdict.py ghost_trackers.py wifi_survey.py babel_view.py service_check.py hygiene.py playback.py waterfall.py auth.py db_care.py distributed_status.py welcome.py align.py club_report.py routing_errors.py spectrum_view.py prom_source.py prom_watch.py link_alerts.py link_potential.py embeds.py phones.py ssh_collect.py ssh_health.py uptime.py ssh_traffic.py rollup.py audit.py incidents.py suppressions.py acks.py degradation.py storm.py noise_source.py tunnels.py tape.py call_quality.py iface_traffic.py services_catalog.py syslog_rx.py boards.py public_status.py local_time.py node_clock.py
 

@@ -51,3 +51,6 @@ backups/
 
 # SSH key pair and pinned host keys (ssh_collect.py): never commit
 ssh/
+
+# Docker data volume (docker-compose.yml)
+data/

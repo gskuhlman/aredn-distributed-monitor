@@ -1,0 +1,26 @@
+services:
+  aredn-monitor:
+    build: .
+    image: aredn-monitor:latest
+    container_name: aredn-monitor
+    # Host networking (Linux hosts): the mesh DNS (*.local.mesh), pings,
+    # traceroutes, SSH to nodes and the optional syslog UDP port all use the
+    # workstation's own mesh interface. The web UI is on http://<host>:5000.
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 30s
+    volumes:
+      - ./data:/data
+    environment:
+      TZ: America/Chicago
+      COLLECTOR_ID: ${COLLECTOR_ID:-collector-workstation}
+      COLLECTOR_SITE: ${COLLECTOR_SITE:-}
+      # PORT: "5000"
+      # STARTING_NODE: "http://localnode.local.mesh/cgi-bin/sysinfo.json?lqm=1&hosts=1&services=1&services_local=1"
+      # ADMIN_PASSWORD: set one on /admin instead (stored hashed in the database)
+      # SYSLOG_ENABLED: "true"   # opens UDP 514 on the host
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
