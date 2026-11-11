@@ -1248,7 +1248,7 @@ def set_node_selected(name, selected):
 
 DEFAULT_SITE_NAMES = {
     'COL': 'Collins Tower',
-    'MMC': 'Mt Mercy Hospital',
+    'MMC': 'Mercy Medical Center',
     'EOC': 'Linn County EOC',
 }
 
