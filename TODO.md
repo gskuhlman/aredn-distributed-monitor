@@ -320,12 +320,16 @@ attached devices), Link Health map, Log Viewer (syslog), Incidents, Changes, Ali
 - [ ] 90. **Weather radar overlay on the map** (RainViewer tiles) to set beside rain fade (#weather).
 - [ ] 91. **Quick iperf3 box** on the home page: pick two nodes, TCP/UDP, Run test, last result
       and history (we have iPerf in Links; this is just faster to reach).
-- [ ] 92. **Our SSH collector in their syslog.** NM5PB's log viewer (all W0GQ nodes already send
+- [x] 92. **Our SSH collector in their syslog.** NM5PB's log viewer (all W0GQ nodes already send
       syslog to nm5pb-lin01, 10.246.137.98:514) shows this PC (10.42.92.116) logging in to every
       infrastructure radio every 15 min (3 dropbear lines each), sometimes "Connection reset by
       peer". On W0GQ-COL-RKT-S every run also logs "ath10k_pci: failed to request fw stats: -145"
       (timeout): stop reading fw_stats on a radio once it times out there (Collins South has
       "ath10k mesh unresponsive" resets, their INC-2026-0001), and close sessions cleanly.
+      *Built: a backed-off radio's fw_stats is retried once a week on a slow run (`SSH_FW_STATS_RETRY_DAYS`),
+      not on every daily slow run; sessions already ended with `exit` (dropbear logs "Disconnect
+      received"), and on SIGTERM (docker stop) the app now starts no new session and lets the open
+      one finish before exiting.*
 - [ ] 93. **Read NM5PB's log collector instead of running our own** (#85), if it has an API and
       NM5PB agrees. Seen there now: KD0CGN-Prox (starting node) babeld "kernel_route(ADD):
       Operation not permitted" for 192.168.1.214/32 x191 in 3 h; KF0JCL-QTH lan_monitor ucode

@@ -361,8 +361,11 @@ SSH_RX_ERROR_PCT = env_int("SSH_RX_ERROR_PCT", 20)                  # received M
 SSH_ETH_FLAPS_PER_HOUR = env_int("SSH_ETH_FLAPS_PER_HOUR", 2)
 SSH_CLOCK_SKEW_SECONDS = env_int("SSH_CLOCK_SKEW_SECONDS", 120)
 SSH_PHY_RESETS_PER_HOUR = env_int("SSH_PHY_RESETS_PER_HOUR", 30)    # ath10k "PDEV resets" (firmware resets the PHY)
-# fw_stats timeouts in a row before a radio's fw_stats is read only on slow runs
+# fw_stats timeouts in a row before a radio's fw_stats is backed off; a
+# backed-off radio is retried once every SSH_FW_STATS_RETRY_DAYS, on a slow run
+# (each timeout logs "failed to request fw stats: -145" in the node's syslog).
 SSH_FW_STATS_BACKOFF_FAILS = env_int("SSH_FW_STATS_BACKOFF_FAILS", 3)
+SSH_FW_STATS_RETRY_DAYS = env_int("SSH_FW_STATS_RETRY_DAYS", 7)
 # A TDWR airport weather radar (5600-5650 MHz) within range of the mesh. The
 # nearest to Cedar Rapids are Chicago, Milwaukee and Minneapolis (300+ km), so
 # off: 5600-5650 is then only "below the ham band" and 5650-5660 is not penalised.

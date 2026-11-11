@@ -183,3 +183,27 @@ def test_extra_ath10k_chains_are_dropped(ssh):
     assert s['chains_avg'] == [-63, -64]   # no iw phy yet: two chains
     assert sc.rx_chains('Available Antennas: TX 0x3 RX 0x3\n\tConfigured Antennas: TX 0x1 RX 0x1') == 1
     assert sc.rx_chains('Wiphy phy0') is None
+
+
+def test_run_stops_between_nodes_on_shutdown(monkeypatch):
+    """After stop() (SIGTERM), the session in progress finishes and no further
+    node is started."""
+    import gateway
+    import ssh_collect as sc
+    monkeypatch.setattr(sc, 'ensure_tables', lambda: None)
+    monkeypatch.setattr(sc, 'key_present', lambda: True)
+    monkeypatch.setattr(gateway, 'is_reachable', lambda: True)
+    monkeypatch.setattr(sc, 'evaluate', lambda now: [])
+    monkeypatch.setattr(sc, '_prune', lambda now: None)
+    monkeypatch.setattr(sc, '_stopping', sc.threading.Event())
+    seen = []
+
+    def collect(node, **kw):
+        seen.append(node)
+        assert sc.busy()
+        if node == 'b':
+            sc.stop()
+        return {'node': node, 'ok': True}
+    monkeypatch.setattr(sc, 'collect_node', collect)
+    result = sc.run(['a', 'b', 'c'])
+    assert seen == ['a', 'b'] and result['stopped'] and not sc.busy()

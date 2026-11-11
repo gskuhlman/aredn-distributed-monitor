@@ -22,6 +22,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 import logging
 import atexit
+import signal
 import time
 import os
 import html
@@ -3545,9 +3546,31 @@ def shutdown_scheduler():
 
 atexit.register(shutdown_scheduler)
 
+# Seconds to let an SSH session in progress finish on SIGTERM (docker stop),
+# so nodes log a normal disconnect, not a connection cut mid-handshake. Kept
+# under the container's 30 s stop grace period.
+SHUTDOWN_SSH_WAIT_SECONDS = 25
+
+
+def handle_sigterm(signum, frame):
+    """docker stop / systemctl stop: no new SSH sessions, let the open one
+    finish, then exit the way Ctrl+C does (KeyboardInterrupt stops the server
+    and runs the atexit handlers)."""
+    logger.info("SIGTERM received: finishing the SSH session in progress, then exiting")
+    ssh_collect.stop()
+
+    def finish():
+        deadline = time.monotonic() + SHUTDOWN_SSH_WAIT_SECONDS
+        while ssh_collect.busy() and time.monotonic() < deadline:
+            socketio.sleep(0.5)
+        shutdown_scheduler()
+        os.kill(os.getpid(), signal.SIGINT)
+    socketio.start_background_task(finish)
+
 
 if __name__ == '__main__':
     logger.info("Starting AREDN Network Monitor")
+    signal.signal(signal.SIGTERM, handle_sigterm)
 
     # Initialize database
     database.init_db()

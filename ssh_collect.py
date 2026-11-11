@@ -24,9 +24,12 @@ a fixed script on stdin -- never anything typed by a user:
          by the driver: reading it never asks the firmware) and ath10k
          fw_stats (asks the firmware; a radio whose firmware doesn't answer
          within the driver's 1 s logs "failed to request fw stats: -145"
-         each time, so after SSH_FW_STATS_BACKOFF_FAILS timeouts in a row it
-         is read only on slow runs until a read works again);
-  slow   (every SSH_SLOW_HOURS, or on request) `iw phy`, ath10k fw_stats and
+         each time -- in the node's syslog, which other operators read -- so
+         after SSH_FW_STATS_BACKOFF_FAILS timeouts in a row it is retried
+         only once every SSH_FW_STATS_RETRY_DAYS, on a slow run, until a read
+         works again);
+  slow   (every SSH_SLOW_HOURS, or on request) `iw phy`, ath10k fw_stats (not
+         on a backed-off radio between its weekly retries) and
          ath9k ani/xmit/reset from debugfs when readable, the last 400 dmesg
          and 600 logread lines, the radio firmware (ath10k/ath11k version
          lines from dmesg; md5, size and whether the file was replaced in the
@@ -101,7 +104,7 @@ for f in /sys/kernel/debug/ieee80211/*/ath10k/fw_reset_stats; do [ -r "$f" ] && 
 ''' + iface_traffic.SCRIPT.format(mark=MARK)
 # fw_stats (counters for receive errors, missing ACKs, PHY resets) is read
 # every run unless the node is backed off (see the docstring), and kept as a
-# snapshot on slow runs.
+# snapshot on slow runs that read it.
 FW_STATS_SCRIPT = f'''for f in /sys/kernel/debug/ieee80211/*/ath10k/fw_stats; do [ -r "$f" ] && {{ echo "{MARK} fw_stats $f"; cat "$f" 2>&1; }}; done
 '''
 # The shell would exit at the end of stdin anyway; `exit` ends the session
@@ -162,6 +165,18 @@ FW_RESET_FIELDS = {'fw_crash_counter': 'fw_crashes', 'fw_warm_reset_counter': 'f
                    'fw_cold_reset_counter': 'fw_cold_resets'}
 
 _lock = threading.Lock()
+# Set on shutdown (app.py's SIGTERM handler): run() starts no further node, so
+# the session in progress ends with its normal `exit` instead of being killed.
+_stopping = threading.Event()
+
+
+def stop():
+    _stopping.set()
+
+
+def busy():
+    """True while a collection run holds the lock (a session may be open)."""
+    return _lock.locked()
 
 
 # ------------------------------------------------------------------ setup --
@@ -228,8 +243,11 @@ def ensure_tables():
                 conn.execute(f'ALTER TABLE ssh_fw_samples ADD COLUMN {col} INTEGER')
         if 'severity' not in {r[1] for r in conn.execute('PRAGMA table_info(ssh_alarm_state)')}:
             conn.execute('ALTER TABLE ssh_alarm_state ADD COLUMN severity TEXT')
-        if 'fw_stats_fails' not in {r[1] for r in conn.execute('PRAGMA table_info(ssh_status)')}:
+        cols = {r[1] for r in conn.execute('PRAGMA table_info(ssh_status)')}
+        if 'fw_stats_fails' not in cols:
             conn.execute('ALTER TABLE ssh_status ADD COLUMN fw_stats_fails INTEGER DEFAULT 0')
+        if 'fw_stats_tried' not in cols:
+            conn.execute('ALTER TABLE ssh_status ADD COLUMN fw_stats_tried TEXT')
 
 
 def _exe(name):
@@ -544,9 +562,9 @@ def fw_stats_failed(text):
 
 
 def node_script(slow, fw_stats=True):
-    """The fixed script for one session: the fast part, fw_stats unless backed
+    """The fixed script for one session: the fast part, fw_stats when asked
     off (always on slow runs), the slow part on slow runs."""
-    return FAST_SCRIPT + (FW_STATS_SCRIPT if fw_stats or slow else '') + (SLOW_SCRIPT if slow else '') + END_SCRIPT
+    return FAST_SCRIPT + (FW_STATS_SCRIPT if fw_stats else '') + (SLOW_SCRIPT if slow else '') + END_SCRIPT
 
 
 def parse_coverage(phy_text):
@@ -632,10 +650,12 @@ def _peer_names(conn, node):
 def _status(conn, node):
     r = conn.execute('SELECT * FROM ssh_status WHERE node_name = ?', (node,)).fetchone()
     return dict(r) if r else {'node_name': node, 'last_try': None, 'last_ok': None, 'last_slow': None,
-                              'error': None, 'error_kind': None, 'fails': 0, 'fw_stats_fails': 0}
+                              'error': None, 'error_kind': None, 'fails': 0, 'fw_stats_fails': 0,
+                              'fw_stats_tried': None}
 
 
-STATUS_COLS = ('node_name', 'last_try', 'last_ok', 'last_slow', 'error', 'error_kind', 'fails', 'fw_stats_fails')
+STATUS_COLS = ('node_name', 'last_try', 'last_ok', 'last_slow', 'error', 'error_kind', 'fails', 'fw_stats_fails',
+               'fw_stats_tried')
 
 
 def _save_status(conn, st):
@@ -645,6 +665,17 @@ def _save_status(conn, st):
 
 def fw_stats_backed_off(st):
     return (st.get('fw_stats_fails') or 0) >= config.SSH_FW_STATS_BACKOFF_FAILS
+
+
+def read_fw_stats(st, slow, now):
+    """Whether this run reads fw_stats: always, unless backed off; a backed-off
+    radio only on a slow run once every SSH_FW_STATS_RETRY_DAYS (each try that
+    times out logs another -145 on the node)."""
+    if not fw_stats_backed_off(st):
+        return True
+    tried = st.get('fw_stats_tried')
+    return bool(slow) and (not tried or datetime.strptime(tried, TS_FMT)
+                           <= now - timedelta(days=config.SSH_FW_STATS_RETRY_DAYS))
 
 
 def _due(st, now, manual):
@@ -668,8 +699,9 @@ def collect_node(node, slow=None, manual=False, now=None):
     if not _due(st, now, manual):
         return {'node': node, 'ok': False, 'skipped': True, 'error_kind': st['error_kind'], 'error': st['error']}
     slow = _slow_due(st, now) if slow is None else slow
+    fw_try = read_fw_stats(st, slow, now)
     try:
-        code, out, err = _run_ssh(node, node_script(slow, fw_stats=not fw_stats_backed_off(st)))
+        code, out, err = _run_ssh(node, node_script(slow, fw_stats=fw_try))
     except subprocess.TimeoutExpired:
         code, out, err = None, '', 'timed out'
     except OSError as exc:
@@ -751,6 +783,8 @@ def collect_node(node, slow=None, manual=False, now=None):
         st.update(last_try=now_s, last_ok=now_s, error=None, error_kind=None, fails=0)
         if fw_read:
             st['fw_stats_fails'] = 0 if fw_ok else (st.get('fw_stats_fails') or 0) + 1
+        if fw_try:
+            st['fw_stats_tried'] = now_s
         if slow:
             st['last_slow'] = now_s
         _save_status(conn, st)
@@ -817,7 +851,11 @@ def run(nodes=None, slow=None, manual=False):
         if not gateway.is_reachable():
             return {'results': [], 'events': [], 'error': gateway.unreachable_message()}
         now = datetime.now()
-        results = [collect_node(n, slow=slow, manual=manual, now=now) for n in (nodes or targets())]
+        results = []
+        for n in (nodes or targets()):
+            if _stopping.is_set():
+                return {'results': results, 'events': [], 'stopped': True}
+            results.append(collect_node(n, slow=slow, manual=manual, now=now))
         events = evaluate(now)
         _prune(now)
         return {'results': results, 'events': events}

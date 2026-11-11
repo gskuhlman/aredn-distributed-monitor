@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+import config
 import database
 import ssh_collect as sc
 import ssh_health
@@ -300,7 +301,8 @@ def test_fw_reset_parsers_and_script():
     fast = sc.node_script(False)
     assert 'fw_reset_stats' in fast and sc.FW_STATS_SCRIPT in fast and sc.SLOW_SCRIPT not in fast
     assert sc.FW_STATS_SCRIPT not in sc.node_script(False, fw_stats=False)
-    assert sc.FW_STATS_SCRIPT in sc.node_script(True, fw_stats=False)
+    assert sc.FW_STATS_SCRIPT not in sc.node_script(True, fw_stats=False)
+    assert sc.FW_STATS_SCRIPT in sc.node_script(True)
     assert sc.node_script(True).endswith(f'echo "{M} end"\nexit 0\n')
 
 
@@ -326,14 +328,30 @@ def test_fw_stats_backoff(ssh, monkeypatch):
         rows = conn.execute('SELECT fw_crashes, pdev_resets FROM ssh_fw_samples ORDER BY timestamp').fetchall()
         assert len(rows) == 6 and all(r[0] == 0 for r in rows)
         assert [r[1] is None for r in rows] == [False, True, True, True, True, True]
-    # a slow run reads it again; a good read ends the back-off
+    # a slow run soon after doesn't retry it: every timeout logs another -145 on the node
     scripts.clear()
     fake.out = lambda i: fw_output(i, slow=True)
     fake.i = 6
     sc.collect_node('w0aa-col-sq-2mmc', slow=True, now=time_of(6))
-    assert sc.FW_STATS_SCRIPT in scripts[0]
+    assert sc.FW_STATS_SCRIPT not in scripts[0]
+    with database.get_connection() as conn:
+        assert ssh_health.fw_stats_status(conn) == {'w0aa-col-sq-2mmc': 3}
+    # nor does a fast run a week later; a slow run a week after the last try does,
+    # and a good read ends the back-off
+    week = time_of(3) + timedelta(days=config.SSH_FW_STATS_RETRY_DAYS)
+    scripts.clear()
+    fake.i = 7
+    sc.collect_node('w0aa-col-sq-2mmc', slow=False, now=week)
+    fake.i = 8
+    sc.collect_node('w0aa-col-sq-2mmc', slow=True, now=week + timedelta(minutes=15))
+    assert [sc.FW_STATS_SCRIPT in s for s in scripts] == [False, True]
     with database.get_connection() as conn:
         assert ssh_health.fw_stats_status(conn) == {}
+    # once it works again it is read on every run
+    scripts.clear()
+    fake.i = 9
+    sc.collect_node('w0aa-col-sq-2mmc', slow=False, now=week + timedelta(minutes=30))
+    assert sc.FW_STATS_SCRIPT in scripts[0]
 
 
 def test_fw_crash_alarm(ssh):
