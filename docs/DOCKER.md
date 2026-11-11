@@ -59,6 +59,17 @@ The nodes already trust the key, so SSH collection keeps working; the pinned
 host keys carry over too. Settings, notification channels, the login
 password and the per-install session key all live in the database.
 
+## Portainer stack
+
+Create the stack from the Git repository (Repository, reference
+`refs/heads/main`, compose path `docker-compose.yml`), not the Web editor:
+the image is built from the repository. A relative `./data` would land inside
+Portainer's own stack folder, so set the stack environment variable
+`DATA_DIR` to an absolute host folder (e.g. `/opt/aredn-monitor/data`) and put
+the files from "Moving the existing monitor" there. To update, use "Pull and
+redeploy" with re-pull/rebuild on; if an older `aredn-monitor:latest` image is
+still on the host, remove it first so it is rebuilt.
+
 ## Day to day
 
 ```bash

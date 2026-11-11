@@ -10,7 +10,10 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     volumes:
-      - ./data:/data
+      # DATA_DIR: absolute host folder for the database, backups, maps and SSH
+      # key (set it in Portainer's stack environment variables; a relative
+      # ./data lands inside Portainer's own stack folder).
+      - ${DATA_DIR:-./data}:/data
     environment:
       TZ: America/Chicago
       COLLECTOR_ID: ${COLLECTOR_ID:-collector-workstation}
