@@ -207,8 +207,10 @@ arrive as many separate events.
       an activation.
 - [ ] 61. **Prometheus / Grafana export.** Read-only `/metrics` (node up, link SNR/LQ, noise, scan
       duration) with an optional token, for anyone who already runs Grafana.
-- [ ] 62. **Global search.** One box in the header for node, site, MAC, IP, callsign or service
+- [x] 62. **Global search.** One box in the header for node, site, MAC, IP, callsign or service
       that jumps to the right page.
+      *Built: search.py + /api/search and global-search.js on every page with a header ("/" to focus);
+      also LAN devices and phones. A callsign opens the Nodes list filtered to it (`?nodes-search=`).*
 
 ## Round 4 ideas (2026-10-25)
 

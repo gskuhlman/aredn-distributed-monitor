@@ -2872,3 +2872,39 @@ tr.site-down td { opacity: 0.65; }
 /* Local time zone label (local_time.py) */
 .tz-label { font-size: 0.75rem; color: #888; white-space: nowrap; align-self: center; }
 .wall-tz { font-size: 1rem; opacity: 0.7; margin-left: 4px; }
+
+/* Global search in the header (global-search.js, TODO #62) */
+.global-search { position: relative; flex: 0 1 280px; min-width: 140px; }
+.global-search input {
+    width: 100%; padding: 6px 10px; border-radius: 4px; font-size: 13px;
+    border: 1px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.12); color: #fff;
+}
+.global-search input::placeholder { color: rgba(255, 255, 255, 0.7); }
+.global-search input:focus { outline: none; background: #fff; color: #2c3e50; border-color: #3498db; }
+.global-search input:focus::placeholder { color: #95a5a6; }
+.global-search-results {
+    position: absolute; top: calc(100% + 4px); right: 0; z-index: 2000;
+    width: 460px; max-width: calc(100vw - 32px); max-height: 70vh; overflow-y: auto;
+    background: #fff; color: #2c3e50; border: 1px solid #d0d7de; border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.gs-item { display: flex; gap: 10px; align-items: baseline; padding: 7px 10px; cursor: pointer; }
+.gs-item + .gs-item { border-top: 1px solid #f0f2f4; }
+.gs-item.active, .gs-item:hover { background: #eaf3fb; }
+.gs-type {
+    flex: 0 0 64px; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    color: #5d6d7e; text-align: right;
+}
+.gs-type-site, .gs-type-callsign { color: #8e44ad; }
+.gs-type-node { color: #2471a3; }
+.gs-type-mac, .gs-type-device { color: #117864; }
+.gs-type-service, .gs-type-phone { color: #a04000; }
+.gs-text { min-width: 0; display: flex; flex-direction: column; }
+.gs-label { font-weight: 600; overflow-wrap: anywhere; }
+.gs-detail { font-size: 12px; color: #6c7a89; overflow-wrap: anywhere; }
+.gs-empty { padding: 10px; color: #6c7a89; font-size: 13px; }
+@media (max-width: 768px) {
+    .header .header-controls { flex-wrap: wrap; justify-content: center; max-width: 100%; }
+    .global-search { order: -1; flex: 1 1 100%; }
+    .global-search-results { left: 0; right: auto; width: 100%; max-width: none; }
+}

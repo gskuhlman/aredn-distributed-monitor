@@ -108,6 +108,7 @@ import tape
 import call_quality
 import iface_traffic
 import services_catalog
+import search
 import syslog_rx
 import boards
 import public_status
@@ -1882,6 +1883,14 @@ def api_report_spof():
                                exclude_tunnels=request.args.get('tunnels') in ('0', 'false', 'no')))
 
 
+@app.route('/api/search')
+def api_search():
+    """Global search (search.py): nodes, callsigns, sites, MACs, IPs,
+    LAN devices, services and phones, ranked, each with a URL to open."""
+    return jsonify(search.search(request.args.get('q', ''),
+                                 limit=max(1, min(request.args.get('limit', search.LIMIT, type=int), 100))))
+
+
 @app.route('/api/sites')
 def api_sites():
     return jsonify({'sites': site_dashboard.sites()})
@@ -3564,6 +3573,9 @@ def handle_sigterm(signum, frame):
         while ssh_collect.busy() and time.monotonic() < deadline:
             socketio.sleep(0.5)
         shutdown_scheduler()
+        # A process started in the background by a shell inherits SIGINT as
+        # ignored; restore Python's handler so the SIGINT below stops the server.
+        signal.signal(signal.SIGINT, signal.default_int_handler)
         os.kill(os.getpid(), signal.SIGINT)
     socketio.start_background_task(finish)
 

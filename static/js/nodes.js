@@ -27,6 +27,9 @@ const NodesModule = {
         const closeDetail = document.getElementById('close-node-detail');
 
         if (searchInput) {
+            // Global search's callsign result: /?nodes-search=<call>#/nodes
+            const preset = new URLSearchParams(location.search).get('nodes-search');
+            if (preset) searchInput.value = preset;
             searchInput.addEventListener('input', () => this.filterNodes());
         }
         if (statusFilter) {
