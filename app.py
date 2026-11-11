@@ -1095,8 +1095,9 @@ def api_get_node_connectivity(name):
 def api_delete_node(name):
     """Delete a node and all its related data"""
     node_name = name.lower()
-    node = database.get_node(node_name)
-    if not node:
+    # Link-only nodes (never polled, or gone: only other nodes' old links,
+    # selection or infrastructure marks keep them listed) can be deleted too.
+    if not database.get_observed_node(node_name):
         return jsonify({'error': 'Node not found'}), 404
 
     count = database.delete_node(node_name)

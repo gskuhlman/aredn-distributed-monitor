@@ -329,9 +329,7 @@ const NodesModule = {
             const modelText = node.is_link_only ? 'Not polled' : (node.model || 'Unknown');
             const firmwareText = node.is_link_only ? 'Not polled' : (node.firmware_version || 'Unknown');
             const wanText = node.is_link_only || node.mesh_gateway == null ? '-' : (node.mesh_gateway ? 'Yes' : 'No');
-            const deleteButton = node.is_link_only
-                ? ''
-                : `<button class="btn btn-small btn-danger" data-node-action="delete" data-node-name="${encodedName}">Delete</button>`;
+            const deleteButton = `<button class="btn btn-small btn-danger" data-node-action="delete" data-node-name="${encodedName}"${node.is_link_only && node.observed_status !== 'removed' ? ' title="Another node still lists it: it comes back on the next scan"' : ''}>Delete</button>`;
 
             html += `
                 <tr>

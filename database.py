@@ -487,6 +487,13 @@ def delete_node(name):
         cursor.execute('DELETE FROM selected_nodes WHERE node_name = ?', (name,))
         cursor.execute('DELETE FROM infrastructure_nodes WHERE node_name = ?', (name,))
         cursor.execute('DELETE FROM node_tags WHERE node_name = ?', (name,))
+        # Leftovers that would keep a defunct node listed or polled (tables
+        # created lazily by their modules may not exist yet).
+        for table in ('node_positions', 'ssh_status', 'scan_boundaries'):
+            try:
+                cursor.execute(f'DELETE FROM {table} WHERE node_name = ?', (name,))
+            except sqlite3.OperationalError:
+                pass
         return deleted
 
 
