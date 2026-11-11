@@ -366,6 +366,14 @@ SSH_PHY_RESETS_PER_HOUR = env_int("SSH_PHY_RESETS_PER_HOUR", 30)    # ath10k "PD
 # (each timeout logs "failed to request fw stats: -145" in the node's syslog).
 SSH_FW_STATS_BACKOFF_FAILS = env_int("SSH_FW_STATS_BACKOFF_FAILS", 3)
 SSH_FW_STATS_RETRY_DAYS = env_int("SSH_FW_STATS_RETRY_DAYS", 7)
+# Asterisk PBX status over SSH (pbx_status.py). The PBXs are a setting edited on
+# the VoIP & Phones page; these are the defaults for a new entry and the timing.
+PBX_STATUS_ENABLED = env_bool("PBX_STATUS_ENABLED", True)
+PBX_INTERVAL_MINUTES = env_int("PBX_INTERVAL_MINUTES", 5)
+PBX_SSH_PORT = env_int("PBX_SSH_PORT", 22)
+PBX_SSH_USER = os.environ.get("PBX_SSH_USER", "root")
+PBX_UNREACHABLE_RUNS = env_int("PBX_UNREACHABLE_RUNS", 2)   # checks in a row before a phone / PBX alarm
+PBX_HISTORY_DAYS = env_int("PBX_HISTORY_DAYS", 7)
 # A TDWR airport weather radar (5600-5650 MHz) within range of the mesh. The
 # nearest to Cedar Rapids are Chicago, Milwaukee and Minneapolis (300+ km), so
 # off: 5600-5650 is then only "below the ham band" and 5650-5660 is not penalised.

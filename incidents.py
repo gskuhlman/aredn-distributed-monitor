@@ -47,7 +47,8 @@ REF_TYPES = ('change', 'note')
 # Timeline event types attached to an open incident's member nodes.
 MEMBER_EVENTS = ('node_offline', 'node_online', 'node_reboot', 'link_dropped', 'link_restored', 'node_degraded',
                  'one_way_link', 'one_way_link_cleared', 'service_down', 'service_restored', 'phone_unreachable',
-                 'phone_restored', 'route_detour', 'route_restored')
+                 'phone_restored', 'route_detour', 'route_restored', 'pbx_phone_unregistered', 'pbx_phone_registered',
+                 'pbx_unreachable', 'pbx_restored')
 MAX_TEXT = 4000
 
 _tables_ready = False

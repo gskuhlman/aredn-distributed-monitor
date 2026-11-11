@@ -75,8 +75,9 @@ EVENT_TYPES = [
     'ethernet_problem', 'ethernet_cleared', 'radio_distance_short', 'radio_distance_ok',
     'node_clock_skew', 'node_clock_ok', 'radio_fw_crash', 'radio_fw_crash_cleared',
     'radio_phy_resets', 'radio_phy_resets_cleared',
-    # Phone connectivity (phones.py)
+    # Phone connectivity (phones.py) and PBX registrations (pbx_status.py)
     'phone_unreachable', 'phone_restored',
+    'pbx_phone_unregistered', 'pbx_phone_registered', 'pbx_unreachable', 'pbx_restored',
     # Round 7: incidents, slow degradation, storm warning, noise source, tunnels, RF paths, call quality
     'incident_opened', 'incident_resolved', 'link_degrading', 'link_degrading_cleared',
     'storm_warning', 'storm_warning_cleared', 'noise_source', 'tunnel_degraded', 'tunnel_restored',
@@ -109,6 +110,8 @@ RECOVERY_OF = {
     'radio_distance_short': 'radio_distance_ok',
     'node_clock_skew': 'node_clock_ok',
     'phone_unreachable': 'phone_restored',
+    'pbx_phone_unregistered': 'pbx_phone_registered',
+    'pbx_unreachable': 'pbx_restored',
     'incident_opened': 'incident_resolved',
     'link_degrading': 'link_degrading_cleared',
     'storm_warning': 'storm_warning_cleared',
@@ -167,6 +170,9 @@ DEFAULT_RULES = [
     {'name': 'Per-link alerts', 'event_types': ['link_alert', 'link_alert_cleared'],
      'min_severity': 'info', 'scope': 'any'},
     {'name': 'Phones not answering', 'event_types': ['phone_unreachable', 'phone_restored'],
+     'min_severity': 'info', 'scope': 'any'},
+    {'name': 'PBX phones / PBX down', 'event_types': ['pbx_phone_unregistered', 'pbx_phone_registered',
+                                                     'pbx_unreachable', 'pbx_restored'],
      'min_severity': 'info', 'scope': 'any'},
     {'name': 'Node resources / routes', 'event_types': ['resource_alarm', 'resource_cleared', 'route_count_drop',
                                                          'route_count_restored'],

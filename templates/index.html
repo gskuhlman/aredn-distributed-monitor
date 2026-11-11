@@ -1782,6 +1782,27 @@
                         <div class="nodes-count"><span id="voip-status">Idle</span></div>
                     </div>
                     <div class="diag-scroll">
+                        <!-- Asterisk PBX status over SSH (pbx_status.py, pbx.js, TODO #79) -->
+                        <div class="diag-section" id="pbx-section">
+                            <h3>PBX Status <small class="form-hint">calls in progress and phone registrations, read from each Asterisk PBX over SSH</small></h3>
+                            <div class="mh-controls">
+                                <button id="pbx-check" class="btn btn-small btn-primary">Check now</button>
+                                <span id="pbx-status" class="form-hint"></span>
+                            </div>
+                            <div id="pbx-report"><p class="log-empty">Loading…</p></div>
+                            <details class="ph-more" id="pbx-setup">
+                                <summary>PBXs to check</summary>
+                                <p class="form-hint">One PBX per line: <code>name, host or IP, SSH port, user</code> (port and user
+                                    may be left out). The monitor logs in with its SSH key only, never a password, and runs only
+                                    read-only <code>asterisk -rx</code> commands. The user needs to reach the Asterisk console:
+                                    root, a member of the <code>asterisk</code> group, or allowed <code>sudo -n asterisk</code>.</p>
+                                <textarea id="pbx-hosts" class="form-input ph-textarea" rows="3"
+                                    placeholder="gs_pbx_eoc, 10.95.35.209, 22, root"></textarea>
+                                <button id="pbx-save" class="btn btn-small btn-primary">Save</button>
+                                <span id="pbx-save-msg" class="form-hint"></span>
+                                <div id="pbx-key"></div>
+                            </details>
+                        </div>
                         <!-- Phone connectivity (phones.py, phones.js) -->
                         <div class="diag-section">
                             <h3>Phone Connectivity <small class="form-hint">every phone on the PBX, pinged after each scan</small></h3>
@@ -2139,6 +2160,7 @@
     <script src="{{ url_for('static', filename='js/cleanup.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip.js') }}"></script>
     <script src="{{ url_for('static', filename='js/phones.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/pbx.js') }}"></script>
     <script src="{{ url_for('static', filename='js/voip_session.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reports.js') }}"></script>
     <script src="{{ url_for('static', filename='js/collector-health.js') }}"></script>

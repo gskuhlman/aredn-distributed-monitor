@@ -90,6 +90,7 @@ import prom_source
 import prom_watch
 import link_alerts
 import phones
+import pbx_status
 import link_potential
 import ssh_collect
 import ssh_traffic
@@ -2715,6 +2716,49 @@ def api_voip_phones_run():
     return jsonify(result)
 
 
+# ---- Asterisk PBX status over SSH (pbx_status.py) ----
+
+def run_pbx_status_task(names=None):
+    try:
+        result = pbx_status.run(names)
+    except Exception as exc:
+        logger.error("PBX status error: %s", exc)
+        return {'results': [], 'events': [], 'aborted': str(exc)}
+    for event in result['events']:
+        socketio.emit('new_event', event)
+    if result.get('results'):
+        socketio.emit('pbx_update', {'checked': len(result['results'])})
+    return result
+
+
+@app.route('/api/voip/pbx')
+def api_voip_pbx():
+    """Configured PBXs with calls in progress and phone registrations."""
+    return jsonify(pbx_status.status())
+
+
+@app.route('/api/voip/pbx/hosts', methods=['POST'])
+def api_voip_pbx_hosts():
+    """Replace the PBX list: {pbxes: [{name, host, port?, user?}]}."""
+    try:
+        hosts = pbx_status.save_hosts((request.get_json(silent=True) or {}).get('pbxes') or [])
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({'pbxes': hosts})
+
+
+@app.route('/api/voip/pbx/check', methods=['POST'])
+def api_voip_pbx_check():
+    """Check every PBX now (or {name}); 503 when the starting node is unreachable."""
+    name = (request.get_json(silent=True) or {}).get('name')
+    result = run_pbx_status_task([name] if name else None)
+    if result.get('aborted') == 'no PBX configured':
+        return jsonify({'error': 'Add a PBX first'}), 400
+    if result.get('aborted'):
+        return jsonify({'error': result['aborted']}), 503
+    return jsonify(result)
+
+
 @app.route('/api/voip/hosts')
 def api_voip_hosts():
     """Mesh hosts not on the phone list yet (?q=), for adding one by hand."""
@@ -3538,6 +3582,9 @@ def start_scheduler():
     degradation.install(scheduler)
     node_clock.install(scheduler, run_node_clock_task)
     storm.install(scheduler)
+    if config.PBX_STATUS_ENABLED:
+        scheduler.add_job(run_pbx_status_task, 'interval', minutes=config.PBX_INTERVAL_MINUTES, id='pbx_status',
+                          replace_existing=True, next_run_time=datetime.now() + timedelta(minutes=1))
 
     scheduler.start()
     logger.info("Scheduler started")

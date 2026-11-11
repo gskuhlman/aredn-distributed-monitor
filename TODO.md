@@ -285,8 +285,12 @@ pulls the RTSP camera streams seen crossing the MMC tunnel.
       *Built: /wall (agency tiles, ticker, located mesh plot, 24 h tape, storm banner); every node as its own tile was left out in favour of the tape rows.*
 - [x] 78. **Continuous call quality per node.** Jitter (ping mdev) and E-model MOS from each poll,
       alerts at jitter > 20 / 50 ms and MOS <= 3.6 / 3.1; pairs with Route Watch flapping.
-- [ ] 79. **Asterisk PBX status over SSH.** Active calls, registered vs unreachable peers
+- [x] 79. **Asterisk PBX status over SSH.** Active calls, registered vs unreachable peers
       (`core show channels concise`, `pjsip show endpoints`), alert when a phone drops off.
+      *Built: pbx_status.py, "PBX Status" on VoIP & Phones (PBX list is a setting edited there; key login only,
+      fixed read-only `asterisk -rx` script, chan_sip peers too). `pbx_phone_unregistered` / `pbx_unreachable`
+      after 2 checks in a row, only for phones that have registered before. Needs the monitor's public key in
+      the PBX user's authorized_keys; not yet tried against a live PBX.*
 - [x] 80. **Interface traffic history.** Store per-interface counters (tunnel, WAN, DtD) from the
       SSH fast runs and chart 1 h .. 7 d, e.g. how much went over the MMC tunnel this week.
 - [x] 81. **Services catalog and devices.** Every advertised service grouped by category

@@ -28,7 +28,8 @@ TABLE_FLAGS = ('notes', 'rollout', 'change_verdict', 'service_check', 'welcome',
                'route_watch', 'weekly_report', 'capacity', 'link_watch', 'collector_health', 'link_budget',
                'maintenance', 'notify', 'weather', 'routing_errors', 'prom_source', 'prom_watch',
                'link_alerts', 'phones', 'rollup', 'audit', 'incidents', 'suppressions', 'acks', 'degradation',
-               'storm', 'tunnels', 'call_quality', 'iface_traffic', 'services_catalog', 'syslog_rx', 'node_clock')
+               'storm', 'tunnels', 'call_quality', 'iface_traffic', 'services_catalog', 'syslog_rx', 'node_clock',
+               'pbx_status')
 
 
 def ts(minutes_ago=0):

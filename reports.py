@@ -35,6 +35,7 @@ EVENT_CATEGORIES = {
              'radio_config_change', 'firmware_change',
              'noise_jump', 'noise_cleared', 'resource_alarm', 'resource_cleared',
              'route_count_drop', 'route_count_restored', 'phone_unreachable', 'phone_restored',
+             'pbx_phone_unregistered', 'pbx_phone_registered', 'pbx_unreachable', 'pbx_restored',
              'radio_interference', 'radio_interference_cleared', 'radio_rx_errors', 'radio_rx_errors_cleared',
              'ethernet_problem', 'ethernet_cleared', 'radio_distance_short', 'radio_distance_ok',
              'node_clock_skew', 'node_clock_ok', 'radio_fw_crash', 'radio_fw_crash_cleared',

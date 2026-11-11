@@ -2908,3 +2908,11 @@ tr.site-down td { opacity: 0.65; }
     .global-search { order: -1; flex: 1 1 100%; }
     .global-search-results { left: 0; right: auto; width: 100%; max-width: none; }
 }
+
+/* PBX Status on the VoIP page (pbx.js, TODO #79) */
+.pbx-card { border: 1px solid #e1e5ea; border-radius: 6px; padding: 10px 12px; margin: 10px 0; }
+.pbx-card h4 { margin: 0 0 8px; }
+.pbx-card h5 { margin: 12px 0 4px; font-size: 13px; color: #34495e; }
+.pbx-error { margin: 6px 0; }
+.pbx-key { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: #f6f8fa; padding: 8px;
+    border-radius: 4px; max-width: 100%; }

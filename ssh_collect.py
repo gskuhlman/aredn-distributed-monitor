@@ -327,9 +327,10 @@ def _subprocess(args, script):
         return subprocess.CompletedProcess(args, p.returncode, fout.read(), ferr.read())
 
 
-def _run_ssh(node, script):
+def _run_ssh(node, script, args=None):
     """(returncode, stdout, stderr). Tests replace this. Runs in a real
-    thread under eventlet (like rf_stats' ping) so the web app keeps going."""
+    thread under eventlet (like rf_stats' ping) so the web app keeps going.
+    `args`: another ssh command line (pbx_status.py), default the node's."""
     os.makedirs(os.path.dirname(config.SSH_KNOWN_HOSTS) or '.', exist_ok=True)
     try:
         import eventlet.patcher
@@ -337,7 +338,7 @@ def _run_ssh(node, script):
         green = eventlet.patcher.is_monkey_patched('thread')
     except ImportError:
         green = False
-    args = _ssh_args(node)
+    args = args or _ssh_args(node)
     p = eventlet.tpool.execute(_subprocess, args, script) if green else _subprocess(args, script)
     return p.returncode, p.stdout.decode('utf-8', 'replace'), p.stderr.decode('utf-8', 'replace')
 
