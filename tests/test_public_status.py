@@ -39,3 +39,15 @@ def test_club_status_escapes_text(mesh):
     mesh.infra('w0gq-x<b>', 'X')
     frag = public_status.render(public_status.build(7))
     assert '<script>' not in frag and '&lt;script&gt;' in frag
+
+
+def test_setup_checklist_is_not_collapsible(mesh):
+    """The page is pasted into emails, where <details> sections lose their contents."""
+    mesh.node('w0gq-col-rkt-n')
+    mesh.infra('w0gq-col-rkt-n', 'COL')
+    d = public_status.build(7)
+    radio = d['sites'][0]['radios'][0]
+    radio['fixes'], radio['hygiene'] = ['Set the antenna azimuth'], 60
+    frag = public_status.render(d, hygiene_details=True)
+    assert 'Node setup checklist' in frag and 'Set the antenna azimuth' in frag
+    assert '<details' not in frag and '<summary' not in frag

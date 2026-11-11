@@ -124,6 +124,8 @@ const RouteWatch = {
                 <button class="btn btn-small btn-secondary" data-rw-action="history" data-id="${p.id}"
                     title="Routes used, where they part, and the likely cause of each switch (last 3 days)">${this.open.has(p.id) ? 'Hide' : 'Why changed?'}</button>
                 <button class="btn btn-small btn-secondary" data-rw-action="path" data-id="${p.id}" title="Each hop coloured by link quality (Path View)">Path</button>
+                <a class="btn btn-small btn-secondary" href="/routes/${p.id}/traffic" target="_blank" rel="noopener"
+                    title="The traffic travelling between these nodes: type, source and destination (read over SSH)">Traffic</a>
                 <button class="btn btn-small btn-secondary" data-rw-action="run" data-id="${p.id}">Trace now</button>
                 <button class="btn btn-small btn-secondary" data-rw-action="delete" data-id="${p.id}"
                     title="${p.kind === 'auto' ? 'Stop watching this automatic path' : 'Delete this path and its history'}">Remove</button>

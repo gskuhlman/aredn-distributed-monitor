@@ -2916,3 +2916,14 @@ tr.site-down td { opacity: 0.65; }
 .pbx-error { margin: 6px 0; }
 .pbx-key { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: #f6f8fa; padding: 8px;
     border-radius: 4px; max-width: 100%; }
+
+/* Build number after the title (version.py) */
+.app-version { font-size: 12px; font-weight: 400; opacity: 0.7; margin-left: 6px; letter-spacing: 0.02em;
+    vertical-align: middle; white-space: nowrap; }
+
+/* Route Traffic page (traffic.js) */
+.rt-hops { margin: 4px 0 8px; padding-left: 22px; line-height: 1.7; }
+.rt-filter { max-width: 280px; }
+.rt-table td { vertical-align: top; }
+.rt-table tr.rt-own td { opacity: 0.7; }
+.rt-table tr.rt-ends td:first-child { border-left: 3px solid #2471a3; }

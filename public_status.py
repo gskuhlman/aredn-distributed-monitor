@@ -383,10 +383,12 @@ def render(d, title='Mesh Network Status', hygiene_details=True, voip=True):
             items = []
             for r in todo:
                 fixes = ''.join(f'<li>{E(f)}</li>' for f in r['fixes'])
-                items.append(f'<details style="border-bottom:1px solid #eaeef2;padding:4px 0">'
-                             f'<summary style="cursor:pointer"><b>{E(r["name"])}</b> &ndash; score {_score(r["hygiene"])}'
-                             f' <span style="{MUTED}">({len(r["fixes"])} to fix)</span></summary>'
-                             f'<ul style="margin:4px 0 6px;padding-left:20px;font-size:13px">{fixes}</ul></details>')
+                # Always expanded (no <details>): the page is copied into emails,
+                # where collapsed sections lose their contents.
+                items.append(f'<div style="border-bottom:1px solid #eaeef2;padding:4px 0">'
+                             f'<div><b>{E(r["name"])}</b> &ndash; score {_score(r["hygiene"])}'
+                             f' <span style="{MUTED}">({len(r["fixes"])} to fix)</span></div>'
+                             f'<ul style="margin:4px 0 6px;padding-left:20px;font-size:13px">{fixes}</ul></div>')
             out.append(f'<div style="font-size:14px;margin:0 0 16px">{"".join(items)}</div>')
         else:
             out.append('<p style="font-size:13px">Every node passes all checks.</p>')

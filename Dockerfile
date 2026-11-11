@@ -27,6 +27,11 @@ ENV PYTHONUNBUFFERED=1 \
 VOLUME /data
 EXPOSE 5000
 
+# Build number for the header (version.py), passed in by the redeploy script.
+# Last, so a new number doesn't rebuild the layers above.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 HEALTHCHECK --interval=60s --timeout=10s --start-period=60s \
   CMD python -c "import urllib.request, os; urllib.request.urlopen('http://127.0.0.1:%s/api/health' % os.environ.get('PORT', '5000'), timeout=8)"
 

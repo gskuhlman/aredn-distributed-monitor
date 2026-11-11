@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Route Traffic - AREDN Network Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container node-page traffic-page">
+        <header class="header">
+            <div class="header-left">
+                <h1 id="rt-title">Route Traffic</h1>
+                <nav class="header-tabs">
+                    <a class="tab-btn" href="/">&larr; Monitor</a>
+                    <a class="tab-btn" href="/#/routing">Routing</a>
+                </nav>
+                <span class="tz-label" title="All times shown are local {{ tz_name }} time">{{ tz_label }}</span>
+            </div>
+            <div class="header-controls">
+                <label class="header-checkbox" title="How long each node's interface counters are sampled">Sample
+                    <select id="rt-seconds" class="form-input">
+                        <option value="3">3 s</option>
+                        <option value="5" selected>5 s</option>
+                        <option value="10">10 s</option>
+                    </select>
+                </label>
+                <span id="rt-status">Reading the nodes…</span>
+                <button id="rt-refresh" class="btn btn-primary">Read again</button>
+            </div>
+        </header>
+
+        <main class="node-page-content">
+            <section class="node-page-section">
+                <h2>Route</h2>
+                <div id="rt-route"><p class="loading">Reading every node on the route over SSH…</p></div>
+            </section>
+            <section class="node-page-section">
+                <h2>Between the two ends</h2>
+                <p class="form-hint" id="rt-ends-hint"></p>
+                <div id="rt-ends"></div>
+            </section>
+            <section class="node-page-section">
+                <h2>Passing along the route</h2>
+                <p class="form-hint">Connections between other places that cross at least one node of this route.</p>
+                <div id="rt-transit"></div>
+            </section>
+            <section class="node-page-section">
+                <h2>All connections</h2>
+                <div class="mh-controls">
+                    <label class="header-checkbox"><input type="checkbox" id="rt-own"> include the nodes' own traffic
+                        (Babel, DNS, this monitor's SSH, broadcasts)</label>
+                    <input id="rt-filter" class="form-input rt-filter" placeholder="filter: name, IP, service, port">
+                    <span id="rt-count" class="form-hint"></span>
+                </div>
+                <div id="rt-flows"></div>
+            </section>
+            <section class="node-page-section">
+                <p class="form-hint">Read on request from each node's connection-tracking table (nothing is stored).
+                    A connection is listed while the node tracks it: active ones and those that ended in the last
+                    minutes. Services are guessed from the ports. Byte and packet counts appear only when the node
+                    counts them (nf_conntrack_acct); they total the connection's life so far, not this sample.
+                    Nodes without the monitor's SSH key can't be read.</p>
+            </section>
+        </main>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+    <script>
+        window.PATH_ID = {{ path_id|tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/traffic.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/global-search.js') }}"></script>
+</body>
+</html>

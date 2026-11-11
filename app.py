@@ -110,6 +110,8 @@ import call_quality
 import iface_traffic
 import services_catalog
 import search
+import route_traffic
+import version
 import syslog_rx
 import boards
 import public_status
@@ -476,6 +478,12 @@ def api_club_status():
 
 # ============ API Routes ============
 
+@app.context_processor
+def inject_version():
+    """Build number (version.py) for every page header."""
+    return {'app_version': version.get()}
+
+
 @app.route('/api/health')
 def api_get_health():
     """Get app health and optional CouchDB connectivity."""
@@ -497,6 +505,7 @@ def api_get_health():
     return jsonify({
         'ok': True,
         'app': 'aredn-network-monitor',
+        'version': version.get(),
         'collector_id': config.COLLECTOR_ID,
         'collector_site': config.COLLECTOR_SITE,
         'couchdb': couch_status
@@ -1659,6 +1668,29 @@ def api_ssh_traffic(name):
     result = ssh_traffic.traffic(node['name'], seconds)
     if result.get('error'):
         return jsonify(result), 409 if result.get('error_kind') == 'no_key' else 502
+    return jsonify(result)
+
+
+@app.route('/routes/<int:path_id>/traffic')
+def route_traffic_page(path_id):
+    """Traffic along one Route Watch path (route_traffic.py)."""
+    return render_template('traffic.html', path_id=path_id)
+
+
+@app.route('/api/routes/<int:path_id>/traffic', methods=['POST'])
+def api_route_traffic(path_id):
+    """Read every SSH-reachable node on the path now (nothing stored). A POST,
+    so it needs the login when a password is set: it names hosts and addresses."""
+    body = request.get_json(silent=True) or {}
+    try:
+        seconds = int(body.get('seconds') or ssh_traffic.DEFAULT_SECONDS)
+    except (TypeError, ValueError):
+        seconds = ssh_traffic.DEFAULT_SECONDS
+    result = route_traffic.route_traffic(path_id, seconds)
+    if result.get('error_kind') == 'not_found':
+        return jsonify(result), 404
+    if result.get('error_kind') == 'no_key':
+        return jsonify(result), 409
     return jsonify(result)
 
 
