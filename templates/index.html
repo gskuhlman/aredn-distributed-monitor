@@ -1431,6 +1431,13 @@
                                 <option value="routing">Routing</option>
                                 <option value="other">Other</option>
                             </select>
+                            <select id="chg-origin" class="form-input" title="Where the entry came from">
+                                <option value="all">All sources</option>
+                                <option value="user">User</option>
+                                <option value="syslog">Syslog</option>
+                                <option value="scan">Scan</option>
+                                <option value="other">Other</option>
+                            </select>
                             <select id="chg-hours" class="form-input">
                                 <option value="168">Last 7 days</option>
                                 <option value="720" selected>Last 30 days</option>
@@ -1458,6 +1465,14 @@
                             <label>When <input type="datetime-local" id="chg-time" class="form-input" step="60"></label>
                             <label class="chg-wide">Description <input type="text" id="chg-desc" class="form-input" placeholder="Moved to ch 173 (5865 MHz)"></label>
                             <label>By (optional) <input type="text" id="chg-author" class="form-input"></label>
+                            <label>Source
+                                <select id="chg-src" class="form-input">
+                                    <option value="user" selected>User</option>
+                                    <option value="syslog">Syslog</option>
+                                    <option value="scan">Scan</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </label>
                         </div>
                         <datalist id="chg-node-names"></datalist>
                         <div class="chg-form-actions">
@@ -1466,7 +1481,7 @@
                         </div>
                     </div>
                     <div class="diag-section">
-                        <h3>Change log <small class="form-hint">channel, radio-setting and firmware changes are added automatically from scans</small></h3>
+                        <h3>Change log <small class="form-hint">channel, radio-setting, firmware and link-cost changes are added automatically from scans, firmware upgrades from node syslog</small></h3>
                         <div class="table-scroll-wrapper" id="chg-list"></div>
                     </div>
                     <div class="chg-window-row">

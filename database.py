@@ -189,6 +189,16 @@ def init_db():
             )
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_change_log_node ON change_log(node_name, timestamp)')
+        # Where an entry came from (user, syslog, scan, other) and, for syslog
+        # imports, the syslog row hash ('syslog:<hash>') so they import once.
+        for column in ('origin', 'ref'):
+            try:
+                cursor.execute(f'ALTER TABLE change_log ADD COLUMN {column} TEXT')
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+        cursor.execute("UPDATE change_log SET origin = CASE WHEN event_id IS NULL THEN 'user' ELSE 'scan' END "
+                       "WHERE origin IS NULL")
+        cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_change_log_ref ON change_log(ref)')
         # --- end change log ----------------------------------------------
 
         # Scan boundaries: operator-chosen nodes that limit BFS discovery so a

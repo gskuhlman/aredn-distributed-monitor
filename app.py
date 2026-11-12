@@ -2139,17 +2139,18 @@ def api_list_changes():
     hours = request.args.get('hours', type=int)
     limit = max(1, min(2000, request.args.get('limit', 500, type=int)))
     return jsonify({'changes': change_log.list_changes(node=node, hours=hours, limit=limit),
-                    'categories': list(change_log.CATEGORIES)})
+                    'categories': list(change_log.CATEGORIES), 'origins': list(change_log.ORIGINS)})
 
 
 @app.route('/api/changes', methods=['POST'])
 def api_add_change():
-    """Record a manual change {node_name, description, category?, timestamp?, peer_node?, author?}."""
+    """Record a manual change {node_name, description, category?, timestamp?, peer_node?, author?,
+    origin? (user|syslog|scan|other, default user)}."""
     data = request.get_json(silent=True) or {}
     try:
         change = change_log.add_change(
             data.get('node_name'), data.get('description'), data.get('category') or 'other',
-            data.get('timestamp'), data.get('peer_node'), data.get('author'))
+            data.get('timestamp'), data.get('peer_node'), data.get('author'), data.get('origin') or 'user')
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
     return jsonify({'success': True, 'change': change})

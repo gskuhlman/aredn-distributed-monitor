@@ -4,7 +4,8 @@ Change log and before/after comparison (Changes tab).
 Records channel, power, antenna, firmware and other changes to a node (or a
 specific link), either entered by the operator or imported from the
 scanner's events (frequency_change, radio_config_change, firmware_change,
-link_cost_change).
+link_cost_change) and from node syslog (firmware upgrades). Each entry has an
+origin: user, syslog, scan or other.
 `compare()` then measures every RF link of the changed node over equal
 windows before and after the change, so an operator can see whether, say,
 moving a sector's channel actually improved its clients' LQ, SNR and noise.
@@ -20,6 +21,16 @@ import database
 
 TS_FMT = '%Y-%m-%d %H:%M:%S'
 CATEGORIES = ('channel', 'power', 'antenna', 'firmware', 'routing', 'other')
+# Where an entry came from: typed in by a user, found in a node's syslog,
+# seen by a scan (scanner events), or anything else.
+ORIGINS = ('user', 'syslog', 'scan', 'other')
+
+# Syslog lines that mean a change was made: (program, message regex,
+# category, description). AREDN doesn't log ordinary settings saves, so
+# today this is the firmware-upgrade marker only.
+SYSLOG_CHANGES = (
+    ('upgrade', r'^Saving config files', 'firmware', 'Firmware upgrade started (sysupgrade saving config)'),
+)
 
 # Events imported as automatic change entries, and the category they map to.
 AUTO_EVENT_TYPES = {
@@ -93,16 +104,48 @@ def sync_from_events():
                 peer = m.group(1).lower() if m else None
             cursor.execute('''
                 INSERT OR IGNORE INTO change_log
-                    (timestamp, node_name, peer_node, category, description, source, event_id, created_at)
-                VALUES (?, ?, ?, ?, ?, 'auto', ?, ?)
+                    (timestamp, node_name, peer_node, category, description, source, origin, event_id,
+                     created_at)
+                VALUES (?, ?, ?, ?, ?, 'auto', 'scan', ?, ?)
             ''', (r['timestamp'], r['node_name'], peer, _event_category(r['event_type'], r['details']),
                   r['details'], r['id'], database.local_timestamp()))
         return len(rows)
 
 
+def sync_from_syslog():
+    """Import change markers from stored syslog (syslog_messages) as 'auto'
+    entries with origin 'syslog' (idempotent: keyed by the message hash)."""
+    added = 0
+    with database.get_connection() as conn:
+        try:
+            for program, pattern, category, text in SYSLOG_CHANGES:
+                rx = re.compile(pattern)
+                rows = conn.execute('''
+                    SELECT s.hash, s.node_time, s.received_at, s.node_name, s.message
+                    FROM syslog_messages s
+                    LEFT JOIN change_log c ON c.ref = 'syslog:' || s.hash
+                    WHERE s.program = ? AND s.node_name IS NOT NULL AND c.id IS NULL
+                ''', (program,)).fetchall()
+                for r in rows:
+                    if not rx.search(r['message'] or ''):
+                        continue
+                    cur = conn.execute('''
+                        INSERT OR IGNORE INTO change_log
+                            (timestamp, node_name, category, description, source, origin, ref, created_at)
+                        VALUES (?, ?, ?, ?, 'auto', 'syslog', ?, ?)
+                    ''', ((r['node_time'] or r['received_at'])[:19], r['node_name'].lower(), category,
+                          f"{text}: {program}: {r['message'][:200]}", f"syslog:{r['hash']}",
+                          database.local_timestamp()))
+                    added += cur.rowcount
+        except database.sqlite3.OperationalError:
+            return 0  # syslog_messages not created yet
+    return added
+
+
 def list_changes(node=None, hours=None, limit=500):
     """Changes newest first, optionally for one node (as node or peer)."""
     sync_from_events()
+    sync_from_syslog()
     where, params = ["source != 'deleted'"], []
     if node:
         where.append('(node_name = ? OR peer_node = ?)')
@@ -126,8 +169,11 @@ def get_change(change_id):
 
 
 def add_change(node_name, description, category='other', timestamp=None,
-               peer_node=None, author=None):
+               peer_node=None, author=None, origin='user'):
     """Record a manual change. Raises ValueError on bad input."""
+    origin = (origin or 'user').strip().lower()
+    if origin not in ORIGINS:
+        raise ValueError(f'source must be one of {", ".join(ORIGINS)}')
     node_name = (node_name or '').strip().lower()
     if not node_name:
         raise ValueError('node_name is required')
@@ -141,23 +187,24 @@ def add_change(node_name, description, category='other', timestamp=None,
     with database.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO change_log (timestamp, node_name, peer_node, category, description, source, author,
-                                    created_at)
-            VALUES (?, ?, ?, ?, ?, 'manual', ?, ?)
+            INSERT INTO change_log (timestamp, node_name, peer_node, category, description, source, origin,
+                                    author, created_at)
+            VALUES (?, ?, ?, ?, ?, 'manual', ?, ?, ?)
         ''', (when.strftime(TS_FMT), node_name, peer_node, category,
-              (description or '').strip() or None, (author or '').strip() or None, database.local_timestamp()))
+              (description or '').strip() or None, origin, (author or '').strip() or None,
+              database.local_timestamp()))
         change_id = cursor.lastrowid
     return get_change(change_id)
 
 
 def delete_change(change_id):
-    """Delete an entry. Auto entries stay deleted (their event_id is kept as a
-    tombstone so sync doesn't re-import them)."""
+    """Delete an entry. Auto entries stay deleted (their event_id / ref is kept
+    as a tombstone so sync doesn't re-import them)."""
     change = get_change(change_id)
     if not change:
         return False
     with database.get_connection() as conn:
-        if change.get('event_id'):
+        if change.get('event_id') or change.get('ref'):
             conn.execute("UPDATE change_log SET source = 'deleted' WHERE id = ?", (change_id,))
         else:
             conn.execute('DELETE FROM change_log WHERE id = ?', (change_id,))

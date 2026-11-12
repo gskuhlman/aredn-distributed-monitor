@@ -19,6 +19,7 @@ const ChangesModule = {
         on('chg-search', 'input', () => this.renderList());
         on('chg-scope', 'change', () => this.renderList());
         on('chg-category', 'change', () => this.renderList());
+        on('chg-origin', 'change', () => this.renderList());
         on('chg-hours', 'change', () => this.load());
         on('chg-add-toggle', 'click', () => this.toggleForm());
         on('chg-cancel', 'click', () => this.toggleForm(false));
@@ -70,11 +71,13 @@ const ChangesModule = {
         const search = (document.getElementById('chg-search')?.value || '').trim().toLowerCase();
         const scope = document.getElementById('chg-scope')?.value || 'all';
         const category = document.getElementById('chg-category')?.value || 'all';
+        const origin = document.getElementById('chg-origin')?.value || 'all';
         return this.changes.filter(c => {
             const names = [c.node_name, c.peer_node].filter(Boolean);
             if (scope === 'selected' && !names.some(n => this.selected.has(n))) return false;
             if (scope === 'infrastructure' && !names.some(n => this.infrastructure.has(n))) return false;
             if (category !== 'all' && c.category !== category) return false;
+            if (origin !== 'all' && this.origin(c) !== origin) return false;
             if (search && !`${names.join(' ')} ${c.description || ''}`.toLowerCase().includes(search)) return false;
             return true;
         });
@@ -101,12 +104,24 @@ const ChangesModule = {
                 <td>${c.peer_node ? `<a href="/nodes/${encodeURIComponent(c.peer_node)}">${this.esc(c.peer_node)}</a>` : ''}</td>
                 <td><span class="chg-cat chg-cat-${this.esc(c.category)}">${this.esc(c.category)}</span></td>
                 <td class="chg-desc">${this.esc(c.description || '')}${c.author ? ` <small>(${this.esc(c.author)})</small>` : ''}</td>
-                <td>${this.esc(c.source)}</td>
+                <td>${this.originBadge(c)}</td>
                 <td>${this.verdictBadge(c)}</td>
                 <td class="chg-actions">
                     <button class="btn btn-small btn-primary" data-chg-action="compare" data-id="${c.id}">Before / after</button>
                     <button class="btn btn-small btn-secondary" data-chg-action="delete" data-id="${c.id}" title="Remove from the log">Delete</button>
                 </td></tr>`).join('')}</tbody></table>`;
+    },
+
+    /** Where the entry came from: user, syslog, scan or other. */
+    origin(c) {
+        return c.origin || (c.event_id ? 'scan' : c.source === 'manual' ? 'user' : 'other');
+    },
+
+    originBadge(c) {
+        const o = this.origin(c);
+        const tip = { user: 'Entered by a user', syslog: "Found in the node's syslog",
+                      scan: 'Detected by a network scan', other: 'Other source' }[o] || '';
+        return `<span class="chg-src chg-src-${this.esc(o)}" title="${tip}">${this.esc(o)}</span>`;
     },
 
     verdictBadge(c) {
@@ -140,7 +155,7 @@ const ChangesModule = {
         const val = id => (document.getElementById(id)?.value || '').trim();
         const body = {
             node_name: val('chg-node'), peer_node: val('chg-peer'), category: val('chg-cat'),
-            description: val('chg-desc'), author: val('chg-author'),
+            description: val('chg-desc'), author: val('chg-author'), origin: val('chg-src') || 'user',
             timestamp: val('chg-time').replace('T', ' ')
         };
         if (!body.node_name || !body.description) {

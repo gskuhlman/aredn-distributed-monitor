@@ -29,7 +29,7 @@ const NodeChanges = {
                 <tbody>${rows.map(c => `<tr>
                     <td>${this.esc(c.timestamp)}</td><td>${this.esc(c.node_name)}</td><td>${this.esc(c.peer_node || '')}</td>
                     <td><span class="chg-cat chg-cat-${this.esc(c.category)}">${this.esc(c.category)}</span></td>
-                    <td class="chg-desc">${this.esc(c.description || '')}</td><td>${this.esc(c.source)}</td>
+                    <td class="chg-desc">${this.esc(c.description || '')}</td><td><span class="chg-src chg-src-${this.esc(c.origin || 'other')}">${this.esc(c.origin || 'other')}</span></td>
                     <td><a class="btn btn-small btn-secondary" href="/#changes/${c.id}">Before / after</a></td>
                 </tr>`).join('')}</tbody></table></div>`;
         } catch (error) {

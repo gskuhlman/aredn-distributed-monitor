@@ -2073,6 +2073,11 @@ body {
 .chg-cat-antenna { background: #8e44ad; }
 .chg-cat-firmware { background: #16a085; }
 .chg-cat-routing { background: #b7950b; }
+.chg-src { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 0.8em; font-weight: 600; border: 1px solid; }
+.chg-src-user { color: #1a5276; border-color: #2471a3; background: #eaf2f8; }
+.chg-src-syslog { color: #6c3483; border-color: #7d3c98; background: #f4ecf7; }
+.chg-src-scan { color: #186a3b; border-color: #1e8449; background: #e9f7ef; }
+.chg-src-other { color: #424949; border-color: #707b7c; background: #f2f3f4; }
 .chg-infra { margin-left: 4px; color: #8e44ad; }
 .chg-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 12px; }
 .chg-form-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 0.9em; }
