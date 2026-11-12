@@ -3,7 +3,8 @@ Change log and before/after comparison (Changes tab).
 
 Records channel, power, antenna, firmware and other changes to a node (or a
 specific link), either entered by the operator or imported from the
-scanner's events (frequency_change, radio_config_change, firmware_change).
+scanner's events (frequency_change, radio_config_change, firmware_change,
+link_cost_change).
 `compare()` then measures every RF link of the changed node over equal
 windows before and after the change, so an operator can see whether, say,
 moving a sector's channel actually improved its clients' LQ, SNR and noise.
@@ -18,13 +19,14 @@ from datetime import datetime, timedelta
 import database
 
 TS_FMT = '%Y-%m-%d %H:%M:%S'
-CATEGORIES = ('channel', 'power', 'antenna', 'firmware', 'other')
+CATEGORIES = ('channel', 'power', 'antenna', 'firmware', 'routing', 'other')
 
 # Events imported as automatic change entries, and the category they map to.
 AUTO_EVENT_TYPES = {
     database.EVENT_FREQUENCY_CHANGE: 'channel',
     database.EVENT_RADIO_CONFIG_CHANGE: 'channel',
     database.EVENT_FIRMWARE_CHANGE: 'firmware',
+    database.EVENT_LINK_COST_CHANGE: 'routing',
 }
 
 # (key, label, better direction, absolute threshold, relative threshold)
@@ -85,11 +87,15 @@ def sync_from_events():
             WHERE e.event_type IN ({placeholders}) AND c.id IS NULL AND e.node_name IS NOT NULL
         ''', types).fetchall()
         for r in rows:
+            peer = None
+            if r['event_type'] == database.EVENT_LINK_COST_CHANGE:
+                m = re.search(r'link to (\S+)', r['details'] or '')
+                peer = m.group(1).lower() if m else None
             cursor.execute('''
                 INSERT OR IGNORE INTO change_log
-                    (timestamp, node_name, category, description, source, event_id, created_at)
-                VALUES (?, ?, ?, ?, 'auto', ?, ?)
-            ''', (r['timestamp'], r['node_name'], _event_category(r['event_type'], r['details']),
+                    (timestamp, node_name, peer_node, category, description, source, event_id, created_at)
+                VALUES (?, ?, ?, ?, ?, 'auto', ?, ?)
+            ''', (r['timestamp'], r['node_name'], peer, _event_category(r['event_type'], r['details']),
                   r['details'], r['id'], database.local_timestamp()))
         return len(rows)
 

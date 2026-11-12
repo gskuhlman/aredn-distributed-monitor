@@ -85,6 +85,9 @@ body {
 
 /* Buttons */
 .btn {
+    display: inline-block;
+    text-decoration: none;
+    white-space: nowrap;
     padding: 8px 16px;
     border: none;
     border-radius: 4px;
@@ -94,12 +97,12 @@ body {
 }
 
 .btn-primary {
-    background-color: #3498db;
-    color: white;
+    background-color: #2471a3;
+    color: #fff;
 }
 
 .btn-primary:hover {
-    background-color: #2980b9;
+    background-color: #1a5276;
 }
 
 .btn-primary:disabled {
@@ -108,12 +111,12 @@ body {
 }
 
 .btn-secondary {
-    background-color: #95a5a6;
-    color: white;
+    background-color: #566573;
+    color: #fff;
 }
 
 .btn-secondary:hover {
-    background-color: #7f8c8d;
+    background-color: #424f5b;
 }
 
 .btn-close {
@@ -250,12 +253,12 @@ body {
     font-size: 0.85rem;
 }
 
-.info-table a {
+.info-table a:not(.btn) {
     color: #3498db;
     text-decoration: none;
 }
 
-.info-table a:hover {
+.info-table a:not(.btn):hover {
     text-decoration: underline;
 }
 
@@ -1222,12 +1225,12 @@ body {
     background: #394957;
 }
 
-.nodes-table td a {
+.nodes-table td a:not(.btn) {
     color: #3498db;
     text-decoration: none;
 }
 
-.nodes-table td a:hover {
+.nodes-table td a:not(.btn):hover {
     text-decoration: underline;
 }
 
@@ -2069,6 +2072,7 @@ body {
 .chg-cat-power { background: #d35400; }
 .chg-cat-antenna { background: #8e44ad; }
 .chg-cat-firmware { background: #16a085; }
+.chg-cat-routing { background: #b7950b; }
 .chg-infra { margin-left: 4px; color: #8e44ad; }
 .chg-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 12px; }
 .chg-form-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 0.9em; }
