@@ -61,6 +61,28 @@
         } catch (e) { el.innerHTML = `<p class="log-empty">${R7.esc(e.message)}</p>`; }
     }
 
+    // Read the node's log over SSH now; the collector otherwise reads it every 15 minutes.
+    async function pullLog() {
+        const btn = document.getElementById('np-syslog-pull');
+        const status = document.getElementById('np-syslog-pull-status');
+        btn.disabled = true;
+        status.textContent = 'Reading the log over SSH…';
+        try {
+            const resp = await fetch(`/api/syslog/pull/${encodeURIComponent(node)}`, { method: 'POST' });
+            const d = await resp.json();
+            if (!resp.ok) status.textContent = d.error || 'Could not read the log.';
+            else {
+                status.textContent = d.recent ? `Already read at ${String(d.at).slice(11, 16)}.`
+                    : `Read at ${String(d.at).slice(11, 16)}: ${d.added} new line${d.added === 1 ? '' : 's'}.`;
+                await loadLog();
+            }
+        } catch (e) {
+            status.textContent = e.message;
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     async function loadCall() {
         const el = document.getElementById('np-call');
         if (!el) return;
@@ -80,6 +102,7 @@
     document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('np-iface-hours')?.addEventListener('change', loadIface);
         document.getElementById('np-syslog-sev')?.addEventListener('change', loadLog);
+        document.getElementById('np-syslog-pull')?.addEventListener('click', pullLog);
         load();
     });
 })();

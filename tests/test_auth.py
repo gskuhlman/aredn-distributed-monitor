@@ -58,3 +58,19 @@ def test_login_rate_limited(client):
         client.post('/api/auth/login', json={'password': 'bad'})
     assert client.post('/api/auth/login', json={'password': 'correct horse'}).status_code == 429
     auth._failures.clear()
+
+
+def test_only_previews_and_one_off_checks_are_open():
+    # Change nothing: open without a login
+    for path in ('/api/channel-map/what-if', '/api/spectrum', '/api/channel-planner', '/api/reports/airtime',
+                 '/api/reports/site-matrix', '/api/rf-stats/diagnose/a/b/live', '/api/path/live',
+                 '/api/ping/w0aa-x', '/api/traceroute/w0aa-x', '/api/alerts/ack/tok', '/api/auth/login'):
+        assert auth._open(path), path
+    # Scans, job runs, refreshes, SSH reads, deletes and settings: login
+    for path in ('/api/scan', '/api/nodes/scan/w0aa-x', '/api/routes/3/run', '/api/voip/phones/run',
+                 '/api/voip/phones/4/ping', '/api/node-clock/run', '/api/weather/refresh',
+                 '/api/collector/health/check', '/api/reports/infrastructure', '/api/services/checks/run',
+                 '/api/syslog/pull/w0aa-x', '/api/syslog/import', '/api/nodes/delete/w0aa-x', '/api/settings',
+                 '/api/scan-boundaries/w0aa-x', '/api/cleanup/delete', '/api/admin/database/vacuum',
+                 '/api/ssh/collect', '/api/capacity/run', '/api/routes/3/traffic'):
+        assert not auth._open(path), path

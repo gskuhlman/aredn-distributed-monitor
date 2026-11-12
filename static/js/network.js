@@ -1533,15 +1533,11 @@ function initSocket() {
  * Request a network scan
  */
 function requestScan() {
-    if (socket && socket.connected) {
-        socket.emit('request_scan');
-    } else {
-        // Fallback to REST API
-        fetch('/api/scan', { method: 'POST' })
-            .then(response => response.json())
-            .then(data => console.log('Scan triggered:', data))
-            .catch(error => console.error('Scan error:', error));
-    }
+    // REST, not Socket.IO: a scan needs the login, and auth.js asks for it on a 401.
+    fetch('/api/scan', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => console.log('Scan triggered:', data))
+        .catch(error => console.error('Scan error:', error));
 }
 
 /**

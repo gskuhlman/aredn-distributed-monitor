@@ -254,7 +254,9 @@
             <section class="node-page-section" data-group="history">
                 <h2>Syslog <small class="form-hint">the node's own log (logread over SSH, or the syslog receiver)</small></h2>
                 <div class="report-actions"><select id="np-syslog-sev" class="form-input"><option value="">All levels</option>
-                    <option value="4">Warnings and worse</option><option value="3">Errors and worse</option></select></div>
+                    <option value="4">Warnings and worse</option><option value="3">Errors and worse</option></select>
+                    <button id="np-syslog-pull" class="btn btn-secondary btn-small" title="Read this node's log over SSH now (otherwise every 15 minutes; needs the login)">Pull latest logs</button>
+                    <span id="np-syslog-pull-status" class="form-hint"></span></div>
                 <div id="np-syslog"><p class="loading">Loading...</p></div>
             </section>
 

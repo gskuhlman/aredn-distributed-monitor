@@ -207,3 +207,37 @@ def test_run_stops_between_nodes_on_shutdown(monkeypatch):
     monkeypatch.setattr(sc, 'collect_node', collect)
     result = sc.run(['a', 'b', 'c'])
     assert seen == ['a', 'b'] and result['stopped'] and not sc.busy()
+
+
+def test_logread_every_15_minutes_at_most(mesh, monkeypatch):
+    assert 'logread' in sc.node_script(True) and 'logread' not in sc.node_script(False)
+    assert 'logread' in sc.node_script(False, logread=True)
+    now = datetime(2026, 11, 12, 14, 0, 0)
+    at = lambda m: (now - timedelta(minutes=m)).strftime(sc.TS_FMT)
+    assert sc.logread_due({'logread_at': None}, now)
+    assert not sc.logread_due({'logread_at': at(10)}, now) and sc.logread_due({'logread_at': at(15)}, now)
+    monkeypatch.setattr(sc.config, 'SYSLOG_PULL_MINUTES', 5)     # never under 15
+    assert not sc.logread_due({'logread_at': at(10)}, now)
+    monkeypatch.setattr(sc.config, 'SYSLOG_PULL_MINUTES', 60)
+    assert not sc.logread_due({'logread_at': at(30)}, now)
+
+
+def test_pull_logs_on_request(mesh, monkeypatch, tmp_path):
+    key = tmp_path / 'k'
+    key.write_text('x')
+    monkeypatch.setattr(sc.config, 'SSH_KEY_PATH', str(key))
+    monkeypatch.setattr(sc, 'targets', lambda: ['w0aa-x'])
+    now = datetime.now()
+    calls = []
+
+    def fake(node, script, args=None):
+        calls.append(script)
+        return 0, f"{sc.MARK} logread\n{_logline(now, 'hello from the node')}\n{sc.MARK} end\n", ''
+    monkeypatch.setattr(sc, '_run_ssh', fake)
+    assert sc.pull_logs('w0aa-y')['error_kind'] == 'not_target' and not calls
+    r = sc.pull_logs('w0aa-x', now=now)
+    assert r['ok'] and r['added'] == 1 and 'logread' in calls[0] and 'station' not in calls[0]
+    assert sc.pull_logs('w0aa-x', now=now + timedelta(seconds=20))['recent'] and len(calls) == 1
+    assert sc.pull_logs('w0aa-x', now=now + timedelta(seconds=90))['ok'] and len(calls) == 2
+    with database.get_connection() as conn:
+        assert conn.execute("SELECT logread_at FROM ssh_status WHERE node_name = 'w0aa-x'").fetchone()[0]

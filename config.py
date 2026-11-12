@@ -424,6 +424,9 @@ SYSLOG_ENABLED = env_bool("SYSLOG_ENABLED", False)
 SYSLOG_HOST = os.environ.get("SYSLOG_HOST", "0.0.0.0")
 SYSLOG_PORT = env_int("SYSLOG_PORT", 514)
 SYSLOG_RETENTION_DAYS = env_int("SYSLOG_RETENTION_DAYS", 31)
+# How often the SSH collector reads each node's log (logread) on its regular
+# runs; never more often than every 15 minutes. Pull now from the node page.
+SYSLOG_PULL_MINUTES = env_int("SYSLOG_PULL_MINUTES", 15)
 # Time zone labels (local_time.py): every stored and shown time is this PC's local time.
 TIME_ZONE_NAME = os.environ.get("TIME_ZONE_NAME", "Central")
 TIME_ZONE_ABBRS = tuple((os.environ.get("TIME_ZONE_ABBRS") or "CST,CDT").split(",")[:2])

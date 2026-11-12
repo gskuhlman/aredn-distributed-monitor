@@ -3082,7 +3082,11 @@ def handle_disconnect():
 
 @socketio.on('request_scan')
 def handle_request_scan():
-    """Handle scan request from client"""
+    """Handle scan request from client. Socket.IO skips the HTTP login check,
+    so a scan here needs the login too (the page uses POST /api/scan)."""
+    if auth.enabled() and not auth.logged_in():
+        emit('scan_acknowledged', {'message': 'Log in to start a scan', 'login_required': True})
+        return
     if not scan_state['is_scanning']:
         socketio.start_background_task(scheduled_scan)
         emit('scan_acknowledged', {'message': 'Scan started'})
@@ -3500,6 +3504,16 @@ def api_syslog_status():
 def api_syslog_csv():
     return Response(syslog_rx.csv_text(**_syslog_filters()), mimetype='text/csv',
                     headers={'Content-Disposition': 'attachment; filename=syslog.csv'})
+
+
+@app.route('/api/syslog/pull/<name>', methods=['POST'])
+def api_syslog_pull(name):
+    """Read one node's log over SSH now (node page "Pull latest logs"; needs the login)."""
+    result = ssh_collect.pull_logs(name)
+    if result.get('ok'):
+        return jsonify(result)
+    status = {'no_key': 409, 'not_target': 409}.get(result.get('error_kind'), 502)
+    return jsonify(result), status
 
 
 @app.route('/api/syslog/import', methods=['POST'])

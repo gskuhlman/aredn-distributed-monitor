@@ -1,8 +1,9 @@
 """
 Login for changes (Admin page). Reading stays open; when a password is set,
 every action (POST/PUT/PATCH/DELETE under /api/) needs a login, except the
-read-like POSTs in OPEN_POSTS (what-if previews, the planner, live
-diagnostics, scans).
+read-like POSTs in OPEN_POSTS (what-if previews, the planner, one-off live
+checks that store nothing). Scans, job runs, refreshes and SSH reads need it;
+so does a scan asked for over Socket.IO (app.handle_request_scan).
 
 The password is either ADMIN_PASSWORD (environment) or a salted hash stored
 in the local SQLite `auth_config` table (set on the Admin page). Like the
@@ -28,23 +29,19 @@ import config
 import database
 
 PROTECTED_METHODS = ('POST', 'PUT', 'PATCH', 'DELETE')
+# Without a login only POSTs that change nothing: previews and calculations
+# (what-if, planner, spectrum, sector / site reports) and one-off live checks
+# that store nothing (ping, traceroute, path and pair checks). Anything that
+# starts a scan or a job, writes data or reads nodes over SSH needs the login.
 OPEN_POSTS = [re.compile(p) for p in (
     r'^/api/auth/(login|logout)$',
     r'^/api/channel-map/what-if$',
     r'^/api/spectrum$',
     r'^/api/channel-planner$',
-    r'^/api/reports/(airtime|site-matrix|infrastructure)$',
+    r'^/api/reports/(airtime|site-matrix)$',
     r'^/api/rf-stats/diagnose/[^/]+/[^/]+/live$',
     r'^/api/path/live$',
     r'^/api/(ping|traceroute)/[^/]+$',
-    r'^/api/scan$',
-    r'^/api/nodes/scan/[^/]+$',
-    r'^/api/collector/health/check$',
-    r'^/api/weather/refresh$',
-    r'^/api/routes/\d+/run$',
-    r'^/api/voip/phones/run$',
-    r'^/api/node-clock/run$',
-    r'^/api/voip/phones/\d+/ping$',
     r'^/api/alerts/ack/[^/]+$',   # the token in the notification link is the credential
 )]
 MAX_FAILS = 5

@@ -115,11 +115,18 @@ exit 0
 SLOW_SCRIPT = f'''echo "{MARK} phy"; iw phy 2>&1
 for f in /sys/kernel/debug/ieee80211/*/ath9k/ani /sys/kernel/debug/ieee80211/*/ath9k/xmit /sys/kernel/debug/ieee80211/*/ath9k/reset; do [ -r "$f" ] && {{ echo "{MARK} ath9k $f"; cat "$f" 2>&1; }}; done
 echo "{MARK} dmesg"; dmesg 2>&1 | tail -n 400
-echo "{MARK} logread"; logread 2>&1 | tail -n 600
 echo "{MARK} uci"; uci show 2>&1
 echo "{MARK} radiofw"; dmesg 2>&1 | grep -E 'ath1[01]k.*(firmware ver| hw[0-9.]+ |CT firmware)' | tail -n 8
 for f in /lib/firmware/ath10k/*/*/firmware-*.bin /lib/firmware/ath11k/*/*/*.bin; do [ -f "$f" ] && {{ md5sum "$f"; echo "size $f $(wc -c < "$f")"; [ -e "/overlay/upper$f" ] && echo "overlay $f"; }}; done
 '''
+# The node's log: on slow runs, and on fast runs once SYSLOG_PULL_MINUTES (at
+# least 15) have passed since this node's log was last read (logread_due), so
+# Node Logs stays fresh without reading it on every run; pull_logs() reads it
+# on request (node page "Pull latest logs"). Same SSH session, no extra login.
+LOGREAD_SCRIPT = f'''echo "{MARK} logread"; logread 2>&1 | tail -n 600
+'''
+LOGREAD_MIN_MINUTES = 15
+PULL_COOLDOWN_SECONDS = 60
 SLOW_KINDS = ('phy', 'fw_stats', 'ath9k', 'dmesg', 'logread', 'uci', 'radiofw')
 
 # (label, severity, pattern) for kernel / radio log lines.
@@ -248,6 +255,8 @@ def ensure_tables():
             conn.execute('ALTER TABLE ssh_status ADD COLUMN fw_stats_fails INTEGER DEFAULT 0')
         if 'fw_stats_tried' not in cols:
             conn.execute('ALTER TABLE ssh_status ADD COLUMN fw_stats_tried TEXT')
+        if 'logread_at' not in cols:
+            conn.execute('ALTER TABLE ssh_status ADD COLUMN logread_at TEXT')
 
 
 def _exe(name):
@@ -562,10 +571,23 @@ def fw_stats_failed(text):
     return not any(v is not None for v in parse_fw_stats(text).values())
 
 
-def node_script(slow, fw_stats=True):
+def node_script(slow, fw_stats=True, logread=None):
     """The fixed script for one session: the fast part, fw_stats when asked
-    off (always on slow runs), the slow part on slow runs."""
-    return FAST_SCRIPT + (FW_STATS_SCRIPT if fw_stats else '') + (SLOW_SCRIPT if slow else '') + END_SCRIPT
+    off (always on slow runs), the slow part on slow runs, and the log on slow
+    runs or when `logread` is due."""
+    logread = slow if logread is None else (logread or slow)
+    return (FAST_SCRIPT + (FW_STATS_SCRIPT if fw_stats else '') + (SLOW_SCRIPT if slow else '')
+            + (LOGREAD_SCRIPT if logread else '') + END_SCRIPT)
+
+
+def logread_minutes():
+    """How often a fast run reads the node's log: SYSLOG_PULL_MINUTES, never under 15."""
+    return max(LOGREAD_MIN_MINUTES, int(config.SYSLOG_PULL_MINUTES or LOGREAD_MIN_MINUTES))
+
+
+def logread_due(st, now):
+    at = st.get('logread_at')
+    return not at or datetime.strptime(at, TS_FMT) <= now - timedelta(minutes=logread_minutes())
 
 
 def parse_coverage(phy_text):
@@ -652,11 +674,11 @@ def _status(conn, node):
     r = conn.execute('SELECT * FROM ssh_status WHERE node_name = ?', (node,)).fetchone()
     return dict(r) if r else {'node_name': node, 'last_try': None, 'last_ok': None, 'last_slow': None,
                               'error': None, 'error_kind': None, 'fails': 0, 'fw_stats_fails': 0,
-                              'fw_stats_tried': None}
+                              'fw_stats_tried': None, 'logread_at': None}
 
 
 STATUS_COLS = ('node_name', 'last_try', 'last_ok', 'last_slow', 'error', 'error_kind', 'fails', 'fw_stats_fails',
-               'fw_stats_tried')
+               'fw_stats_tried', 'logread_at')
 
 
 def _save_status(conn, st):
@@ -701,8 +723,9 @@ def collect_node(node, slow=None, manual=False, now=None):
         return {'node': node, 'ok': False, 'skipped': True, 'error_kind': st['error_kind'], 'error': st['error']}
     slow = _slow_due(st, now) if slow is None else slow
     fw_try = read_fw_stats(st, slow, now)
+    log_try = slow or logread_due(st, now)
     try:
-        code, out, err = _run_ssh(node, node_script(slow, fw_stats=fw_try))
+        code, out, err = _run_ssh(node, node_script(slow, fw_stats=fw_try, logread=log_try))
     except subprocess.TimeoutExpired:
         code, out, err = None, '', 'timed out'
     except OSError as exc:
@@ -788,8 +811,59 @@ def collect_node(node, slow=None, manual=False, now=None):
             st['fw_stats_tried'] = now_s
         if slow:
             st['last_slow'] = now_s
+        if any(k == 'logread' for k, _, _ in snaps):
+            st['logread_at'] = now_s
         _save_status(conn, st)
     return {'node': node, 'ok': True, 'stations': len(stations), 'surveys': len(surveys), 'snapshots': len(snaps)}
+
+
+def _keep_snapshot(conn, node, now_s, kind, label, text):
+    conn.execute('INSERT INTO ssh_snapshots (node_name, timestamp, kind, label, text) VALUES (?,?,?,?,?)',
+                 (node, now_s, kind, label, text))
+    conn.execute('''DELETE FROM ssh_snapshots WHERE node_name = ? AND kind = ? AND COALESCE(label, '') = ?
+                    AND id NOT IN (SELECT id FROM ssh_snapshots WHERE node_name = ? AND kind = ?
+                                   AND COALESCE(label, '') = ? ORDER BY timestamp DESC, id DESC LIMIT ?)''',
+                 (node, kind, label or '', node, kind, label or '', config.SSH_SNAPSHOT_KEEP))
+
+
+def pull_logs(node, now=None):
+    """Read one node's log now (node page "Pull latest logs", diagnostics).
+    {node, ok, added, at} | {recent: True} within PULL_COOLDOWN_SECONDS of the
+    last read | {error, error_kind}. Only nodes the collector reads (targets())."""
+    import syslog_rx
+    ensure_tables()
+    node = (node or '').lower()
+    if not key_present():
+        return {'node': node, 'ok': False, 'error': 'No SSH key yet.', 'error_kind': 'no_key'}
+    if node not in targets():
+        return {'node': node, 'ok': False, 'error_kind': 'not_target',
+                'error': 'This node is not read over SSH (only infrastructure nodes and SSH_NODES are).'}
+    now = now or datetime.now()
+    now_s = now.strftime(TS_FMT)
+    with database.get_connection() as conn:
+        st = _status(conn, node)
+    at = st.get('logread_at')
+    if at and datetime.strptime(at, TS_FMT) > now - timedelta(seconds=PULL_COOLDOWN_SECONDS):
+        return {'node': node, 'ok': True, 'recent': True, 'added': 0, 'at': at}
+    try:
+        code, out, err = _run_ssh(node, LOGREAD_SCRIPT + END_SCRIPT)
+    except subprocess.TimeoutExpired:
+        code, out, err = None, '', 'timed out'
+    except OSError as exc:
+        code, out, err = None, '', f'could not run ssh: {exc}'
+    sections = split_sections(out)
+    body = next((b for k, _, b in sections if k == 'logread'), None)
+    if body is None or sections[-1][0] != 'end':
+        lines = [l.strip() for l in (err or '').splitlines() if l.strip() and not l.startswith('Warning: Permanently added')]
+        return {'node': node, 'ok': False, 'error_kind': classify_error(err),
+                'error': (lines[-1] if lines else f'ssh exit {code}')[:300]}
+    added = syslog_rx.ingest_logread(node, body)
+    with database.get_connection() as conn:
+        _keep_snapshot(conn, node, now_s, 'logread', None, body)
+        st = _status(conn, node)
+        st['logread_at'] = now_s
+        _save_status(conn, st)
+    return {'node': node, 'ok': True, 'added': added, 'at': now_s}
 
 
 def _mesh_info(infos):
