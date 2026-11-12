@@ -484,6 +484,14 @@ def inject_version():
     return {'app_version': version.get()}
 
 
+@app.url_defaults
+def static_cache_buster(endpoint, values):
+    """url_for('static', ...) gets ?v=<build>, so every update loads fresh CSS/JS
+    (the wall display and long-open tabs kept old files from the cache)."""
+    if endpoint == 'static' and 'v' not in values:
+        values['v'] = version.get()
+
+
 @app.route('/api/health')
 def api_get_health():
     """Get app health and optional CouchDB connectivity."""
