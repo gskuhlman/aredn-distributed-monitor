@@ -2927,3 +2927,25 @@ tr.site-down td { opacity: 0.65; }
 .rt-table td { vertical-align: top; }
 .rt-table tr.rt-own td { opacity: 0.7; }
 .rt-table tr.rt-ends td:first-child { border-left: 3px solid #2471a3; }
+
+/* Agencies board: details under the tiles */
+.ag-detail h3 { margin: 14px 0 6px; font-size: 1rem; }
+.ag-detail.ag-degraded { border-left: 4px solid #e67e22; }
+.ag-detail.ag-down { border-left: 4px solid #c0392b; }
+.ag-problems li { margin-bottom: 4px; }
+.ag-dtable td { vertical-align: top; }
+.ag-dtable tr.ag-bad td { background: rgba(207, 34, 46, 0.08); }
+
+/* Wall display: ticker line and agency details (dark) */
+.wall-scroll { margin: 0; font-size: 1.05rem; background: #18212a; border: 1px solid #2c3742; }
+.wall-details-panel { overflow-y: auto; }
+.wall-details .node-page-section { background: transparent; border: none; box-shadow: none; padding: 0 0 0 10px; margin: 0 0 14px; }
+.wall-details .ag-detail { border-left: 4px solid #e67e22; } .wall-details .ag-detail.ag-down { border-left-color: #ec7063; }
+.wall-details h2 { font-size: 1.05rem; color: #e3e9ef; margin: 0 0 4px; }
+.wall-details h3 { font-size: .9rem; color: #98a6b4; margin: 8px 0 4px; }
+.wall-details .info-table, .wall-details .info-table th, .wall-details .info-table td { background: transparent; color: #e3e9ef; border-color: #2c3742; }
+.wall-details .info-table th { color: #98a6b4; }
+.wall-details .ag-dtable tr.ag-bad td { background: rgba(236, 112, 99, 0.15); }
+.wall-details .form-hint { color: #98a6b4; }
+.wall-details a { color: #85c1e9; }
+.wall-details ul { padding-left: 18px; }

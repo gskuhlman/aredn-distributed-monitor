@@ -1,5 +1,5 @@
-// Wall display (/wall): agency tiles, ticker, located mesh plot and the
-// on-the-air tape, refreshed every 30 s; F = full screen, keeps the screen
+// Wall display (/wall): agency tiles, the Status page's ticker line, agency
+// details (as on /board/agencies), located mesh plot and the on-the-air tape, refreshed every 30 s; F = full screen, keeps the screen
 // awake where the browser allows it, reloads itself every 6 hours.
 (function () {
     'use strict';
@@ -12,11 +12,19 @@
         return res.json();
     }
 
+    // The Status page's scrolling ticker line (ticker.js), same items and wording.
     function ticker(data) {
-        const el = document.getElementById('wall-ticker');
-        el.innerHTML = data.items.length ? data.items.slice(0, 14).map(i =>
-            `<li class="wt-${esc(i.severity)} wt-${esc(i.kind)}"><time>${esc((i.t || '').slice(11, 16))}</time>${esc(i.text)}</li>`).join('')
-            : '<li class="wt-info">Nothing to report in the last 24 hours.</li>';
+        const el = document.getElementById('wall-scroll');
+        const text = data.items.slice(0, 10).map(i => `${(i.t || '').slice(11, 16)} ${i.text}`).join('   •   ');
+        const next = text || 'All quiet in the last 24 hours.';
+        if (el.dataset.text === next) return;      // don't restart the scroll when nothing changed
+        el.dataset.text = next;
+        el.innerHTML = `<span>${esc(next)}</span>`;
+    }
+
+    function agencies(d) {
+        window.AgencyTiles.render(document.getElementById('wall-agencies'), d);
+        window.AgencyTiles.renderDetails(document.getElementById('wall-details'), d);
     }
 
     function plot(net) {
@@ -68,7 +76,7 @@
 
     async function refresh() {
         const jobs = [
-            get('/api/boards/agencies').then(d => window.AgencyTiles.render(document.getElementById('wall-agencies'), d)),
+            get('/api/boards/agencies').then(agencies),
             get('/api/ticker?limit=20').then(ticker),
             get('/api/network').then(plot),
             get('/api/reports/tape?hours=24&scope=infrastructure-connected').then(tape),

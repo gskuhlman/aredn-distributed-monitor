@@ -375,6 +375,24 @@ def traceroute_local(target, max_hops=30, timeout=2):
         return None
 
 
+# One traceroute at a time per source node: AREDN's traceroute page mixes up
+# the answers of two requests running on one node at once (Route Watch saw
+# COL -> EOC come back as the COL -> MMC trace and the other way round).
+_trace_locks = {}
+_trace_locks_guard = threading.Lock()
+
+
+def _trace_lock(host):
+    with _trace_locks_guard:
+        return _trace_locks.setdefault(host.lower(), threading.Lock())
+
+
+def _trace_server(text):
+    """The target the node says it traced ("Server:" line, else the traceroute header)."""
+    m = re.search(r'^\s*Server:\s*(\S+)', text, re.M) or re.search(r'traceroute to\s+(\S+)', text)
+    return m.group(1).rstrip(',').lower() if m else None
+
+
 def traceroute_via_aredn(target, source_node_ip=None):
     """Run a traceroute FROM an AREDN node toward a target, via its CGI.
 
@@ -401,15 +419,24 @@ def traceroute_via_aredn(target, source_node_ip=None):
 
         url = f"http://{source_host}/cgi-bin/traceroute?server={urllib.parse.quote(target_addr)}"
         logger.info("Running traceroute via AREDN API: %s -> %s", source_host, target_addr)
-        response = requests.get(url, timeout=45)
-        if response.status_code != 200:
-            logger.warning("AREDN traceroute API returned status %s", response.status_code)
-            return None
-
-        text = re.sub(r'<[^>]+>', '', response.text)
-        if 'Provide a server name' in text or '<title>ERROR' in response.text:
-            logger.warning("AREDN traceroute error for %s", target)
-            return None
+        with _trace_lock(source_host):
+            for attempt in range(2):
+                response = requests.get(url, timeout=45)
+                if response.status_code != 200:
+                    logger.warning("AREDN traceroute API returned status %s", response.status_code)
+                    return None
+                text = re.sub(r'<[^>]+>', '', response.text)
+                if 'Provide a server name' in text or '<title>ERROR' in response.text:
+                    logger.warning("AREDN traceroute error for %s", target)
+                    return None
+                server = _trace_server(text)
+                if server is None or server == target_addr.lower():
+                    break
+                # Another request's answer (someone else tracing from this node at the same time).
+                logger.warning("Traceroute via %s for %s answered for %s%s", source_host, target_addr, server,
+                               '; retrying' if attempt == 0 else '; giving up')
+            else:
+                return None
 
         hops = []
         for line in text.splitlines():
