@@ -2137,7 +2137,7 @@ def api_list_changes():
     """Channel/power/antenna/firmware changes, newest first."""
     node = (request.args.get('node') or '').strip().lower() or None
     hours = request.args.get('hours', type=int)
-    limit = max(1, min(2000, request.args.get('limit', 500, type=int)))
+    limit = max(1, min(5000, request.args.get('limit', 2000, type=int)))
     return jsonify({'changes': change_log.list_changes(node=node, hours=hours, limit=limit),
                     'categories': list(change_log.CATEGORIES), 'origins': list(change_log.ORIGINS)})
 
@@ -2153,6 +2153,20 @@ def api_add_change():
             data.get('timestamp'), data.get('peer_node'), data.get('author'), data.get('origin') or 'user')
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
+    return jsonify({'success': True, 'change': change})
+
+
+@app.route('/api/changes/<int:change_id>', methods=['PATCH'])
+def api_update_change(change_id):
+    """Edit an entry {category?, description?, peer_node?, origin?} (admin login)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        change = change_log.update_change(change_id, data.get('category'), data.get('description'),
+                                          data.get('peer_node'), data.get('origin'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    if not change:
+        return jsonify({'error': 'Change not found'}), 404
     return jsonify({'success': True, 'change': change})
 
 

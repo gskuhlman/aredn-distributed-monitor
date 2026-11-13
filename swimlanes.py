@@ -28,8 +28,7 @@ DEGRADED_QUALITY = 50
 MAX_LANES = 150
 STATES = ('good', 'degraded', 'flapping', 'down', 'unknown', 'none')
 MARKER_EVENTS = {'node_reboot': 'reboot', 'radio_config_change': 'config',
-                 'frequency_change': 'config', 'firmware_change': 'config',
-                 'link_cost_change': 'config'}
+                 'frequency_change': 'config', 'firmware_change': 'config'}
 
 
 def _parse(ts):

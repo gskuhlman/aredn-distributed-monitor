@@ -1,37 +1,45 @@
-import json
+"""Change log sources (user / syslog / scan / other), cost-setting changes from
+saved node config, and editing entries (change_log.py)."""
+
+import pytest
 
 import change_log
 import database
-import scanner
 
 
-def _link(rxcost):
-    return {'raw_tracker': json.dumps({'rxcost': rxcost, 'txcost': rxcost})}
+UCI_OLD = """babel.tunnel.rxcost='206'
+network.wgsV1KghN8c=interface
+network.wgsV1KghN8c.cost='206'
+network.wgsV1KghN8c.proto='wireguard'"""
 
 
-def test_tunnel_cost_change_detected():
-    assert scanner.link_cost_change('Wireguard', _link(206), {'rxcost': 1000}) == (206, 1000)
-    assert scanner.link_cost_change('DtD', _link(96), {'rxcost': 200}) == (96, 200)
+def _snap(conn, node, ts, text):
+    conn.execute("INSERT INTO ssh_snapshots (node_name, timestamp, kind, label, text) VALUES (?, ?, 'uci', NULL, ?)",
+                 (node, ts, text))
 
 
-def test_no_change_rf_infinity_or_missing():
-    assert scanner.link_cost_change('Wireguard', _link(206), {'rxcost': 206}) is None
-    assert scanner.link_cost_change('RF', _link(300), {'rxcost': 900}) is None
-    assert scanner.link_cost_change('Wireguard', _link(206), {'rxcost': 65535}) is None
-    assert scanner.link_cost_change('Wireguard', _link(65535), {'rxcost': 206}) is None
-    assert scanner.link_cost_change('Wireguard', None, {'rxcost': 206}) is None
-    assert scanner.link_cost_change('Wireguard', {'raw_tracker': None}, {'rxcost': 206}) is None
-    assert scanner.link_cost_change('Wireguard', _link(206), {}) is None
+def test_cost_setting_changes():
+    old = change_log.cost_settings(UCI_OLD)
+    assert old == {'babel.tunnel.rxcost': '206', 'network.wgsV1KghN8c.cost': '206'}
+    renamed = change_log.cost_settings(UCI_OLD.replace('wgsV1KghN8c', 'wgsGpC4j8kE'))
+    assert change_log.cost_setting_changes(old, renamed) == []           # tunnel renamed, same cost
+    raised = change_log.cost_settings(UCI_OLD.replace('wgsV1KghN8c', 'wgsGpC4j8kE').replace(".cost='206'", ".cost='1000'"))
+    assert change_log.cost_setting_changes(old, raised) == [('network.wgsGpC4j8kE.cost', '206', '1000')]
 
 
-def test_cost_change_event_lands_in_change_log(mesh):
-    database.log_event(database.EVENT_LINK_COST_CHANGE, 'w0gq-mmc-ac2',
-                       'Wireguard link to kd0cgn-prox Babel cost changed: rxcost 206 -> 1000')
+def test_cost_change_from_saved_config_lands_in_change_log(mesh):
+    import ssh_collect
+    ssh_collect.ensure_tables()
+    with database.get_connection() as conn:
+        _snap(conn, 'w0aa-mmc-ac2', '2026-11-11 14:41:52', UCI_OLD)
+        _snap(conn, 'w0aa-mmc-ac2', '2026-11-12 14:47:01', UCI_OLD.replace(".cost='206'", ".cost='1000'"))
+        _snap(conn, 'w0aa-mmc-ac2', '2026-11-13 14:47:01', UCI_OLD.replace(".cost='206'", ".cost='1000'"))
     rows = change_log.list_changes()
     assert len(rows) == 1
     r = rows[0]
-    assert r['category'] == 'routing' and r['peer_node'] == 'kd0cgn-prox' and r['source'] == 'auto'
-    assert change_log.sync_from_events() == 0
+    assert (r['category'], r['origin'], r['timestamp']) == ('routing', 'scan', '2026-11-12 14:47:01')
+    assert 'network.wgsV1KghN8c.cost 206 -> 1000' in r['description']
+    assert change_log.sync_from_config() == 0
 
 
 def _msg(node, program, message, ts='2026-11-11 11:57:33'):
@@ -58,6 +66,29 @@ def test_entries_carry_their_source(mesh):
 
 
 def test_bad_origin_rejected(mesh):
-    import pytest
     with pytest.raises(ValueError):
         change_log.add_change('w0aa-b', 'x', 'other', origin='rumour')
+
+
+def test_edit_entry(mesh):
+    c = change_log.add_change('w0aa-b', 'route cost to 1000', 'other')
+    e = change_log.update_change(c['id'], category='routing', peer_node='W0AA-C', description=' cost 1000 ')
+    assert (e['category'], e['peer_node'], e['description'], e['origin']) == ('routing', 'w0aa-c', 'cost 1000', 'user')
+    assert change_log.update_change(c['id'], origin='other')['origin'] == 'other'
+    with pytest.raises(ValueError):
+        change_log.update_change(c['id'], category='nonsense')
+    assert change_log.update_change(99999, category='routing') is None
+
+
+def test_edit_requires_admin_login(mesh):
+    from flask import Flask, jsonify
+    import auth
+    app = Flask(__name__)
+    auth.install(app)
+
+    @app.route('/api/changes/<int:change_id>', methods=['PATCH'])
+    def edit(change_id):
+        return jsonify({'ok': True})
+
+    assert auth.set_password('correct horse')[0]
+    assert app.test_client().patch('/api/changes/1', json={'category': 'routing'}).status_code == 401

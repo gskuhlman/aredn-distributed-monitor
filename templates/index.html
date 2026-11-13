@@ -1422,15 +1422,17 @@
                                 <option value="selected">Selected Nodes</option>
                                 <option value="infrastructure">Infrastructure Nodes</option>
                             </select>
-                            <select id="chg-category" class="form-input">
-                                <option value="all">All categories</option>
-                                <option value="channel">Channel</option>
-                                <option value="power">Power</option>
-                                <option value="antenna">Antenna</option>
-                                <option value="firmware">Firmware</option>
-                                <option value="routing">Routing</option>
-                                <option value="other">Other</option>
-                            </select>
+                            <fieldset id="chg-categories" class="chg-cat-filter" title="Categories to show">
+                                <legend>Show</legend>
+                                <label><input type="checkbox" value="channel" checked> Channel</label>
+                                <label><input type="checkbox" value="power" checked> Power</label>
+                                <label><input type="checkbox" value="antenna" checked> Antenna</label>
+                                <label><input type="checkbox" value="firmware" checked> Firmware</label>
+                                <label><input type="checkbox" value="routing" checked> Routing</label>
+                                <label><input type="checkbox" value="other" checked> Other</label>
+                                <button type="button" class="btn-link" data-cats="all">all</button>
+                                <button type="button" class="btn-link" data-cats="none">none</button>
+                            </fieldset>
                             <select id="chg-origin" class="form-input" title="Where the entry came from">
                                 <option value="all">All sources</option>
                                 <option value="user">User</option>

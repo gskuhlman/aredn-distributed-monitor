@@ -1664,7 +1664,6 @@ const EVENT_ICONS = {
     'scan_complete_again': { icon: '&#10004;', label: 'Scans Complete Again', class: 'event-success' },
     'radio_config_change': { icon: '&#128225;', label: 'Radio Settings Changed', class: 'event-warning' },
     'firmware_change': { icon: '&#128190;', label: 'Firmware Changed', class: 'event-info' },
-    'link_cost_change': { icon: '&#128678;', label: 'Link Cost Changed', class: 'event-info' },
     // Link Watch (link_watch.py)
     'noise_jump': { icon: '&#128266;', label: 'Noise Floor Jump', class: 'event-warning' },
     'noise_cleared': { icon: '&#128264;', label: 'Noise Floor Normal', class: 'event-success' },

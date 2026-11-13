@@ -451,24 +451,6 @@ def discover_neighbors(data, show_tunnels, answering=None):
     return discovered_nodes
 
 
-def link_cost_change(link_type, existing_link, tracker):
-    """(old, new) when a wired/tunnel link's Babel rxcost changed since the last
-    scan, else None. That rxcost is this node's own configured cost for the link
-    (AREDN tunnel/DtD "Cost"), so a change means someone changed the setting and
-    babeld picked it up. RF links are skipped (their cost follows LQ), as are
-    moves to or from infinity (link down/up, not a setting change)."""
-    if not existing_link or str(link_type or '').upper() == 'RF':
-        return None
-    try:
-        old = json.loads(existing_link.get('raw_tracker') or '{}').get('rxcost')
-        old, new = int(float(old)), int(float(tracker.get('rxcost')))
-    except (TypeError, ValueError, AttributeError):
-        return None
-    if old == new or 65535 in (old, new) or old <= 0 or new <= 0:
-        return None
-    return old, new
-
-
 def process_links(data, source_node):
     """Process LQM tracker data to extract links and discover connected nodes"""
     if not data or not source_node:
@@ -595,17 +577,6 @@ def process_links(data, source_node):
                             source_node, hostname, 'unblocked', link_type=link_type,
                             quality=quality, snr=snr, rev_snr=rev_snr
                         )
-
-            cost_change = link_cost_change(link_type, existing_link, tracker)
-            if cost_change:
-                old_cost, new_cost = cost_change
-                events.append({
-                    'type': database.EVENT_LINK_COST_CHANGE,
-                    'node': source_node,
-                    'details': f"{link_type} link to {hostname} Babel cost changed: rxcost {old_cost} -> {new_cost}",
-                    'severity': 'info'
-                })
-                logger.info(f"Link cost change: {source_node} -> {hostname} {old_cost} -> {new_cost}")
 
             database.upsert_link(
                 source_node=source_node,

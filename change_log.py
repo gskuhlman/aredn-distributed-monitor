@@ -3,9 +3,10 @@ Change log and before/after comparison (Changes tab).
 
 Records channel, power, antenna, firmware and other changes to a node (or a
 specific link), either entered by the operator or imported from the
-scanner's events (frequency_change, radio_config_change, firmware_change,
-link_cost_change) and from node syslog (firmware upgrades). Each entry has an
-origin: user, syslog, scan or other.
+scanner's events (frequency_change, radio_config_change, firmware_change),
+from node syslog (firmware upgrades) and from the nodes' saved config read
+over SSH (tunnel / Babel cost settings). Each entry has an origin: user,
+syslog, scan or other.
 `compare()` then measures every RF link of the changed node over equal
 windows before and after the change, so an operator can see whether, say,
 moving a sector's channel actually improved its clients' LQ, SNR and noise.
@@ -37,7 +38,6 @@ AUTO_EVENT_TYPES = {
     database.EVENT_FREQUENCY_CHANGE: 'channel',
     database.EVENT_RADIO_CONFIG_CHANGE: 'channel',
     database.EVENT_FIRMWARE_CHANGE: 'firmware',
-    database.EVENT_LINK_COST_CHANGE: 'routing',
 }
 
 # (key, label, better direction, absolute threshold, relative threshold)
@@ -98,16 +98,11 @@ def sync_from_events():
             WHERE e.event_type IN ({placeholders}) AND c.id IS NULL AND e.node_name IS NOT NULL
         ''', types).fetchall()
         for r in rows:
-            peer = None
-            if r['event_type'] == database.EVENT_LINK_COST_CHANGE:
-                m = re.search(r'link to (\S+)', r['details'] or '')
-                peer = m.group(1).lower() if m else None
             cursor.execute('''
                 INSERT OR IGNORE INTO change_log
-                    (timestamp, node_name, peer_node, category, description, source, origin, event_id,
-                     created_at)
-                VALUES (?, ?, ?, ?, ?, 'auto', 'scan', ?, ?)
-            ''', (r['timestamp'], r['node_name'], peer, _event_category(r['event_type'], r['details']),
+                    (timestamp, node_name, category, description, source, origin, event_id, created_at)
+                VALUES (?, ?, ?, ?, 'auto', 'scan', ?, ?)
+            ''', (r['timestamp'], r['node_name'], _event_category(r['event_type'], r['details']),
                   r['details'], r['id'], database.local_timestamp()))
         return len(rows)
 
@@ -142,10 +137,74 @@ def sync_from_syslog():
     return added
 
 
+# Saved settings whose change is a routing change: per-tunnel / per-interface
+# cost (network.<if>.cost, from the AREDN tunnel "Cost" field) and the Babel
+# defaults (babel.<type>.rxcost). Read from the `uci show` snapshots the SSH
+# collector keeps (ssh_snapshots kind 'uci'), so a change shows even before
+# babeld applies it. Live Babel rxcost is not used: on tunnels it moves with
+# packet loss all the time.
+COST_SETTING = re.compile(r"^(network\.[\w-]+\.cost|babel\.[\w-]+\.rxcost(?:fast)?)='?([^']*)'?$")
+
+
+def cost_settings(uci_text):
+    """{uci key: value} of the cost settings in a `uci show` dump."""
+    out = {}
+    for line in (uci_text or '').splitlines():
+        m = COST_SETTING.match(line.strip())
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+def cost_setting_changes(old, new):
+    """[(key, old value, new value)] between two cost_settings() dicts. A
+    tunnel interface that was renamed (one key gone, one new) counts as the
+    same setting; added or removed tunnels otherwise don't count."""
+    changes = [(k, old[k], new[k]) for k in sorted(set(old) & set(new)) if old[k] != new[k]]
+    gone = [k for k in old if k not in new and k.startswith('network.')]
+    added = [k for k in new if k not in old and k.startswith('network.')]
+    if len(gone) == 1 and len(added) == 1 and old[gone[0]] != new[added[0]]:
+        changes.append((added[0], old[gone[0]], new[added[0]]))
+    return changes
+
+
+def sync_from_config():
+    """Import cost-setting changes between consecutive uci snapshots of each
+    node as 'auto' routing entries with origin 'scan' (idempotent)."""
+    added = 0
+    with database.get_connection() as conn:
+        try:
+            snaps = conn.execute('''SELECT id, node_name, timestamp, text FROM ssh_snapshots
+                                    WHERE kind = 'uci' ORDER BY node_name, timestamp, id''').fetchall()
+        except database.sqlite3.OperationalError:
+            return 0  # ssh_snapshots not created yet
+        prev = {}
+        for s in snaps:
+            node = (s['node_name'] or '').lower()
+            new = cost_settings(s['text'])
+            before = prev.get(node)
+            prev[node] = (s['timestamp'], new)
+            if not before:
+                continue
+            for key, old_v, new_v in cost_setting_changes(before[1], new):
+                what = 'Tunnel/interface cost' if key.startswith('network.') else 'Babel default cost'
+                cur = conn.execute('''
+                    INSERT OR IGNORE INTO change_log
+                        (timestamp, node_name, category, description, source, origin, ref, created_at)
+                    VALUES (?, ?, 'routing', ?, 'auto', 'scan', ?, ?)
+                ''', (s['timestamp'], node,
+                      f"{what} setting changed: {key} {old_v} -> {new_v} "
+                      f"(saved config, seen between {before[0][:16]} and {s['timestamp'][:16]})",
+                      f"uci:{node}:{key}:{s['timestamp']}", database.local_timestamp()))
+                added += cur.rowcount
+    return added
+
+
 def list_changes(node=None, hours=None, limit=500):
     """Changes newest first, optionally for one node (as node or peer)."""
     sync_from_events()
     sync_from_syslog()
+    sync_from_config()
     where, params = ["source != 'deleted'"], []
     if node:
         where.append('(node_name = ? OR peer_node = ?)')
@@ -194,6 +253,33 @@ def add_change(node_name, description, category='other', timestamp=None,
               (description or '').strip() or None, origin, (author or '').strip() or None,
               database.local_timestamp()))
         change_id = cursor.lastrowid
+    return get_change(change_id)
+
+
+def update_change(change_id, category=None, description=None, peer_node=None, origin=None):
+    """Edit an entry's category, description, peer or source (None = keep).
+    Returns the updated entry, None if it doesn't exist; ValueError on bad input."""
+    change = get_change(change_id)
+    if not change or change.get('source') == 'deleted':
+        return None
+    sets, params = [], []
+    if category is not None:
+        category = category.strip().lower()
+        if category not in CATEGORIES:
+            raise ValueError(f'category must be one of {", ".join(CATEGORIES)}')
+        sets.append('category = ?'); params.append(category)
+    if origin is not None:
+        origin = origin.strip().lower()
+        if origin not in ORIGINS:
+            raise ValueError(f'source must be one of {", ".join(ORIGINS)}')
+        sets.append('origin = ?'); params.append(origin)
+    if description is not None:
+        sets.append('description = ?'); params.append(description.strip() or None)
+    if peer_node is not None:
+        sets.append('peer_node = ?'); params.append(peer_node.strip().lower() or None)
+    if sets:
+        with database.get_connection() as conn:
+            conn.execute(f'UPDATE change_log SET {", ".join(sets)} WHERE id = ?', params + [change_id])
     return get_change(change_id)
 
 

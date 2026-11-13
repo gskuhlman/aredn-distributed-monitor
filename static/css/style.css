@@ -2964,3 +2964,15 @@ tr.site-down td { opacity: 0.65; }
 /* Changes log: wrap long descriptions so Source/Verdict stay on screen. */
 .table-scroll-wrapper .info-table.chg-table { min-width: 0; width: 100%; }
 .table-scroll-wrapper .info-table.chg-table td.chg-desc { white-space: normal; min-width: 260px; }
+/* Changes tab: category checkboxes, inline edit, and let the whole tab scroll
+   (the shared .nodes-container clips overflow, which cut the log at one screen). */
+#changes-view .nodes-container { overflow-y: auto; }
+#changes-view .nodes-container > * { flex-shrink: 0; }
+.chg-cat-filter { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0;
+    padding: 3px 10px; border: 1px solid #ccd1d9; border-radius: 4px; font-size: 0.85em; background: #fff; }
+.chg-cat-filter legend { padding: 0 4px; font-size: 0.85em; color: #566573; }
+.chg-cat-filter label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+.chg-cat-filter .btn-link { font-size: 0.9em; }
+.chg-table tr.chg-editing td { background: #fef9e7; vertical-align: middle; }
+.chg-table tr.chg-editing .form-input { padding: 3px 6px; font-size: 0.9em; }
+.chg-table .chg-edit-desc { width: 100%; min-width: 240px; box-sizing: border-box; }

@@ -28,7 +28,7 @@ import spof
 
 TS_FMT = '%Y-%m-%d %H:%M:%S'
 EVENT_TYPES = ('node_offline', 'node_online', 'node_reboot', 'node_degraded', 'link_dropped', 'link_restored',
-               'radio_config_change', 'frequency_change', 'firmware_change', 'link_cost_change', 'noise_jump', 'one_way_link',
+               'radio_config_change', 'frequency_change', 'firmware_change', 'noise_jump', 'one_way_link',
                'one_way_link_cleared', 'route_detour', 'route_changed', 'route_restored',
                'route_flapping', 'route_steady')
 

@@ -18,7 +18,18 @@ const ChangesModule = {
         const on = (id, ev, fn) => document.getElementById(id)?.addEventListener(ev, fn);
         on('chg-search', 'input', () => this.renderList());
         on('chg-scope', 'change', () => this.renderList());
-        on('chg-category', 'change', () => this.renderList());
+        const cats = document.getElementById('chg-categories');
+        if (cats) {
+            this.restoreCategories(cats);
+            cats.addEventListener('change', () => { this.saveCategories(cats); this.renderList(); });
+            cats.addEventListener('click', e => {
+                const b = e.target.closest('[data-cats]');
+                if (!b) return;
+                cats.querySelectorAll('input[type=checkbox]').forEach(x => { x.checked = b.dataset.cats === 'all'; });
+                this.saveCategories(cats);
+                this.renderList();
+            });
+        }
         on('chg-origin', 'change', () => this.renderList());
         on('chg-hours', 'change', () => this.load());
         on('chg-add-toggle', 'click', () => this.toggleForm());
@@ -29,8 +40,12 @@ const ChangesModule = {
             const btn = e.target.closest('[data-chg-action]');
             if (!btn) return;
             const id = Number(btn.dataset.id);
-            if (btn.dataset.chgAction === 'compare') this.compare(id);
-            else if (btn.dataset.chgAction === 'delete') this.remove(id);
+            const action = btn.dataset.chgAction;
+            if (action === 'compare') this.compare(id);
+            else if (action === 'delete') this.remove(id);
+            else if (action === 'edit') { this.editing = id; this.renderList(); }
+            else if (action === 'edit-cancel') { this.editing = null; this.renderList(); }
+            else if (action === 'edit-save') this.saveEdit(id, btn.closest('tr'));
         });
     },
 
@@ -70,13 +85,13 @@ const ChangesModule = {
     filtered() {
         const search = (document.getElementById('chg-search')?.value || '').trim().toLowerCase();
         const scope = document.getElementById('chg-scope')?.value || 'all';
-        const category = document.getElementById('chg-category')?.value || 'all';
+        const cats = this.checkedCategories();
         const origin = document.getElementById('chg-origin')?.value || 'all';
         return this.changes.filter(c => {
             const names = [c.node_name, c.peer_node].filter(Boolean);
             if (scope === 'selected' && !names.some(n => this.selected.has(n))) return false;
             if (scope === 'infrastructure' && !names.some(n => this.infrastructure.has(n))) return false;
-            if (category !== 'all' && c.category !== category) return false;
+            if (!cats.has(c.category) && !(c.id === this.editing)) return false;
             if (origin !== 'all' && this.origin(c) !== origin) return false;
             if (search && !`${names.join(' ')} ${c.description || ''}`.toLowerCase().includes(search)) return false;
             return true;
@@ -97,7 +112,7 @@ const ChangesModule = {
         el.innerHTML = `<table class="info-table diag-table chg-table">
             <thead><tr><th>Time</th><th>Node</th><th>Peer</th><th>Category</th><th>Description</th>
             <th>Source</th><th title="Automatic before/after verdict, ${this.verdictHours || 24} h after the change">Verdict</th><th></th></tr></thead>
-            <tbody>${rows.map(c => `<tr class="${this.current && this.current.id === c.id ? 'chg-active' : ''}">
+            <tbody>${rows.map(c => c.id === this.editing ? this.editRow(c) : `<tr class="${this.current && this.current.id === c.id ? 'chg-active' : ''}">
                 <td>${this.esc(c.timestamp)}</td>
                 <td><a href="/nodes/${encodeURIComponent(c.node_name)}">${this.esc(c.node_name)}</a>
                     ${this.infrastructure.has(c.node_name) ? '<small class="chg-infra">infra</small>' : ''}</td>
@@ -108,8 +123,64 @@ const ChangesModule = {
                 <td>${this.verdictBadge(c)}</td>
                 <td class="chg-actions">
                     <button class="btn btn-small btn-primary" data-chg-action="compare" data-id="${c.id}">Before / after</button>
+                    <button class="btn btn-small btn-secondary" data-chg-action="edit" data-id="${c.id}" title="Change category, peer, description or source">Edit</button>
                     <button class="btn btn-small btn-secondary" data-chg-action="delete" data-id="${c.id}" title="Remove from the log">Delete</button>
                 </td></tr>`).join('')}</tbody></table>`;
+    },
+
+    CATEGORY_LIST: ['channel', 'power', 'antenna', 'firmware', 'routing', 'other'],
+    ORIGIN_LIST: ['user', 'syslog', 'scan', 'other'],
+
+    checkedCategories() {
+        const boxes = document.querySelectorAll('#chg-categories input[type=checkbox]');
+        if (!boxes.length) return new Set(this.CATEGORY_LIST);
+        return new Set([...boxes].filter(b => b.checked).map(b => b.value));
+    },
+
+    saveCategories(el) {
+        try {
+            localStorage.setItem('chg-categories', JSON.stringify([...el.querySelectorAll('input:checked')].map(b => b.value)));
+        } catch (e) { /* remembering the filter is a convenience only */ }
+    },
+
+    restoreCategories(el) {
+        try {
+            const saved = JSON.parse(localStorage.getItem('chg-categories') || 'null');
+            if (Array.isArray(saved)) el.querySelectorAll('input[type=checkbox]').forEach(b => { b.checked = saved.includes(b.value); });
+        } catch (e) { /* keep the default: everything shown */ }
+    },
+
+    editRow(c) {
+        const opts = (list, cur) => list.map(v => `<option value="${v}"${v === cur ? ' selected' : ''}>${v}</option>`).join('');
+        return `<tr class="chg-editing">
+            <td>${this.esc(c.timestamp)}</td>
+            <td>${this.esc(c.node_name)}</td>
+            <td><input type="text" class="form-input" data-f="peer_node" list="chg-node-names" value="${this.esc(c.peer_node || '')}"></td>
+            <td><select class="form-input" data-f="category">${opts(this.CATEGORY_LIST, c.category)}</select></td>
+            <td class="chg-desc"><input type="text" class="form-input chg-edit-desc" data-f="description" value="${this.esc(c.description || '')}"></td>
+            <td><select class="form-input" data-f="origin">${opts(this.ORIGIN_LIST, this.origin(c))}</select></td>
+            <td></td>
+            <td class="chg-actions">
+                <button class="btn btn-small btn-primary" data-chg-action="edit-save" data-id="${c.id}">Save</button>
+                <button class="btn btn-small btn-secondary" data-chg-action="edit-cancel" data-id="${c.id}">Cancel</button>
+            </td></tr>`;
+    },
+
+    async saveEdit(id, row) {
+        const body = {};
+        row.querySelectorAll('[data-f]').forEach(el => { body[el.dataset.f] = el.value; });
+        try {
+            const resp = await fetch(`/api/changes/${id}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.error || 'Save failed');
+            this.editing = null;
+            await this.load();
+            this.setStatus('Change updated');
+        } catch (error) {
+            this.setStatus(error.message);
+        }
     },
 
     /** Where the entry came from: user, syslog, scan or other. */

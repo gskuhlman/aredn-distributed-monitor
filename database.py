@@ -1546,7 +1546,6 @@ EVENT_GATEWAY_RESTORED = 'gateway_restored'
 EVENT_SCAN_INCOMPLETE = 'scan_incomplete'
 EVENT_SCAN_COMPLETE_AGAIN = 'scan_complete_again'
 EVENT_FIRMWARE_CHANGE = 'firmware_change'
-EVENT_LINK_COST_CHANGE = 'link_cost_change'
 # Link Watch (link_watch.py) transitions
 EVENT_NOISE_JUMP = 'noise_jump'
 EVENT_NOISE_CLEARED = 'noise_cleared'

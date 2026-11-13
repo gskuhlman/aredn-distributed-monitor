@@ -32,7 +32,7 @@ LINK_TYPE_BUCKETS = {
 
 EVENT_CATEGORIES = {
     'node': ('node_discovered', 'node_offline', 'node_online', 'node_degraded', 'node_reboot',
-             'radio_config_change', 'firmware_change', 'link_cost_change',
+             'radio_config_change', 'firmware_change',
              'noise_jump', 'noise_cleared', 'resource_alarm', 'resource_cleared',
              'route_count_drop', 'route_count_restored', 'phone_unreachable', 'phone_restored',
              'pbx_phone_unregistered', 'pbx_phone_registered', 'pbx_unreachable', 'pbx_restored',
