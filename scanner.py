@@ -267,7 +267,9 @@ def process_node_data(data, refresh_services=True):
     )
 
     # Radio settings (mode, SSID, width, antenna) for audits and diagnostics.
-    labels = {'rf_mode': 'mode', 'rf_ssid': 'SSID', 'rf_chanbw': 'channel width'}
+    labels = {'rf_mode': 'mode', 'rf_ssid': 'SSID', 'rf_chanbw': 'channel width', 'rf_txpower': 'TX power',
+              'antenna_azimuth': 'antenna azimuth', 'antenna_elevation': 'antenna elevation',
+              'antenna_height': 'antenna height', 'antenna_gain': 'antenna gain'}
     changes = database.set_node_radio_config(node_name, database.radio_config_from_sysinfo(data))
     for col, (old, new) in changes.items():
         events.append({

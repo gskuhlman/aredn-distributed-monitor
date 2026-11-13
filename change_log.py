@@ -4,8 +4,9 @@ Change log and before/after comparison (Changes tab).
 Records channel, power, antenna, firmware and other changes to a node (or a
 specific link), either entered by the operator or imported from the
 scanner's events (frequency_change, radio_config_change, firmware_change),
-from node syslog (firmware upgrades) and from the nodes' saved config read
-over SSH (tunnel / Babel cost settings). Each entry has an origin: user,
+from node syslog (firmware upgrades), from the nodes' saved config read
+over SSH (tunnel / Babel cost and TX power settings) and, for nodes that
+report neither, from one-way signal steps (power_steps.py). Each entry has an origin: user,
 syslog, scan or other.
 `compare()` then measures every RF link of the changed node over equal
 windows before and after the change, so an operator can see whether, say,
@@ -80,6 +81,10 @@ def _parse_ts(value):
 
 def _event_category(event_type, details):
     if event_type == database.EVENT_RADIO_CONFIG_CHANGE and details:
+        if re.search(r'\bTX power\b', details):
+            return 'power'
+        if re.search(r'\bantenna\b', details, re.I):
+            return 'antenna'
         if re.search(r'\bmode\b|\bssid\b', details, re.I):
             return 'other'
     return AUTO_EVENT_TYPES.get(event_type, 'other')
@@ -142,8 +147,19 @@ def sync_from_syslog():
 # defaults (babel.<type>.rxcost). Read from the `uci show` snapshots the SSH
 # collector keeps (ssh_snapshots kind 'uci'), so a change shows even before
 # babeld applies it. Live Babel rxcost is not used: on tunnels it moves with
-# packet loss all the time.
-COST_SETTING = re.compile(r"^(network\.[\w-]+\.cost|babel\.[\w-]+\.rxcost(?:fast)?)='?([^']*)'?$")
+# packet loss all the time. The radio's TX power setting (wireless.<radio>.
+# txpower, dBm) is read the same way and logged as a power change.
+COST_SETTING = re.compile(r"^(network\.[\w-]+\.cost|babel\.[\w-]+\.rxcost(?:fast)?|wireless\.[\w-]+\.txpower)"
+                          r"='?([^']*)'?$")
+
+
+def _setting_kind(key):
+    """(category, label) for a COST_SETTING key."""
+    if key.startswith('wireless.'):
+        return 'power', 'TX power'
+    if key.startswith('network.'):
+        return 'routing', 'Tunnel/interface cost'
+    return 'routing', 'Babel default cost'
 
 
 def cost_settings(uci_text):
@@ -169,8 +185,8 @@ def cost_setting_changes(old, new):
 
 
 def sync_from_config():
-    """Import cost-setting changes between consecutive uci snapshots of each
-    node as 'auto' routing entries with origin 'scan' (idempotent)."""
+    """Import cost and TX power setting changes between consecutive uci
+    snapshots of each node as 'auto' entries with origin 'scan' (idempotent)."""
     added = 0
     with database.get_connection() as conn:
         try:
@@ -187,12 +203,12 @@ def sync_from_config():
             if not before:
                 continue
             for key, old_v, new_v in cost_setting_changes(before[1], new):
-                what = 'Tunnel/interface cost' if key.startswith('network.') else 'Babel default cost'
+                category, what = _setting_kind(key)
                 cur = conn.execute('''
                     INSERT OR IGNORE INTO change_log
                         (timestamp, node_name, category, description, source, origin, ref, created_at)
-                    VALUES (?, ?, 'routing', ?, 'auto', 'scan', ?, ?)
-                ''', (s['timestamp'], node,
+                    VALUES (?, ?, ?, ?, 'auto', 'scan', ?, ?)
+                ''', (s['timestamp'], node, category,
                       f"{what} setting changed: {key} {old_v} -> {new_v} "
                       f"(saved config, seen between {before[0][:16]} and {s['timestamp'][:16]})",
                       f"uci:{node}:{key}:{s['timestamp']}", database.local_timestamp()))

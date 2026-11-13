@@ -31,7 +31,8 @@ import database
 PROTECTED_METHODS = ('POST', 'PUT', 'PATCH', 'DELETE')
 # Without a login only POSTs that change nothing: previews and calculations
 # (what-if, planner, spectrum, sector / site reports) and one-off live checks
-# that store nothing (ping, traceroute, path and pair checks). Anything that
+# that store nothing (ping, traceroute, path and pair checks), plus adding a
+# Changes-log entry so node owners can document their own work. Anything that
 # starts a scan or a job, writes data or reads nodes over SSH needs the login.
 OPEN_POSTS = [re.compile(p) for p in (
     r'^/api/auth/(login|logout)$',
@@ -43,6 +44,7 @@ OPEN_POSTS = [re.compile(p) for p in (
     r'^/api/path/live$',
     r'^/api/(ping|traceroute)/[^/]+$',
     r'^/api/alerts/ack/[^/]+$',   # the token in the notification link is the credential
+    r'^/api/changes$',            # anyone may document a change (add only; edit/delete need the login)
 )]
 MAX_FAILS = 5
 FAIL_WINDOW_S = 300

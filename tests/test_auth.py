@@ -64,7 +64,8 @@ def test_only_previews_and_one_off_checks_are_open():
     # Change nothing: open without a login
     for path in ('/api/channel-map/what-if', '/api/spectrum', '/api/channel-planner', '/api/reports/airtime',
                  '/api/reports/site-matrix', '/api/rf-stats/diagnose/a/b/live', '/api/path/live',
-                 '/api/ping/w0aa-x', '/api/traceroute/w0aa-x', '/api/alerts/ack/tok', '/api/auth/login'):
+                 '/api/ping/w0aa-x', '/api/traceroute/w0aa-x', '/api/alerts/ack/tok', '/api/auth/login',
+                 '/api/changes'):
         assert auth._open(path), path
     # Scans, job runs, refreshes, SSH reads, deletes and settings: login
     for path in ('/api/scan', '/api/nodes/scan/w0aa-x', '/api/routes/3/run', '/api/voip/phones/run',
@@ -72,5 +73,5 @@ def test_only_previews_and_one_off_checks_are_open():
                  '/api/collector/health/check', '/api/reports/infrastructure', '/api/services/checks/run',
                  '/api/syslog/pull/w0aa-x', '/api/syslog/import', '/api/nodes/delete/w0aa-x', '/api/settings',
                  '/api/scan-boundaries/w0aa-x', '/api/cleanup/delete', '/api/admin/database/vacuum',
-                 '/api/ssh/collect', '/api/capacity/run', '/api/routes/3/traffic'):
+                 '/api/ssh/collect', '/api/capacity/run', '/api/routes/3/traffic', '/api/changes/5'):
         assert not auth._open(path), path

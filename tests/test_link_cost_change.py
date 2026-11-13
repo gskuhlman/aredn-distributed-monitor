@@ -92,3 +92,27 @@ def test_edit_requires_admin_login(mesh):
 
     assert auth.set_password('correct horse')[0]
     assert app.test_client().patch('/api/changes/1', json={'category': 'routing'}).status_code == 401
+
+
+def test_txpower_setting_change_from_saved_config(mesh):
+    import ssh_collect
+    ssh_collect.ensure_tables()
+    with database.get_connection() as conn:
+        _snap(conn, 'w0aa-rkt', '2026-11-12 07:00:00', "wireless.radio0.txpower='23'")
+        _snap(conn, 'w0aa-rkt', '2026-11-13 07:00:00', "wireless.radio0.txpower='20'")
+    (r,) = change_log.list_changes()
+    assert r['category'] == 'power' and 'TX power setting changed: wireless.radio0.txpower 23 -> 20' in r['description']
+
+
+def test_reported_txpower_and_antenna_changes_are_categorised():
+    assert change_log._event_category(database.EVENT_RADIO_CONFIG_CHANGE, 'Radio TX power changed: 20 -> 23') == 'power'
+    assert change_log._event_category(database.EVENT_RADIO_CONFIG_CHANGE, 'Radio antenna azimuth changed: 90 -> 120') == 'antenna'
+    assert change_log._event_category(database.EVENT_RADIO_CONFIG_CHANGE, 'Radio SSID changed: a -> b') == 'other'
+    assert change_log._event_category(database.EVENT_RADIO_CONFIG_CHANGE, 'Radio channel width changed: 10 -> 20') == 'channel'
+
+
+def test_set_node_radio_config_reports_txpower(mesh):
+    mesh.node('w0aa-rkt')
+    database.set_node_radio_config('w0aa-rkt', {'rf_mode': 'adhoc', 'rf_txpower': 20.0})
+    assert database.set_node_radio_config('w0aa-rkt', {'rf_mode': 'adhoc', 'rf_txpower': 23.0}) == {
+        'rf_txpower': (20.0, 23.0)}

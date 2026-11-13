@@ -53,6 +53,7 @@ import spectrum_view
 import channel_planner
 import link_watch
 import route_watch
+import power_steps
 import path_view
 import spof
 import site_dashboard
@@ -3638,6 +3639,8 @@ def start_scheduler():
     weekly_report.install(scheduler, run_weekly_report_task)
     # Round 2: change verdicts, service checks, database backups, WiFi survey.
     change_verdict.install(scheduler)
+    # Hourly: one-way signal steps = likely TX power changes (Changes tab).
+    power_steps.install(scheduler)
     service_check.install(scheduler, run_service_check_task)
     db_care.install(scheduler)
     wifi_survey.install(scheduler)

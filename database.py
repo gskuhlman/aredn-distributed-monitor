@@ -1373,14 +1373,20 @@ def radio_config_from_sysinfo(data):
     }
 
 
+# Reported radio settings whose change logs a radio_config_change event.
+RADIO_EVENT_COLS = ('rf_mode', 'rf_ssid', 'rf_chanbw', 'rf_txpower', 'antenna_azimuth',
+                    'antenna_elevation', 'antenna_height', 'antenna_gain')
+
+
 def set_node_radio_config(name, config_values):
     """Store a node's reported radio settings. Returns {field: (old, new)} for
-    the settings whose change is worth an event (mode, SSID, width)."""
+    the settings whose change is worth an event (mode, SSID, width, TX power
+    and antenna settings when the firmware reports them)."""
     if not any(v is not None for v in config_values.values()):
         return {}
     with get_connection() as conn:
         cursor = conn.cursor()
-        old = cursor.execute('SELECT rf_mode, rf_ssid, rf_chanbw FROM nodes WHERE name = ?',
+        old = cursor.execute(f"SELECT {', '.join(RADIO_EVENT_COLS)} FROM nodes WHERE name = ?",
                              (name,)).fetchone()
         cols = list(config_values)
         cursor.execute(
@@ -1388,7 +1394,7 @@ def set_node_radio_config(name, config_values):
             [config_values[c] for c in cols] + [local_timestamp(), name])
     changes = {}
     if old:
-        for col in ('rf_mode', 'rf_ssid', 'rf_chanbw'):
+        for col in RADIO_EVENT_COLS:
             if old[col] is not None and config_values.get(col) is not None and old[col] != config_values[col]:
                 changes[col] = (old[col], config_values[col])
     return changes
