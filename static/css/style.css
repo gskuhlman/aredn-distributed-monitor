@@ -2976,3 +2976,5 @@ tr.site-down td { opacity: 0.65; }
 .chg-table tr.chg-editing td { background: #fef9e7; vertical-align: middle; }
 .chg-table tr.chg-editing .form-input { padding: 3px 6px; font-size: 0.9em; }
 .chg-table .chg-edit-desc { width: 100%; min-width: 240px; box-sizing: border-box; }
+.chg-cat-filter { flex-wrap: nowrap; flex-shrink: 0; }
+.chg-table tr.chg-editing select.form-input { min-width: 95px; }
