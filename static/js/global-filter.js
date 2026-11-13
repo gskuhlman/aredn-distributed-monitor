@@ -23,7 +23,7 @@ const GlobalFilter = {
         'nodes-type-filter', 'rf-search', 'rf-status-filter', 'rf-infra-filter', 'diag-node-filter',
         'diag-infra-filter', 'diag-type-filter', 'diag-hours', 'voip-infra-filter', 'ph-hours', 'air-scope',
         'aim-scope', 'air-hours', 'sm-hours', 'pv-hours', 'drift-scope', 'rpt-scope', 'rpt-link-type',
-        'rpt-search', 'chg-scope', 'chg-search'],
+        'rpt-search', 'chg-scope', 'chg-search', 'chg-hours'],
 
     /**
      * Per page: what it uses (`nodes`: the Nodes choices it understands,
@@ -154,9 +154,10 @@ const GlobalFilter = {
             afterOpen(st, gf) { gf.reportsWindow(st); }
         },
         changes: {
-            uses: { nodes: ['all', 'selected', 'infrastructure'], search: true },
+            uses: { nodes: ['all', 'selected', 'infrastructure'], time: true, search: true },
             set(st, live, gf) {
                 gf.put('chg-scope', st.nodes, true);
+                gf.put('chg-hours', st.hours, live);
                 gf.put('chg-search', st.q, true, 'input');
             }
         }

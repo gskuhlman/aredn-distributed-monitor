@@ -79,6 +79,22 @@ def _parse_ts(value):
 
 # ------------------------------------------------------------------ CRUD ----
 
+EARLIEST = datetime(2015, 1, 1)          # nothing on the mesh is older than AREDN
+FUTURE_SLACK = timedelta(minutes=10)     # clock skew between browser and server
+
+
+def _checked_time(value, now=None):
+    """Parse and sanity-check a change time. Raises ValueError."""
+    when = _parse_ts(value)
+    if not when:
+        raise ValueError('time must look like YYYY-MM-DD HH:MM (a real date and time)')
+    now = now or datetime.now()
+    if when > now + FUTURE_SLACK:
+        raise ValueError(f"time {when.strftime('%Y-%m-%d %H:%M')} is in the future")
+    if when < EARLIEST:
+        raise ValueError(f"time {when.strftime('%Y-%m-%d %H:%M')} is before {EARLIEST.year}")
+    return when
+
 def _event_category(event_type, details):
     if event_type == database.EVENT_RADIO_CONFIG_CHANGE and details:
         if re.search(r'\bTX power\b', details):
@@ -255,9 +271,7 @@ def add_change(node_name, description, category='other', timestamp=None,
     category = (category or 'other').strip().lower()
     if category not in CATEGORIES:
         raise ValueError(f'category must be one of {", ".join(CATEGORIES)}')
-    when = _parse_ts(timestamp) if timestamp else datetime.now()
-    if not when:
-        raise ValueError('timestamp must look like YYYY-MM-DD HH:MM')
+    when = _checked_time(timestamp) if timestamp else datetime.now()
     peer_node = (peer_node or '').strip().lower() or None
     with database.get_connection() as conn:
         cursor = conn.cursor()
@@ -272,13 +286,23 @@ def add_change(node_name, description, category='other', timestamp=None,
     return get_change(change_id)
 
 
-def update_change(change_id, category=None, description=None, peer_node=None, origin=None):
-    """Edit an entry's category, description, peer or source (None = keep).
-    Returns the updated entry, None if it doesn't exist; ValueError on bad input."""
+def update_change(change_id, category=None, description=None, peer_node=None, origin=None, timestamp=None):
+    """Edit an entry's category, description, peer, source or (user entries
+    only) time; None = keep. Returns the updated entry, None if it doesn't
+    exist; ValueError on bad input."""
     change = get_change(change_id)
     if not change or change.get('source') == 'deleted':
         return None
     sets, params = [], []
+    new_time = None
+    if timestamp is not None and str(timestamp).strip():
+        if (change.get('origin') or 'user') != 'user':
+            raise ValueError('only entries entered by a user can have their time changed')
+        new_time = _checked_time(timestamp).strftime(TS_FMT)
+        if new_time != change['timestamp']:
+            sets.append('timestamp = ?'); params.append(new_time)
+        else:
+            new_time = None
     if category is not None:
         category = category.strip().lower()
         if category not in CATEGORIES:
@@ -296,6 +320,11 @@ def update_change(change_id, category=None, description=None, peer_node=None, or
     if sets:
         with database.get_connection() as conn:
             conn.execute(f'UPDATE change_log SET {", ".join(sets)} WHERE id = ?', params + [change_id])
+            if new_time:
+                try:  # the automatic before/after verdict was for the old time
+                    conn.execute('DELETE FROM change_verdicts WHERE change_id = ?', (change_id,))
+                except database.sqlite3.OperationalError:
+                    pass
     return get_change(change_id)
 
 

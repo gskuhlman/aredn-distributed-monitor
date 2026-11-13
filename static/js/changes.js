@@ -152,8 +152,14 @@ const ChangesModule = {
 
     editRow(c) {
         const opts = (list, cur) => list.map(v => `<option value="${v}"${v === cur ? ' selected' : ''}>${v}</option>`).join('');
+        // Only a user's own entries can be re-timed; detected ones keep the time they were seen.
+        const timeCell = this.origin(c) === 'user'
+            ? `<input type="datetime-local" class="form-input" data-f="timestamp" step="60" min="2015-01-01T00:00"
+                   max="${this.localInputValue(new Date(Date.now() + 10 * 60000))}"
+                   value="${this.esc(String(c.timestamp || '').slice(0, 16).replace(' ', 'T'))}">`
+            : `${this.esc(c.timestamp)}`;
         return `<tr class="chg-editing">
-            <td>${this.esc(c.timestamp)}</td>
+            <td>${timeCell}</td>
             <td>${this.esc(c.node_name)}</td>
             <td><input type="text" class="form-input" data-f="peer_node" list="chg-node-names" value="${this.esc(c.peer_node || '')}"></td>
             <td><select class="form-input" data-f="category">${opts(this.CATEGORY_LIST, c.category)}</select></td>
@@ -169,6 +175,14 @@ const ChangesModule = {
     async saveEdit(id, row) {
         const body = {};
         row.querySelectorAll('[data-f]').forEach(el => { body[el.dataset.f] = el.value; });
+        const t = row.querySelector('[data-f=timestamp]');
+        if (t) {
+            if (!t.value || !t.checkValidity()) {
+                this.setStatus('Time must be a real date and time, not in the future and not before 2015');
+                return;
+            }
+            body.timestamp = t.value.replace('T', ' ');
+        }
         try {
             const resp = await fetch(`/api/changes/${id}`, {
                 method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
@@ -210,7 +224,11 @@ const ChangesModule = {
         form.hidden = !visible;
         if (visible) {
             const t = document.getElementById('chg-time');
-            if (t) t.value = this.localInputValue(new Date());
+            if (t) {
+                t.value = this.localInputValue(new Date());
+                t.min = '2015-01-01T00:00';
+                t.max = this.localInputValue(new Date(Date.now() + 10 * 60000));
+            }
             document.getElementById('chg-node')?.focus();
         }
     },

@@ -116,3 +116,25 @@ def test_set_node_radio_config_reports_txpower(mesh):
     database.set_node_radio_config('w0aa-rkt', {'rf_mode': 'adhoc', 'rf_txpower': 20.0})
     assert database.set_node_radio_config('w0aa-rkt', {'rf_mode': 'adhoc', 'rf_txpower': 23.0}) == {
         'rf_txpower': (20.0, 23.0)}
+
+
+def test_time_edit_user_entries_only_with_sanity_checks(mesh):
+    from datetime import datetime, timedelta
+    u = change_log.add_change('w0aa-b', 'Adjusted power up some', 'power', timestamp='2026-11-13 00:55')
+    e = change_log.update_change(u['id'], timestamp='2026-11-13T07:55')
+    assert e['timestamp'] == '2026-11-13 07:55:00'
+    future = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d %H:%M')
+    for bad in (future, '2014-12-31 23:00', '2026-02-30 10:00', '2026-11-13 25:00', 'yesterday'):
+        with pytest.raises(ValueError):
+            change_log.update_change(u['id'], timestamp=bad)
+        with pytest.raises(ValueError):
+            change_log.add_change('w0aa-b', 'x', 'other', timestamp=bad)
+    assert change_log.get_change(u['id'])['timestamp'] == '2026-11-13 07:55:00'
+    database.log_event(database.EVENT_FIRMWARE_CHANGE, 'w0aa-a', 'Firmware changed: 3.25 -> 4.0')
+    scan = next(c for c in change_log.list_changes() if c['origin'] == 'scan')
+    with pytest.raises(ValueError):
+        change_log.update_change(scan['id'], timestamp='2026-11-13 07:00')
+    # A user entry whose source was re-labelled stays fixed in time too.
+    change_log.update_change(u['id'], origin='other')
+    with pytest.raises(ValueError):
+        change_log.update_change(u['id'], timestamp='2026-11-13 08:00')

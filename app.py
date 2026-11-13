@@ -2159,11 +2159,12 @@ def api_add_change():
 
 @app.route('/api/changes/<int:change_id>', methods=['PATCH'])
 def api_update_change(change_id):
-    """Edit an entry {category?, description?, peer_node?, origin?} (admin login)."""
+    """Edit an entry {category?, description?, peer_node?, origin?, timestamp? (user entries)}
+    (admin login)."""
     data = request.get_json(silent=True) or {}
     try:
         change = change_log.update_change(change_id, data.get('category'), data.get('description'),
-                                          data.get('peer_node'), data.get('origin'))
+                                          data.get('peer_node'), data.get('origin'), data.get('timestamp'))
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
     if not change:
