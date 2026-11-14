@@ -2,7 +2,8 @@
  * Node page Services table (service_check.py): each advertised service with
  * its latest check and its alerts. An admin can silence a service's alerts
  * for a while (1 h .. 1 month, or until enabled again) or ignore it (no
- * checks, no alerts) and enable it again. Others see the state only.
+ * checks, no alerts) and enable it again. The buttons show for everyone;
+ * without a login they open the login box first.
  */
 const NodeServices = {
     services: [],
@@ -81,23 +82,26 @@ const NodeServices = {
                 <td>${this.esc(s.ip || 'N/A')}</td>
                 <td>${this.checkCell(c)}</td>
                 <td>${this.alertCell(m)}</td>
-                ${this.admin ? `<td class="svc-actions">${this.actionCell(s.name, m)}</td>` : ''}
+                <td class="svc-actions">${this.actionCell(s.name, m)}</td>
             </tr>`;
         }).join('');
         el.innerHTML = `<div class="table-scroll-wrapper"><table class="info-table">
-            <tr><th>Service</th><th>Protocol</th><th>IP</th><th>Check</th><th>Alerts</th>${this.admin ? '<th></th>' : ''}</tr>
+            <tr><th>Service</th><th>Protocol</th><th>IP</th><th>Check</th><th>Alerts</th><th></th></tr>
             ${rows}</table></div>
-            ${this.admin ? '' : '<p class="form-hint"><a href="#" data-svc-login>Log in</a> to silence or ignore a service.</p>'}
+            ${this.admin ? '' : '<p class="form-hint">Silence, Ignore and Enable ask for the admin login.</p>'}
             <p class="svc-msg form-hint" hidden></p>`;
         el.querySelectorAll('[data-svc-act]').forEach(b => b.addEventListener('click', () =>
             this.act(b.dataset.svcAct, b.dataset.svc, b)));
-        el.querySelector('[data-svc-login]')?.addEventListener('click', async (e) => {
-            e.preventDefault();
-            if (await Auth.prompt('Log in to silence or ignore a service')) this.render();
-        });
     },
 
-    act(action, name, btn) {
+    async act(action, name, btn) {
+        if (!this.admin) {
+            if (typeof Auth === 'undefined' || !await Auth.prompt('Log in to silence or ignore a service')) return;
+            await this.loadAuth();
+            this.draw();
+            btn = document.querySelector(`#node-services [data-svc-act="${action}"][data-svc="${CSS.escape(name)}"]`);
+            if (!btn) return;
+        }
         if (action === 'enable') return this.send('DELETE', name);
         if (action === 'ignore') return this.send('POST', name, { mode: 'ignore' });
         // Silence: ask how long, inline (no browser dialog).
