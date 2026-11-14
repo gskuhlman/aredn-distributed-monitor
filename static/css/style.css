@@ -2978,3 +2978,12 @@ tr.site-down td { opacity: 0.65; }
 .chg-table .chg-edit-desc { width: 100%; min-width: 240px; box-sizing: border-box; }
 .chg-cat-filter { flex-wrap: nowrap; flex-shrink: 0; }
 .chg-table tr.chg-editing select.form-input { min-width: 95px; }
+.gf-chips { flex-wrap: wrap; }
+.gf-chip.gf-beyond { opacity: .45; }
+.svc-alerts { font-size: .85em; padding: 1px 6px; border-radius: 3px; }
+.svc-alerts-on { background: #d5f5e3; color: #1e6b3a; }
+.svc-alerts-silenced { background: #fdebd0; color: #8a4b08; }
+.svc-alerts-ignored { background: #e5e8e8; color: #4d5656; }
+.svc-actions { white-space: nowrap; }
+.svc-silence { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.svc-silence select { width: auto; padding: 2px 4px; }

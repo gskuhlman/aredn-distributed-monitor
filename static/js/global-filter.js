@@ -13,7 +13,9 @@
 const GlobalFilter = {
     DEFAULT: { nodes: 'infrastructure', nb: true, tag: 'all', links: 'all', hours: 24, q: '' },
     STORE: 'global-filter-v2',   // v2: defaults changed to Infrastructure + neighbours
-    HOURS: [1, 6, 24, 72, 168, 720],
+    HOURS: [1, 6, 24, 72, 168, 720, 2160, 4320, 8760],
+    // Most history is kept about a month; a page with older data sets maxHours.
+    MAX_HOURS: 720,
     state: null,
     tab: 'status',
     searchTimer: null,
@@ -155,6 +157,7 @@ const GlobalFilter = {
         },
         changes: {
             uses: { nodes: ['all', 'selected', 'infrastructure'], time: true, search: true },
+            maxHours: 8760,     // the change log is kept for good
             set(st, live, gf) {
                 gf.put('chg-scope', st.nodes, true);
                 gf.put('chg-hours', st.hours, live);
@@ -257,7 +260,13 @@ const GlobalFilter = {
         this.save();
         this.render();
         const page = this.PAGES[this.tab];
-        if (page) page.set(this.state, true, this);
+        if (page) page.set(this.forPage(page), true, this);
+    },
+
+    /** State as a page sees it: Time capped at what the page keeps. */
+    forPage(page, st = this.state) {
+        const max = page?.maxHours || this.MAX_HOURS;
+        return st.hours > max ? { ...st, hours: max } : st;
     },
 
     render() {
@@ -278,7 +287,14 @@ const GlobalFilter = {
             b.disabled = !ok;
             b.title = ok ? '' : 'Not used on this page';
         });
-        this.bar.querySelectorAll('[data-hours]').forEach(b => b.classList.toggle('active', Number(b.dataset.hours) === st.hours));
+        const maxH = page?.maxHours || this.MAX_HOURS;
+        const effH = Math.min(st.hours, maxH);
+        this.bar.querySelectorAll('[data-hours]').forEach(b => {
+            const h = Number(b.dataset.hours);
+            b.classList.toggle('active', h === effH);
+            b.classList.toggle('gf-beyond', h > maxH);
+            b.title = h > maxH ? `This page keeps about ${Math.round(maxH / 24)} days of history` : '';
+        });
         const g = (name) => this.bar.querySelector(`[data-gf="${name}"]`);
         off(g('nodes')?.querySelector('.gf-label'), !uses.nodes);
         off(g('neighbours'), !uses.nb);
@@ -303,7 +319,9 @@ const GlobalFilter = {
         if (note) {
             const unused = Array.isArray(uses.nodes) && !uses.nodes.includes(st.nodes)
                 ? `This page shows ${uses.nodes.join(' or ')} nodes; "${st.nodes}" counts as all here. ` : '';
-            note.textContent = unused + (page?.note || '');
+            const capped = uses.time && st.hours > maxH
+                ? `This page keeps about ${Math.round(maxH / 24)} days, so it shows the last ${Math.round(maxH / 24)} days. ` : '';
+            note.textContent = unused + capped + (page?.note || '');
         }
     },
 
@@ -312,8 +330,8 @@ const GlobalFilter = {
         this.render();
         const page = this.PAGES[tab];
         if (!page) return;
-        page.set(this.state, false, this);
-        if (page.afterOpen) setTimeout(() => page.afterOpen(this.state, this), 0);
+        page.set(this.forPage(page), false, this);
+        if (page.afterOpen) setTimeout(() => page.afterOpen(this.forPage(page), this), 0);
     },
 
     // ------------------------------------------------------------ helpers
@@ -344,6 +362,8 @@ const GlobalFilter = {
     hoursLabel(v) {
         const h = Number(v);
         if (!h) return v;
+        if (h >= 8760 && h % 8760 === 0) return h === 8760 ? 'Last year' : `Last ${h / 8760} years`;
+        if (h >= 2160 && h % 720 === 0) return `Last ${h / 720} months`;
         return h >= 48 && h % 24 === 0 ? `Last ${h / 24} days` : `Last ${h} hours`;
     },
 

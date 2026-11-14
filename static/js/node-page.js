@@ -563,23 +563,12 @@ const NodePage = {
 
     renderServices() {
         const services = this.data.services || [];
-        if (!services.length) {
-            document.getElementById('node-services').innerHTML = '<p>No services recorded for this node.</p>';
+        if (typeof NodeServices !== 'undefined') {
+            NodeServices.render(services);
             return;
         }
-        const rows = services.map(service => `
-            <tr>
-                <td>${service.link ? `<a href="${this.escapeAttr(service.link)}" target="_blank">${this.escapeHtml(service.name)}</a>` : this.escapeHtml(service.name)}</td>
-                <td>${this.escapeHtml(service.protocol || 'N/A')}</td>
-                <td>${this.escapeHtml(service.ip || 'N/A')}</td>
-            </tr>
-        `).join('');
-        document.getElementById('node-services').innerHTML = `
-            <table class="info-table">
-                <tr><th>Service</th><th>Protocol</th><th>IP</th></tr>
-                ${rows}
-            </table>
-        `;
+        document.getElementById('node-services').innerHTML = services.length
+            ? services.map(s => this.escapeHtml(s.name)).join(', ') : '<p>No services recorded for this node.</p>';
     },
 
     renderCharts() {

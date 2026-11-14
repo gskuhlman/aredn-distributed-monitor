@@ -73,5 +73,6 @@ def test_only_previews_and_one_off_checks_are_open():
                  '/api/collector/health/check', '/api/reports/infrastructure', '/api/services/checks/run',
                  '/api/syslog/pull/w0aa-x', '/api/syslog/import', '/api/nodes/delete/w0aa-x', '/api/settings',
                  '/api/scan-boundaries/w0aa-x', '/api/cleanup/delete', '/api/admin/database/vacuum',
-                 '/api/ssh/collect', '/api/capacity/run', '/api/routes/3/traffic', '/api/changes/5'):
+                 '/api/ssh/collect', '/api/capacity/run', '/api/routes/3/traffic', '/api/changes/5',
+                 '/api/services/mute'):
         assert not auth._open(path), path

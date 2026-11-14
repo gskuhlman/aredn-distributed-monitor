@@ -20,6 +20,14 @@ that is down is the scanner's alarm, not a service's. Events on transitions:
 `service_down` (warning), `service_restored` (info); covered maintenance
 windows suppress them via notifications as usual.
 SQLite `service_checks` keeps per service the current state and counters.
+
+An admin can mute one service on one node (`service_mutes`, node page):
+  silence  still probed and shown, but raises no alarm or event until it
+           ends (1 h .. 1 month, or until enabled again: until NULL); an
+           alarm already up is cleared quietly. A service still failing when
+           the silence ends alarms on its next failed check.
+  ignore   not probed at all and left out of the counts, until enabled again.
+Expired silences are dropped on the next run.
 """
 
 import logging
@@ -68,7 +76,70 @@ def ensure_tables():
                 PRIMARY KEY (node_name, service_name)
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS service_mutes (
+                node_name TEXT NOT NULL,
+                service_name TEXT NOT NULL,
+                mode TEXT NOT NULL CHECK (mode IN ('silence', 'ignore')),
+                until DATETIME,
+                set_at DATETIME NOT NULL,
+                PRIMARY KEY (node_name, service_name)
+            )
+        ''')
     _tables_ready = True
+
+
+MUTE_MODES = ('silence', 'ignore')
+SILENCE_HOURS = (1, 6, 24, 168, 720)     # 1 h, 6 h, 1 d, 1 w, 1 month; None = until enabled again
+
+
+def mutes(conn, now=None):
+    """{(node, service): {'mode', 'until', 'set_at'}} for mutes still in force."""
+    now_s = (now or datetime.now()).strftime(TS_FMT)
+    return {(r['node_name'], r['service_name']): {'mode': r['mode'], 'until': r['until'], 'set_at': r['set_at']}
+            for r in conn.execute('''SELECT * FROM service_mutes
+                                     WHERE until IS NULL OR until > ?''', (now_s,))}
+
+
+def set_mute(node, service, mode, hours=None, now=None):
+    """Silence (for `hours`, or until enabled again when None) or ignore one
+    service on one node. Returns (mute, error)."""
+    ensure_tables()
+    node, service = (node or '').strip(), (service or '').strip()
+    if not node or not service:
+        return None, 'node and service are required'
+    if mode not in MUTE_MODES:
+        return None, f"mode must be one of {', '.join(MUTE_MODES)}"
+    if mode == 'ignore':
+        hours = None
+    if hours is not None:
+        try:
+            hours = int(hours)
+        except (TypeError, ValueError):
+            return None, 'hours must be a number'
+        if hours not in SILENCE_HOURS:
+            return None, f"hours must be one of {', '.join(map(str, SILENCE_HOURS))} (or none: until enabled)"
+    now = now or datetime.now()
+    until = (now + timedelta(hours=hours)).strftime(TS_FMT) if hours else None
+    with database.get_connection() as conn:
+        conn.execute('''INSERT OR REPLACE INTO service_mutes (node_name, service_name, mode, until, set_at)
+                        VALUES (?, ?, ?, ?, ?)''', (node, service, mode, until, now.strftime(TS_FMT)))
+        # A muted service has no alarm; a silence that ends alarms afresh.
+        conn.execute('''UPDATE service_checks SET alarm = 0, since = NULL
+                        WHERE node_name = ? AND service_name = ?''', (node, service))
+    return {'node_name': node, 'service_name': service, 'mode': mode, 'until': until}, None
+
+
+def clear_mute(node, service):
+    """Enable alerts (and checks) again. Returns True when a mute was removed."""
+    ensure_tables()
+    with database.get_connection() as conn:
+        cur = conn.execute('DELETE FROM service_mutes WHERE node_name = ? AND service_name = ?', (node, service))
+        if cur.rowcount:
+            # An ignored service starts counting afresh.
+            conn.execute('''UPDATE service_checks SET fail_count = 0
+                            WHERE node_name = ? AND service_name = ? AND alarm = 0''', (node, service))
+    return bool(cur.rowcount)
 
 
 def _host(host):
@@ -169,9 +240,13 @@ def run(now=None):
         services = [dict(r) for r in conn.execute('SELECT node_name, name, protocol, link, ip FROM services')]
         nodes = {r['name']: dict(r) for r in conn.execute('SELECT name, is_active, last_seen FROM nodes')}
         states = {(r['node_name'], r['service_name']): dict(r) for r in conn.execute('SELECT * FROM service_checks')}
-    seen = {}
+        conn.execute('DELETE FROM service_mutes WHERE until IS NOT NULL AND until <= ?', (now.strftime(TS_FMT),))
+        muted = mutes(conn, now)
+    advertised = {}
     for s in services:
-        seen.setdefault((s['node_name'], s['name']), s)
+        advertised.setdefault((s['node_name'], s['name']), s)
+    # Ignored services are not probed; their rows stay as they were.
+    seen = {k: s for k, s in advertised.items() if (muted.get(k) or {}).get('mode') != 'ignore'}
     with ThreadPoolExecutor(max_workers=12) as pool:
         results = dict(zip(seen, pool.map(probe, seen.values())))
     now_s = now.strftime(TS_FMT)
@@ -184,19 +259,20 @@ def run(now=None):
         node_up = _node_up(nodes.get(s['node_name']) or {}, now)
         fail_count, alarm, since = st['fail_count'], st['alarm'], st['since']
         checks, oks, last_ok = st['checks'], st['oks'], st['last_ok']
+        silenced = key in muted
         if ok is not None:
             checks += 1
         if ok:
             oks += 1
             last_ok = now_s
-            if alarm:
+            if alarm and not silenced:
                 events.append(('service_restored', s['node_name'],
                                f"Service {s['name']} ({s['link']}) answers again", 'info'))
             fail_count, alarm, since = 0, 0, None
         elif ok is False:
             if node_up:
                 fail_count += 1
-                if not alarm and fail_count >= config.SERVICE_CHECK_FAILS:
+                if not alarm and not silenced and fail_count >= config.SERVICE_CHECK_FAILS:
                     alarm, since = 1, now_s
                     events.append(('service_down', s['node_name'],
                                    f"Service {s['name']} ({s['link']}) not answering: {error}; "
@@ -209,7 +285,7 @@ def run(now=None):
                                 fail_count, alarm, since, last_check, last_ok, last_error, last_ms, checks, oks)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', rows)
         # Services no longer advertised are dropped.
-        stale = [k for k in states if k not in seen]
+        stale = [k for k in states if k not in advertised]
         conn.executemany('DELETE FROM service_checks WHERE node_name = ? AND service_name = ?', stale)
     out = []
     for kind, node, text, sev in events:
@@ -225,17 +301,25 @@ def report():
             SELECT c.*, n.is_active AS node_active, n.last_seen AS node_last_seen
             FROM service_checks c LEFT JOIN nodes n ON n.name = c.node_name
             ORDER BY c.alarm DESC, (c.ok = 0) DESC, c.node_name, c.service_name''')]
-    now = datetime.now()
+        now = datetime.now()
+        muted = mutes(conn, now)
     for r in rows:
+        r['mute'] = muted.get((r['node_name'], r['service_name']))
         r['node_up'] = _node_up({'is_active': r['node_active'], 'last_seen': r['node_last_seen']}, now)
         r['availability_pct'] = round(100.0 * r['oks'] / r['checks'], 1) if r['checks'] else None
         r['state'] = ('alarm' if r['alarm'] else 'down' if r['ok'] == 0 and r['node_up'] else
                       'node_down' if r['ok'] == 0 else 'up' if r['ok'] else r['kind'] or 'unchecked')
+        if r['mute'] and r['mute']['mode'] == 'ignore':
+            r['state'] = 'ignored'
+        elif r['mute'] and r['state'] in ('alarm', 'down'):
+            r['state'] = 'silenced'
+    mute_list = [{'node_name': k[0], 'service_name': k[1], **m} for k, m in muted.items()]
     counts = {}
     for r in rows:
         counts[r['state']] = counts.get(r['state'], 0) + 1
     last = max((r['last_check'] for r in rows if r['last_check']), default=None)
-    return {'services': rows, 'counts': counts, 'last_check': last,
+    return {'services': rows, 'counts': counts, 'last_check': last, 'mutes': mute_list,
+            'silence_hours': list(SILENCE_HOURS),
             'interval_minutes': config.SERVICE_CHECK_INTERVAL_MINUTES, 'enabled': config.SERVICE_CHECK_ENABLED}
 
 

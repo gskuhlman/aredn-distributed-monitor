@@ -47,19 +47,21 @@ const ServiceChecks = {
         const d = this.data;
         if (!d) return;
         const all = document.getElementById('sc-all')?.checked;
-        const rank = { alarm: 0, down: 1, node_down: 2, up: 3 };
-        const rows = d.services.filter(s => all || ['alarm', 'down', 'node_down'].includes(s.state))
+        const rank = { alarm: 0, down: 1, node_down: 2, silenced: 3, up: 4, ignored: 9 };
+        const rows = d.services.filter(s => all || ['alarm', 'down', 'node_down', 'silenced'].includes(s.state))
             .sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9));
         const label = { alarm: 'alarm', down: 'failing', node_down: 'node down', up: 'up', external: 'outside mesh',
-                        none: 'not probed', http: 'unchecked', tcp: 'unchecked' };
+                        none: 'not probed', http: 'unchecked', tcp: 'unchecked', silenced: 'silenced', ignored: 'ignored' };
         const badge = { alarm: 'critical', down: 'warning', node_down: 'info', up: 'ok' };
+        const muteNote = (m) => !m ? '' : m.mode === 'ignore' ? ' <small>(ignored)</small>'
+            : ` <small>(silenced ${m.until ? 'until ' + this.esc(m.until.slice(0, 16)) : 'until enabled'})</small>`;
         const el = document.getElementById('sc-report');
         el.innerHTML = rows.length ? `<div class="table-scroll-wrapper"><table class="info-table diag-table">
             <thead><tr><th>State</th><th>Node</th><th>Service</th><th>Link</th><th>Last result</th><th>Availability</th><th>Last OK</th></tr></thead>
             <tbody>${rows.map(s => `<tr>
                 <td><span class="diag-badge infra-badge-${badge[s.state] || 'info'}">${this.esc(label[s.state] || s.state)}</span></td>
                 <td><a href="/nodes/${encodeURIComponent(s.node_name)}">${this.esc(s.node_name)}</a></td>
-                <td>${this.esc(s.service_name)}</td>
+                <td>${this.esc(s.service_name)}${muteNote(s.mute)}</td>
                 <td class="sc-link">${this.esc(s.link || '')}</td>
                 <td>${s.ok === 1 ? `answered${s.last_ms != null ? ` in ${s.last_ms} ms` : ''}` : this.esc(s.last_error || '-')}</td>
                 <td>${s.availability_pct != null ? s.availability_pct + '%' : '-'}</td>
@@ -67,7 +69,9 @@ const ServiceChecks = {
             : '<p class="log-empty">Every probed service answers.</p>';
         const c = d.counts;
         this.setStatus(`${c.up || 0} up, ${c.alarm || 0} alarm, ${c.down || 0} failing, ${c.node_down || 0} on down nodes, `
-            + `${(c.external || 0) + (c.none || 0)} not probed · checked every ${d.interval_minutes} min`
+            + `${(c.external || 0) + (c.none || 0)} not probed`
+            + (c.silenced ? `, ${c.silenced} silenced` : '') + (c.ignored ? `, ${c.ignored} ignored` : '')
+            + ` · checked every ${d.interval_minutes} min`
             + (d.last_check ? ` · last ${d.last_check}` : '') + (d.enabled ? '' : ' · scheduled checks off'));
     },
 

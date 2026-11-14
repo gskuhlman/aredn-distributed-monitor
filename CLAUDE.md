@@ -465,3 +465,4 @@ Infrastructure nodes (towers/high sites, marked like Selected nodes) appear as a
 - Avoid storing secrets in replicated monitoring documents.
 - Notification secrets stay local: only the SQLite `notification_config` table or `NOTIFY_*` env vars; never in the `settings` table (returned by `/api/settings`), CouchDB, logs, or API responses.
 - Keep normal CouchDB writes append-only to avoid replication conflicts.
+- Service mutes (`service_check.service_mutes`, node page Services table, admin-only `POST/DELETE /api/services/mute`): `silence` keeps probing but raises no alarm/event until `until` (NULL = until enabled), then a still-failing service alarms on its next failed check; `ignore` skips the probe and the counts. Global Time bar goes to 1 y, but pages are capped at `MAX_HOURS` (30 d) unless they set `maxHours` (Changes: 1 y).

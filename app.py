@@ -795,6 +795,26 @@ def run_service_check_task():
         return {'events': [], 'aborted': str(exc)}
 
 
+@app.route('/api/services/mute', methods=['POST'])
+def api_service_mute():
+    """Admin: silence {node, service, mode: 'silence', hours: 1|6|24|168|720|null}
+    or ignore {node, service, mode: 'ignore'} one service on one node."""
+    body = request.get_json(silent=True) or {}
+    mute, error = service_check.set_mute(body.get('node'), body.get('service'), body.get('mode'), body.get('hours'))
+    if error:
+        return jsonify({'error': error}), 400
+    return jsonify({'mute': mute})
+
+
+@app.route('/api/services/mute', methods=['DELETE'])
+def api_service_unmute():
+    """Admin: enable alerts and checks for one service again."""
+    node, service = request.args.get('node', ''), request.args.get('service', '')
+    if not node or not service:
+        return jsonify({'error': 'node and service are required'}), 400
+    return jsonify({'removed': service_check.clear_mute(node, service)})
+
+
 @app.route('/api/services/checks/run', methods=['POST'])
 def api_service_checks_run():
     result = run_service_check_task()
