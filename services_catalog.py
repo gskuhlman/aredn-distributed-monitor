@@ -101,6 +101,9 @@ def catalog(now=None, search=''):
                 checks[(d['node_name'], d['service_name'])] = d
         except Exception:
             pass
+        import service_check
+        service_check.ensure_tables()
+        muted = service_check.mutes(conn, now)
     q = (search or '').lower()
     services, left = [], []
     for key, s in current.items():
@@ -113,7 +116,8 @@ def catalog(now=None, search=''):
                 'new': bool(info.get('first_seen') and info['first_seen'] >= new_cut
                             and info['first_seen'] > tracking_since),
                 'node_active': bool((nodes.get(node) or {}).get('is_active')),
-                'check_state': chk.get('state'), 'check_detail': chk.get('last_error')}
+                'check_state': chk.get('state'), 'check_detail': chk.get('last_error'),
+                'mute': muted.get((node, name))}
         if q and q not in f"{node} {name} {ip} {s.get('link') or ''}".lower():
             continue
         services.append(item)
@@ -140,17 +144,21 @@ def catalog(now=None, search=''):
         g['count'] = len(g['services'])
     left.sort(key=lambda s: s['last_seen'], reverse=True)
     return {'generated_at': now.strftime(TS_FMT), 'groups': out, 'left': left,
-            'counts': {'services': len(services), 'new': sum(1 for s in services if s['new']), 'left': len(left)},
+            'counts': {'services': len(services), 'new': sum(1 for s in services if s['new']), 'left': len(left),
+                       'muted': sum(1 for s in services if s['mute'])},
             'new_hours': NEW_HOURS, 'left_days': LEFT_DAYS}
 
 
 def devices(node=None, search=''):
     """Hosts on each node's LAN from the mesh host list."""
     import phones
+    import service_check
     phones.ensure_tables()
+    service_check.ensure_tables()
     with database.get_connection() as conn:
         node_rows = {r['name']: dict(r) for r in conn.execute('SELECT name, ip, is_active FROM nodes')}
         hosts = [dict(r) for r in conn.execute('SELECT * FROM mesh_hosts ORDER BY name')]
+        muted = service_check.device_mutes(conn)
     node_ips = {n: r['ip'] for n, r in node_rows.items() if r['ip']}
     q = (search or '').lower()
     by_node = {}
@@ -165,7 +173,7 @@ def devices(node=None, search=''):
         if q and q not in f"{name} {h['ip']} {owner}".lower():
             continue
         by_node.setdefault(owner, []).append({'name': h.get('name'), 'ip': h['ip'], 'first_seen': h.get('first_seen'),
-                                              'last_seen': h.get('last_seen')})
+                                              'last_seen': h.get('last_seen'), 'mute': muted.get(h['ip'])})
     out = [{'node': n, 'active': bool((node_rows.get(n) or {}).get('is_active')), 'devices': d}
            for n, d in sorted(by_node.items())]
     return {'nodes': out, 'count': sum(len(n['devices']) for n in out)}

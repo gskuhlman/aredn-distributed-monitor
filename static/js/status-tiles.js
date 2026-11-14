@@ -104,6 +104,10 @@ const StatusTiles = {
 
         const services = d.services ? d.services.counts?.alarm || 0 : null;
         add('Services down', count(services), level(services), 'section:Service Checks', 'Service Checks');
+        const mc = d.services?.mute_counts;
+        const mutedN = mc ? (mc.silenced || 0) + (mc.ignored || 0) : null;
+        add('Silenced services', count(mutedN), mutedN ? 'info' : mutedN === 0 ? 'ok' : 'unknown', 'services:muted',
+            mc ? `${mc.silenced || 0} silenced, ${mc.ignored || 0} ignored (services and devices; Services & Devices page)` : 'Services & Devices');
         const phones = d.phones?.enabled === false ? null : d.phones ? d.phones.counts?.alarm || 0 : null;
         add('Phones down', count(phones), level(phones), 'voip', 'Phone Connectivity (VoIP & Phones)');
 
@@ -130,6 +134,15 @@ const StatusTiles = {
             if (h3.parentElement.classList.contains('collapsed')) h3.click();
             h3.scrollIntoView({ block: 'start' });
             return;
+        }
+        if (where === 'services:muted') {
+            // Open Services & Devices with the silenced and ignored ones shown.
+            const box = document.getElementById('svc-show-muted');
+            if (box && !box.checked) {
+                box.checked = true;
+                box.dispatchEvent(new Event('change'));
+            }
+            where = 'services';
         }
         location.hash = `#/${where}`;
     },

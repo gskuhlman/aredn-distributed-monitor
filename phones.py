@@ -463,6 +463,16 @@ def run(now=None, pinger=None):
     with database.get_connection() as conn:
         phones = [dict(r) for r in conn.execute('SELECT * FROM phones WHERE enabled = 1 AND ignored = 0')]
         nodes = _attached(phones, conn)
+        try:
+            import service_check
+            service_check.ensure_tables()
+            muted = service_check.device_mutes(conn, now)
+        except Exception as exc:
+            logger.error("Device mutes unavailable: %s", exc)
+            muted = {}
+    # A device ignored on Services & Devices is not pinged; a silenced one
+    # is pinged but raises no alarm or event.
+    phones = [p for p in phones if (muted.get(p['ip']) or {}).get('mode') != 'ignore']
     if not phones:
         return {'events': [], 'aborted': None, 'checked': 0}
     results = (pinger or _ping_many)([p['ip'] for p in phones])
@@ -484,7 +494,7 @@ def run(now=None, pinger=None):
         if ok:
             oks += 1
             last_ok = now_s
-            if alarm:
+            if alarm and p['ip'] not in muted:
                 events.append(('phone_restored', node or p['name'] or p['ip'],
                                f"Phone {label} answers ping again ({avg:.0f} ms)" if avg is not None
                                else f"Phone {label} answers ping again", 'info'))
@@ -493,7 +503,9 @@ def run(now=None, pinger=None):
             pass  # its node is down: the scanner reports that; keep the counters
         else:
             fail_count += 1
-            if not alarm and fail_count >= config.PHONE_PING_FAILS:
+            if p['ip'] in muted:
+                alarm, since = 0, None
+            elif not alarm and fail_count >= config.PHONE_PING_FAILS:
                 alarm, since = 1, now_s
                 where = f"; node {node} is up" if node else ''
                 events.append(('phone_unreachable', node or p['name'] or p['ip'],

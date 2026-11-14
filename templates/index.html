@@ -1103,6 +1103,7 @@
                         <div class="mh-controls">
                             <input id="svc-q" class="form-input" placeholder="Search services, nodes, addresses…">
                             <button id="svc-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                            <label class="checkbox-label"><input type="checkbox" id="svc-show-muted"> Show silenced and ignored</label>
                             <span id="svc-status" class="form-hint"></span>
                         </div>
                         <div id="svc-catalog"><p class="log-empty">Loading…</p></div>
@@ -2221,6 +2222,7 @@
     <script src="{{ url_for('static', filename='js/tape.js') }}"></script>
     <script src="{{ url_for('static', filename='js/incidents.js') }}"></script>
     <script src="{{ url_for('static', filename='js/syslog.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/mute-controls.js') }}"></script>
     <script src="{{ url_for('static', filename='js/services-catalog.js') }}"></script>
     <script src="{{ url_for('static', filename='js/tunnels.js') }}"></script>
     <script src="{{ url_for('static', filename='js/rf-trends.js') }}"></script>

@@ -79,3 +79,38 @@ def test_bad_input(svc):
     assert service_check.set_mute('', 'PBX', 'silence', 1)[1]
     for h in (1, 6, 24, 168, 720, None):
         assert not service_check.set_mute('w0aa-pbx', 'PBX', 'silence', h)[1]
+
+
+def test_device_mute_quiets_phone_and_counts(svc, monkeypatch):
+    import phones
+    import services_catalog
+    phones.ensure_tables()
+    with database.get_connection() as conn:
+        cols = {r[1] for r in conn.execute('PRAGMA table_info(phones)')}
+        row = {'name': 'shack-phone', 'ip': '10.0.0.9', 'enabled': 1, 'ignored': 0, 'source': 'manual'}
+        row = {k: v for k, v in row.items() if k in cols}
+        conn.execute(f"INSERT INTO phones ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
+    monkeypatch.setattr(phones, 'save_hosts', lambda now=None: None)
+    monkeypatch.setattr(phones, 'sync', lambda now=None: None)
+    monkeypatch.setattr(phones.gateway, 'failure_is_ours', lambda: False)
+    monkeypatch.setattr(config, 'PHONE_PING_ENABLED', True)
+    monkeypatch.setattr(config, 'PHONE_PING_FAILS', 1)
+    pinged = []
+
+    def pinger(ips):
+        pinged.extend(ips)
+        return {ip: {'loss': 100.0} for ip in ips}
+    service_check.set_mute('w0aa-pbx', 'device:10.0.0.9', 'silence', 6)
+    assert phones.run(pinger=pinger)['events'] == [] and pinged == ['10.0.0.9']
+    service_check.set_mute('w0aa-pbx', 'device:10.0.0.9', 'ignore')
+    service_check.set_mute('w0aa-pbx', 'PBX', 'silence', None)
+    pinged.clear()
+    phones.run(pinger=pinger)
+    assert pinged == []
+    r = service_check.report()
+    assert r['mute_counts'] == {'silenced': 1, 'ignored': 1}
+    assert {m['kind'] for m in r['mutes']} == {'device', 'service'}
+    cat = services_catalog.catalog()
+    assert cat['counts']['muted'] == 1
+    service_check.clear_mute('w0aa-pbx', 'device:10.0.0.9')
+    assert phones.run(pinger=pinger)['events'][0]['event_type'] == 'phone_unreachable'

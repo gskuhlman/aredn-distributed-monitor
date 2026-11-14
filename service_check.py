@@ -28,6 +28,9 @@ An admin can mute one service on one node (`service_mutes`, node page):
            the silence ends alarms on its next failed check.
   ignore   not probed at all and left out of the counts, until enabled again.
 Expired silences are dropped on the next run.
+A device (a host on a node's LAN, Services & Devices page) is muted the same
+way under service_name `device:<ip>`; phones.py honours it for the phone at
+that IP (silence: no phone alarm; ignore: not pinged).
 """
 
 import logging
@@ -101,6 +104,21 @@ def mutes(conn, now=None):
                                      WHERE until IS NULL OR until > ?''', (now_s,))}
 
 
+DEVICE_PREFIX = 'device:'
+
+
+def device_mutes(conn, now=None):
+    """{ip: mute} for muted devices (any node)."""
+    return {k[1][len(DEVICE_PREFIX):]: m for k, m in mutes(conn, now).items() if k[1].startswith(DEVICE_PREFIX)}
+
+
+def mute_counts(muted):
+    """{'silenced': n, 'ignored': n} over services and devices."""
+    vals = list(muted.values())
+    return {'silenced': sum(1 for m in vals if m['mode'] == 'silence'),
+            'ignored': sum(1 for m in vals if m['mode'] == 'ignore')}
+
+
 def set_mute(node, service, mode, hours=None, now=None):
     """Silence (for `hours`, or until enabled again when None) or ignore one
     service on one node. Returns (mute, error)."""
@@ -127,6 +145,11 @@ def set_mute(node, service, mode, hours=None, now=None):
         # A muted service has no alarm; a silence that ends alarms afresh.
         conn.execute('''UPDATE service_checks SET alarm = 0, since = NULL
                         WHERE node_name = ? AND service_name = ?''', (node, service))
+        if service.startswith(DEVICE_PREFIX):
+            try:
+                conn.execute('UPDATE phones SET alarm = 0, since = NULL WHERE ip = ?', (service[len(DEVICE_PREFIX):],))
+            except Exception:
+                pass    # no phones table yet
     return {'node_name': node, 'service_name': service, 'mode': mode, 'until': until}, None
 
 
@@ -313,12 +336,14 @@ def report():
             r['state'] = 'ignored'
         elif r['mute'] and r['state'] in ('alarm', 'down'):
             r['state'] = 'silenced'
-    mute_list = [{'node_name': k[0], 'service_name': k[1], **m} for k, m in muted.items()]
+    mute_list = [{'node_name': k[0], 'service_name': k[1], **m,
+                  'kind': 'device' if k[1].startswith(DEVICE_PREFIX) else 'service'} for k, m in muted.items()]
     counts = {}
     for r in rows:
         counts[r['state']] = counts.get(r['state'], 0) + 1
     last = max((r['last_check'] for r in rows if r['last_check']), default=None)
     return {'services': rows, 'counts': counts, 'last_check': last, 'mutes': mute_list,
+            'mute_counts': mute_counts(muted),
             'silence_hours': list(SILENCE_HOURS),
             'interval_minutes': config.SERVICE_CHECK_INTERVAL_MINUTES, 'enabled': config.SERVICE_CHECK_ENABLED}
 
