@@ -2471,7 +2471,10 @@ tr.site-down td { opacity: 0.65; }
 .nav-panel .tab-btn:hover, .nav-panel .tab-btn:focus { background: #ecf0f1; outline: none; }
 .nav-panel .tab-btn.active { background: #2c3e50; color: white; }
 @media (max-width: 768px) {
-    .nav-panel { flex-direction: column; }
+    /* Groups in as many columns as fit, scrolling down inside the panel (nav-menu.js sets its size). */
+    .nav-panel:not([hidden]) { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); overflow-x: hidden; }
+    .nav-group { min-width: 0; }
+    .nav-panel .tab-btn, .nav-panel .nav-link { white-space: normal; overflow-wrap: anywhere; }
 }
 
 /* ---- Map tab (geo-map.js) ---- */
