@@ -76,3 +76,23 @@ def test_only_previews_and_one_off_checks_are_open():
                  '/api/ssh/collect', '/api/capacity/run', '/api/routes/3/traffic', '/api/changes/5',
                  '/api/services/mute'):
         assert not auth._open(path), path
+
+
+
+def test_backup_file_lookup(mesh):
+    import os
+    import db_care
+    os.makedirs(db_care.backup_dir(), exist_ok=True)
+    name = 'aredn_monitor-20260101-000000.db'
+    with open(os.path.join(db_care.backup_dir(), name), 'wb') as f:
+        f.write(b'SQLite format 3\x00')
+    assert db_care.backup_file(name).endswith(name)
+    assert db_care.backup_file('../app.py') is None
+    assert db_care.backup_file('aredn_monitor-20990101-000000.db') is None
+
+
+def test_reads_are_not_admin_without_login(client):
+    auth.set_password('admin password')
+    auth._failures.clear()
+    with client.application.test_request_context('/api/admin/database/backups/x'):
+        assert auth.enabled() and not auth.is_admin()

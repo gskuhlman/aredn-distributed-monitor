@@ -120,6 +120,14 @@ def report():
             'task': dict(_state)}
 
 
+def backup_file(name):
+    """Full path of an existing backup by its file name, or None (no paths, only backup names)."""
+    if not BACKUP_RE.match(name or ''):
+        return None
+    path = os.path.join(backup_dir(), name)
+    return path if os.path.isfile(path) else None
+
+
 def list_backups():
     d = backup_dir()
     out = []

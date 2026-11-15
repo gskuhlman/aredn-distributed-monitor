@@ -127,7 +127,10 @@ const Admin = {
             const b = d.backup;
             document.getElementById('db-backups').innerHTML = `<p class="form-hint">${b.enabled ? `Nightly at ${this.esc(b.time)}` : 'Nightly backups off (BACKUP_ENABLED=0)'},
                 keeping ${b.keep} in ${this.esc(b.dir)}.</p>` + (d.backups.length ? `<table class="info-table diag-table"><tbody>${d.backups.map(x =>
-                `<tr><td>${this.esc(x.file)}</td><td>${this.esc(x.taken_at)}</td><td>${this.size(x.bytes)}</td></tr>`).join('')}</tbody></table>`
+                `<tr><td>${this.esc(x.file)}</td><td>${this.esc(x.taken_at)}</td><td>${this.size(x.bytes)}</td>
+                <td><a class="btn btn-small btn-secondary" href="/api/admin/database/backups/${encodeURIComponent(x.file)}" download
+                    title="Admins only: a full copy of the database, including password hashes and e-mail addresses">Download</a></td></tr>`).join('')}</tbody></table>
+                <p class="form-hint">Downloads need an admin login. A backup holds password hashes and e-mail addresses; keep it private.</p>`
                 : '<p class="log-empty">No backups yet.</p>');
         } catch (error) {
             document.getElementById('db-summary').innerHTML = '<p class="log-empty">Failed to load.</p>';

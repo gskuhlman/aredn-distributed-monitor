@@ -1111,6 +1111,20 @@ def api_admin_database_backup():
         return _json_error(exc, 409)
 
 
+@app.route('/api/admin/database/backups/<name>')
+def api_admin_database_backup_download(name):
+    """Admin: download one backup file (a plain SQLite database). It holds
+    password hashes and contact details, so it needs admin even though it is a GET."""
+    if auth.enabled() and not auth.is_admin():
+        return jsonify({'error': 'Downloading a backup needs an admin', 'admin_required': True}), 403
+    if not db_care.backup_file(name):
+        return _json_error('No such backup', 404)
+    who = auth.current_callsign() or 'admin'
+    database.log_event('database_backup_download', None, f'Backup {name} downloaded by {who.upper()}', 'info')
+    return send_from_directory(db_care.backup_dir(), name, as_attachment=True,
+                               mimetype='application/vnd.sqlite3', max_age=0)
+
+
 @app.route('/api/admin/database/vacuum', methods=['POST'])
 def api_admin_database_vacuum():
     try:
