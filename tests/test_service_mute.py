@@ -133,3 +133,14 @@ def test_daily_availability_and_weekly_sections(svc, mesh):
     text = weekly_report.render_text({'start': '2026-01-01 00:00', 'end': '2026-01-08 00:00',
                                       'headline': {'error': 'n/a'}, 'site_uptime': sites, 'services': sv})
     assert 'Site uptime' in text and 'PBX: 75% of 4 checks' in text
+
+
+def test_weekly_hygiene_section(mesh):
+    import weekly_report
+    mesh.node('w0aa-home', description='', lat=None, lon=None)
+    hy = weekly_report._hygiene(datetime.now() - timedelta(days=7))
+    assert hy['nodes'] >= 1 and hy['average'] is not None
+    assert any(k == 'location' for k, _ in hy['common_fixes'])
+    text = weekly_report.render_text({'start': '2026-01-01 00:00', 'end': '2026-01-08 00:00',
+                                      'headline': {'error': 'n/a'}, 'hygiene': hy})
+    assert 'Node hygiene: average score' in text and 'no location' in text

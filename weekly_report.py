@@ -281,6 +281,50 @@ def _services(start, end):
             'problems': [r for r in checked if r['availability_pct'] < 100 or r['outages']][:25]}
 
 
+HYGIENE_LOW = 70          # nodes under this score are listed
+
+
+def _hygiene(start):
+    """Node hygiene (hygiene.py) now: average and change since the last saved
+    report, the commonest fixes, the lowest-scoring nodes and owners."""
+    import hygiene
+    r = hygiene.report()
+    rows = [n for n in r['nodes'] if n['score'] is not None]
+    if not rows:
+        return {}
+    prev = None
+    ensure_tables()
+    with database.get_connection() as conn:
+        last = conn.execute('SELECT summary FROM weekly_reports WHERE end <= ? ORDER BY end DESC LIMIT 1',
+                            (_fmt(start + timedelta(hours=12)),)).fetchone()
+    if last:
+        try:
+            prev = (json.loads(last[0]).get('hygiene') or {}).get('average')
+        except (ValueError, AttributeError):
+            prev = None
+    fixes = defaultdict(int)
+    for n in rows:
+        for c in n['checks']:
+            if not c['ok']:
+                fixes[c['key']] += 1
+    return {'average': r['average'], 'previous_average': prev, 'nodes': len(rows),
+            'perfect': sum(1 for n in rows if n['score'] == 100),
+            'low': sum(1 for n in rows if n['score'] < HYGIENE_LOW),
+            'latest_release': r.get('latest_release'),
+            'common_fixes': sorted(fixes.items(), key=lambda kv: -kv[1])[:6],
+            'worst_nodes': [{'name': n['name'], 'score': n['score'], 'fixes': n['fixes'][:2]}
+                            for n in rows if n['score'] < HYGIENE_LOW][:15],
+            'owners': [{'owner': o['owner'], 'nodes': o['nodes'], 'avg_score': o['avg_score'], 'fixes': o['fixes']}
+                       for o in r['owners'] if o['avg_score'] < HYGIENE_LOW][:10]}
+
+
+HYGIENE_FIX_LABEL = {'location': 'no location', 'location_plausible': 'location looks wrong',
+                     'firmware': 'firmware behind', 'description': 'no description',
+                     'contact': 'no owner contact', 'name': 'name lacks a callsign', 'azimuth': 'no antenna azimuth',
+                     'antenna': 'antenna model not set', 'height': 'no antenna height',
+                     'polled': 'not read in the last day', 'timezone': 'clock not on Central time'}
+
+
 def build(end=None, days=7):
     end = end or datetime.now().replace(second=0, microsecond=0)
     start = end - timedelta(days=days)
@@ -292,6 +336,7 @@ def build(end=None, days=7):
     _section(out, 'site_outages', lambda: _site_outages(start, end))
     _section(out, 'site_uptime', lambda: _site_uptime(start, end))
     _section(out, 'services', lambda: _services(start, end))
+    _section(out, 'hygiene', lambda: _hygiene(start))
     _section(out, 'infrastructure', _infrastructure)
     _section(out, 'changes', lambda: _changes(start, end))
     _section(out, 'change_verdicts', lambda: _verdicts(start, end))
@@ -367,6 +412,25 @@ def render_text(r, short=False):
               lambda e: f"{e['severity']}: {e['type'].replace('_', ' ')} on {e['node']} ×{e['count']} (first {e['first'][5:16]})",
               lim)
         block('Newly unreachable', np_.get('nodes'), lambda n: f"{n['name']}: {n['cause']} ({n['failed_polls']} failed polls)", lim)
+    hy = r.get('hygiene') or {}
+    if _err(hy):
+        lines.append(f"\nNode hygiene: unavailable ({hy['error']})")
+    elif hy:
+        trend = ''
+        if hy.get('previous_average') is not None:
+            d = hy['average'] - hy['previous_average']
+            trend = f" ({'+' if d > 0 else ''}{d} since the last report)" if d else ' (no change since the last report)'
+        lines.append(f"\nNode hygiene: average score {hy['average']}/100{trend}; {hy['perfect']} of {hy['nodes']} node(s) "
+                     f"at 100, {hy['low']} under {HYGIENE_LOW}"
+                     + (f"; newest firmware {hy['latest_release']}" if hy.get('latest_release') else '') + '.')
+        if hy.get('common_fixes'):
+            lines.append('Most common fixes: ' + ', '.join(f"{HYGIENE_FIX_LABEL.get(k, k)} ({n})"
+                                                           for k, n in hy['common_fixes']) + '.')
+        block('Lowest hygiene scores', hy.get('worst_nodes'),
+              lambda n: f"{n['name']}: {n['score']}" + (f" – {'; '.join(n['fixes'])}" if n['fixes'] else ''), lim)
+        if not short:
+            block('Owners to nudge', hy.get('owners'),
+                  lambda o: f"{o['owner']}: avg {o['avg_score']} over {o['nodes']} node(s), {o['fixes']} fix(es)", lim)
     inf = r.get('infrastructure') or {}
     if _err(inf):
         lines.append(f"\nInfrastructure: unavailable ({inf['error']})")
