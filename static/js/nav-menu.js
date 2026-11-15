@@ -6,6 +6,21 @@
  * keeps the button label in step with the active tab.
  */
 const NavMenu = {
+    /** Keep the open menu inside the window on small or short screens: fixed
+     * under the button, no wider or taller than the window, scrolling inside. */
+    fit(toggle, panel) {
+        const gap = 8;
+        const r = toggle.getBoundingClientRect();
+        const top = Math.round(r.bottom + 6);
+        panel.style.position = 'fixed';
+        panel.style.top = `${top}px`;
+        panel.style.maxWidth = `${window.innerWidth - 2 * gap}px`;
+        panel.style.maxHeight = `${Math.max(160, window.innerHeight - top - gap)}px`;
+        panel.style.left = `${gap}px`;           // measure at the left edge, then move under the button if it fits
+        const w = panel.offsetWidth;
+        panel.style.left = `${Math.max(gap, Math.min(r.left, window.innerWidth - w - gap))}px`;
+    },
+
     init() {
         const toggle = document.getElementById('nav-toggle');
         const panel = document.getElementById('nav-panel');
@@ -18,8 +33,12 @@ const NavMenu = {
             event.stopPropagation();
             panel.hidden = !panel.hidden;
             toggle.setAttribute('aria-expanded', String(!panel.hidden));
-            if (!panel.hidden) panel.querySelector('.tab-btn.active, .tab-btn')?.focus();
+            if (!panel.hidden) {
+                this.fit(toggle, panel);
+                panel.querySelector('.tab-btn.active, .tab-btn')?.focus({ preventScroll: true });
+            }
         });
+        window.addEventListener('resize', () => { if (!panel.hidden) this.fit(toggle, panel); });
         panel.querySelectorAll('.nav-link').forEach(link => link.addEventListener('click', close));
         panel.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
             document.getElementById('nav-current').textContent = btn.textContent.trim();

@@ -2518,7 +2518,7 @@ tr.site-down td { opacity: 0.65; }
 }
 .nav-panel .nav-link:hover, .nav-panel .nav-link:focus { background: #ecf0f1; outline: none; }
 .nav-panel button.nav-link { background: none; border: none; width: 100%; text-align: left; cursor: pointer; font-family: inherit; }
-.nav-panel { width: max-content; max-width: calc(100vw - 32px); flex-wrap: wrap; }
+.nav-panel { width: max-content; max-width: calc(100vw - 32px); flex-wrap: wrap; overflow-y: auto; overscroll-behavior: contain; }
 
 /* Pages with a side menu of sub-pages (page-router.js): Radio & RF, Routing, Setup, Planning */
 .subnav-layout { flex: 1; display: flex; min-height: 0; }
