@@ -132,6 +132,14 @@ def _phone_name(p, include_ips):
     return name
 
 
+def _notes(now):
+    try:
+        import status_notes
+        return [{'text': n['text'], 'level': n['level'], 'ends_at': n['ends_at']} for n in status_notes.active(now)]
+    except Exception:
+        return []
+
+
 def build(days=30, include_ips=False, now=None):
     now = now or datetime.now()
     end = now.strftime(TS_FMT)
@@ -222,6 +230,7 @@ def build(days=30, include_ips=False, now=None):
         'days': days, 'include_ips': include_ips,
         'sites': site_list, 'clients': client_rows, 'phones': ph,
         'incidents': open_incidents,
+        'notes': _notes(now),
         'maintenance': [{'note': w.get('note'), 'start': w.get('start_time'), 'end': w.get('end_time'),
                          'status': w.get('status'), 'nodes': len(w.get('covered_nodes') or [])} for w in upcoming],
         'summary': {
@@ -310,7 +319,9 @@ def render(d, title='Mesh Network Status', hygiene_details=True, voip=True):
         tiles.append(_tile('Phones answering', f'{s["phones_up"]} / {s["phones"]}'))
     out.append(f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px">{"".join(tiles)}</div>')
 
-    notices = [f'<li><b>Incident:</b> {E(i["title"])} <span style="{MUTED}">(since {E(local_time.stamp(i["opened_at"]))})</span></li>'
+    notices = [f'<li><b>{"Notice" if n["level"] == "info" else "Important"}:</b> {E(n["text"])}</li>'
+               for n in d.get('notes') or []]
+    notices += [f'<li><b>Incident:</b> {E(i["title"])} <span style="{MUTED}">(since {E(local_time.stamp(i["opened_at"]))})</span></li>'
                for i in d['incidents']]
     notices += [f'<li><b>{"Maintenance now" if m["status"] in ("active", "grace") else "Planned maintenance"}:</b> '
                 f'{E(m["start"][:16])} – {E(m["end"][11:16] if m["start"][:10] == m["end"][:10] else m["end"][:16])} '

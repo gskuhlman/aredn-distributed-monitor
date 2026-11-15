@@ -78,6 +78,7 @@
                             <button class="tab-btn" data-tab="maintenance">Maintenance</button>
                             <button class="tab-btn" data-tab="notifications">Notifications</button>
                             <button type="button" class="nav-link nav-action" data-click="settings-btn">Scanning settings</button>
+                            <a class="nav-link" href="/account">Account &amp; my alerts, users</a>
                             <a class="nav-link" href="/admin">Login, database, SSH, collectors</a>
                             <a class="nav-link" href="/field/">Field mode</a>
                         </div>
@@ -531,7 +532,20 @@
                         <!-- What's happening (ticker.js) -->
                         <div class="diag-section">
                             <h3>What's Happening <small class="form-hint">open incidents, maintenance and the newest warnings and recoveries</small>
-                                <button id="tk-refresh" class="btn btn-secondary btn-small">Refresh</button></h3>
+                                <button id="tk-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                <button id="sn-toggle" class="btn btn-secondary btn-small" title="Pinned operator message on Status, the wall display and the club status page">Status notes</button></h3>
+                            <div id="sn-editor" class="sn-editor" hidden>
+                                <div class="mh-controls">
+                                    <input id="sn-text" class="form-input sn-text" maxlength="500" placeholder="e.g. Collins tower work Saturday 9-12: COL sectors off and on">
+                                    <select id="sn-level" class="form-input"><option value="info">Notice</option><option value="warning">Important</option></select>
+                                    <label class="form-hint">From <input id="sn-start" type="datetime-local" class="form-input"></label>
+                                    <label class="form-hint">Until <input id="sn-end" type="datetime-local" class="form-input"></label>
+                                    <button id="sn-add" class="btn btn-primary btn-small">Add note</button>
+                                    <span id="sn-msg" class="form-hint"></span>
+                                </div>
+                                <p class="form-hint">Empty "From" = now; empty "Until" = until removed. Admins only.</p>
+                                <div id="sn-list"></div>
+                            </div>
                             <div id="tk-scroll" class="tk-scroll"></div>
                             <ul id="tk-list" class="ticker-list"><li>Loading…</li></ul>
                         </div>

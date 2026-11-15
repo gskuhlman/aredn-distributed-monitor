@@ -11,6 +11,14 @@ notification secrets it is never returned by any API, written to CouchDB or
 logged. With AUTH_PROXY_HEADER set (e.g. "X-Remote-User"), a request carrying
 that header from the reverse proxy counts as logged in.
 
+Users (users.py): besides the admin password, a node owner logs in with
+callsign + password (an admin sets the first one). A user's session may only
+change their own settings and alerts (USER_PATHS, checked again in the
+handlers); everything else answers 403 unless the user has admin power
+(`users.is_admin`, read on every request so removing it applies at once).
+The admin password, the proxy header, and an install without a password are
+admin.
+
 The Flask session key is random per install (stored in `auth_config`), not the
 fixed key in app.py, so a session cookie can't be forged from the source.
 Logins are rate limited per client address.
@@ -45,6 +53,12 @@ OPEN_POSTS = [re.compile(p) for p in (
     r'^/api/(ping|traceroute)/[^/]+$',
     r'^/api/alerts/ack/[^/]+$',   # the token in the notification link is the credential
     r'^/api/changes$',            # anyone may document a change (add only; edit/delete need the login)
+)]
+# A logged-in user without admin power may change only these (the handlers
+# check it is their own account / alerts).
+USER_PATHS = [re.compile(p) for p in (
+    r'^/api/me(/.*)?$',
+    r'^/api/service-alerts$',
 )]
 MAX_FAILS = 5
 FAIL_WINDOW_S = 300
@@ -120,6 +134,26 @@ def current_user():
     return proxy_user() or (session.get('auth_user') if logged_in() else None)
 
 
+def current_callsign():
+    """The logged-in user's callsign (users.py), or None for the admin password / proxy."""
+    if proxy_user() or not logged_in():
+        return None
+    return session.get('auth_callsign')
+
+
+def is_admin():
+    """Admin power: no login configured, the proxy header, the admin password, or a user with is_admin."""
+    if not enabled() or proxy_user():
+        return True
+    if not logged_in():
+        return False
+    cs = session.get('auth_callsign')
+    if not cs:
+        return True     # logged in with the admin password
+    import users
+    return users.is_admin(cs)
+
+
 def _open(path):
     return any(p.match(path) for p in OPEN_POSTS)
 
@@ -128,9 +162,13 @@ def guard():
     """Flask before_request hook."""
     if request.method not in PROTECTED_METHODS or not request.path.startswith('/api/'):
         return None
-    if _open(request.path) or not enabled() or logged_in():
+    if _open(request.path) or not enabled():
         return None
-    return jsonify({'error': 'Log in to make changes', 'login_required': True}), 401
+    if not logged_in():
+        return jsonify({'error': 'Log in to make changes', 'login_required': True}), 401
+    if is_admin() or any(p.match(request.path) for p in USER_PATHS):
+        return None
+    return jsonify({'error': 'That needs an admin', 'admin_required': True}), 403
 
 
 def _client():
@@ -138,28 +176,41 @@ def _client():
 
 
 def login(password, user=None):
+    """Callsign + password (users.py), or no / 'admin' user with the admin password."""
     now = time.time()
     who = _client()
     fails = [t for t in _failures.get(who, []) if now - t < FAIL_WINDOW_S]
     if len(fails) >= MAX_FAILS:
         return False, 'Too many failed logins; wait a few minutes.', 429
-    if not password_source():
-        return False, 'No password is set.', 400
-    if not check_password(password):
+    name = (user or '').strip().lower()
+    callsign = None
+    if name and name not in ('admin', 'operator'):
+        import users
+        callsign = users.normalize(name)
+        ok, error = users.check_password(callsign, password) if callsign else (False, 'Unknown callsign or wrong password.')
+        if not ok and 'No password is set' in (error or ''):
+            return False, error, 400
+    else:
+        if not password_source():
+            return False, 'No admin password is set.', 400
+        ok, error = check_password(password), 'Wrong password.'
+    if not ok:
         fails.append(now)
         _failures[who] = fails
-        database.log_event('login_failed', None, f'Failed login from {who}', 'warning')
-        return False, 'Wrong password.', 401
+        database.log_event('login_failed', None, f'Failed login from {who}' + (f' as {name}' if name else ''), 'warning')
+        return False, error, 401
     _failures.pop(who, None)
     session.permanent = True
     session['auth_until'] = now + config.AUTH_SESSION_HOURS * 3600
-    session['auth_user'] = (user or 'operator')[:60]
+    session['auth_user'] = callsign.upper() if callsign else 'admin'
+    session['auth_callsign'] = callsign
     return True, None, 200
 
 
 def logout():
     session.pop('auth_until', None)
     session.pop('auth_user', None)
+    session.pop('auth_callsign', None)
 
 
 def set_password(new, current=None):
@@ -179,7 +230,8 @@ def set_password(new, current=None):
 
 def status():
     return {'enabled': enabled(), 'source': password_source(), 'proxy_header': config.AUTH_PROXY_HEADER or None,
-            'logged_in': logged_in(), 'user': current_user(),
+            'logged_in': logged_in(), 'user': current_user(), 'callsign': current_callsign(),
+            'is_admin': is_admin(),
             'expires': (datetime.fromtimestamp(session['auth_until']).strftime('%Y-%m-%d %H:%M')
                         if logged_in() and session.get('auth_until') else None)}
 

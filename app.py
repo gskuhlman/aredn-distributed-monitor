@@ -54,6 +54,9 @@ import channel_planner
 import link_watch
 import route_watch
 import power_steps
+import users
+import user_alerts
+import status_notes
 import path_view
 import spof
 import site_dashboard
@@ -939,6 +942,138 @@ def api_auth_password():
     return (jsonify(auth.status()) if ok else jsonify({'error': error})), code
 
 
+def _sync_users():
+    try:
+        n = users.sync_from_nodes()
+        if n:
+            logger.info("Users created for new node callsigns: %s", n)
+    except Exception as exc:
+        logger.error("User sync error: %s", exc)
+
+
+def _need_login():
+    return jsonify({'error': 'Log in with your callsign and password', 'login_required': True}), 401
+
+
+def _need_admin():
+    return jsonify({'error': 'That needs an admin', 'admin_required': True}), 403
+
+
+@app.route('/account')
+def account_page():
+    return render_template('account.html')
+
+
+@app.route('/api/me', methods=['GET', 'PATCH'])
+def api_me():
+    """The logged-in user's own settings (callsign login)."""
+    cs = auth.current_callsign()
+    if not cs:
+        return _need_login()
+    if request.method == 'PATCH':
+        u, error = users.update(cs, request.get_json(silent=True) or {}, as_admin=auth.is_admin())
+        if error:
+            return jsonify({'error': error}), 400
+    return jsonify({'user': users.get(cs, private=True), 'services': user_alerts.my_services(cs),
+                    'groups': user_alerts.GROUP_LABELS})
+
+
+@app.route('/api/me/password', methods=['POST'])
+def api_me_password():
+    cs = auth.current_callsign()
+    if not cs:
+        return _need_login()
+    body = request.get_json(silent=True) or {}
+    ok, error = users.change_password(cs, body.get('current'), body.get('new'))
+    return (jsonify({'ok': True}) if ok else jsonify({'error': error})), (200 if ok else 400)
+
+
+@app.route('/api/me/test', methods=['POST'])
+def api_me_test():
+    cs = auth.current_callsign()
+    if not cs:
+        return _need_login()
+    out = user_alerts.send_test(cs)
+    return jsonify(out), (400 if 'error' in out else 200)
+
+
+@app.route('/api/users/callsigns')
+def api_user_callsigns():
+    """Callsigns only (public), for picking alert recipients."""
+    return jsonify({'callsigns': [u['callsign'] for u in users.list_users()]})
+
+
+@app.route('/api/users', methods=['GET', 'POST'])
+def api_users():
+    if not auth.is_admin():
+        return _need_admin()
+    if request.method == 'POST':
+        u, error = users.create((request.get_json(silent=True) or {}).get('callsign'))
+        if error:
+            return jsonify({'error': error}), 400
+        return jsonify({'user': u})
+    return jsonify({'users': users.list_users(private=True), 'groups': user_alerts.GROUP_LABELS})
+
+
+@app.route('/api/users/<callsign>', methods=['PATCH', 'DELETE'])
+def api_user(callsign):
+    if not auth.is_admin():
+        return _need_admin()
+    if request.method == 'DELETE':
+        ok, error = users.delete(callsign)
+        return (jsonify({'ok': True}) if ok else jsonify({'error': error})), (200 if ok else 400)
+    u, error = users.update(callsign, request.get_json(silent=True) or {}, as_admin=True)
+    return (jsonify({'user': u}) if u else jsonify({'error': error})), (200 if u else 400)
+
+
+@app.route('/api/users/<callsign>/password', methods=['POST'])
+def api_user_password(callsign):
+    """Admin: set or (empty) remove a user's password."""
+    if not auth.is_admin():
+        return _need_admin()
+    ok, error = users.set_password(callsign, (request.get_json(silent=True) or {}).get('password'))
+    return (jsonify({'ok': True}) if ok else jsonify({'error': error})), (200 if ok else 400)
+
+
+@app.route('/api/service-alerts', methods=['GET', 'POST'])
+def api_service_alerts():
+    """GET ?node=: who each of the node's services alerts. POST {node, service,
+    callsign, enabled}: a user changes their own; an admin anyone's."""
+    if request.method == 'GET':
+        node = (request.args.get('node') or '').strip().lower()
+        me = auth.current_callsign()
+        return jsonify({'node': node, 'owner': users.callsign_of(node), 'services': user_alerts.node_recipients(node),
+                        'me': me, 'admin': auth.is_admin() and auth.enabled() and auth.logged_in()})
+    body = request.get_json(silent=True) or {}
+    me = auth.current_callsign()
+    target = (body.get('callsign') or me or '').strip().lower()
+    if not auth.is_admin() and target != me:
+        return (_need_login() if not me else
+                (jsonify({'error': 'You can change only your own alerts'}), 403))
+    rec, error = user_alerts.set_recipient((body.get('node') or '').strip().lower(), body.get('service') or '',
+                                           target, bool(body.get('enabled')), by=auth.current_user())
+    return (jsonify({'recipients': rec}) if rec is not None else jsonify({'error': error})), (200 if rec is not None else 400)
+
+
+@app.route('/api/status-notes', methods=['GET', 'POST'])
+def api_status_notes():
+    """GET: notes showing now (public), plus scheduled ones for admins. POST (admin): add one."""
+    if request.method == 'POST':
+        b = request.get_json(silent=True) or {}
+        note, error = status_notes.add(b.get('text'), b.get('starts_at'), b.get('ends_at'), b.get('level') or 'info',
+                                       by=auth.current_user())
+        return (jsonify({'note': note}) if note else jsonify({'error': error})), (200 if note else 400)
+    out = {'notes': status_notes.active()}
+    if auth.is_admin():
+        out['all'] = status_notes.upcoming_and_active()
+    return jsonify(out)
+
+
+@app.route('/api/status-notes/<int:note_id>', methods=['DELETE'])
+def api_status_note_delete(note_id):
+    return jsonify({'removed': status_notes.delete(note_id)})
+
+
 @app.route('/api/admin/database')
 def api_admin_database():
     return jsonify(db_care.report())
@@ -1727,8 +1862,8 @@ def api_route_traffic(path_id):
 @app.route('/api/ssh/snapshot/<int:snap_id>')
 def api_ssh_snapshot(snap_id):
     # Logs and settings: behind the login when one is set (uci secrets are already removed).
-    if auth.enabled() and not auth.logged_in():
-        return jsonify({'error': 'Log in to read node logs and settings', 'login_required': True}), 401
+    if not auth.is_admin():
+        return jsonify({'error': 'Log in as an admin to read node logs and settings', 'login_required': True}), 401
     snap = ssh_collect.snapshot(snap_id)
     return jsonify(snap) if snap else (jsonify({'error': 'not found'}), 404)
 
@@ -3121,8 +3256,8 @@ def handle_disconnect():
 def handle_request_scan():
     """Handle scan request from client. Socket.IO skips the HTTP login check,
     so a scan here needs the login too (the page uses POST /api/scan)."""
-    if auth.enabled() and not auth.logged_in():
-        emit('scan_acknowledged', {'message': 'Log in to start a scan', 'login_required': True})
+    if not auth.is_admin():
+        emit('scan_acknowledged', {'message': 'Log in as an admin to start a scan', 'login_required': True})
         return
     if not scan_state['is_scanning']:
         socketio.start_background_task(scheduled_scan)
@@ -3662,6 +3797,8 @@ def start_scheduler():
     change_verdict.install(scheduler)
     # Hourly: one-way signal steps = likely TX power changes (Changes tab).
     power_steps.install(scheduler)
+    # Hourly: a user (no password) for every new node callsign (users.py).
+    scheduler.add_job(_sync_users, 'cron', minute=11, id='users_sync', replace_existing=True)
     service_check.install(scheduler, run_service_check_task)
     db_care.install(scheduler)
     wifi_survey.install(scheduler)
@@ -3737,6 +3874,9 @@ if __name__ == '__main__':
 
         # Notifications: listen to logged events (sends only when enabled)
         notify.install(socketio.start_background_task)
+        # Alerts to node owners and the infrastructure team (user_alerts.py).
+        user_alerts.install(socketio.start_background_task)
+        _sync_users()
         # Automatic incidents from starting-node events; syslog receiver (only when SYSLOG_ENABLED).
         incidents.install()
         syslog_rx.install(socketio.start_background_task)

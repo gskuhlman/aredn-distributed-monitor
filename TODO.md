@@ -344,10 +344,9 @@ attached devices), Link Health map, Log Viewer (syslog), Incidents, Changes, Ali
 
 ## Round 7 ideas (2026-11-15, from Uptime Kuma)
 
-Four Uptime Kuma instances are on the mesh: KE0UZC's (ke0uzc-uptime:3001, public status page
-"KE0UZC Apps", 1 monitor, down at the time), N6LKA-uptimekuma (10.228.128.110), n3fud-kuma
-(10.171.54.228) and Uptime-Kuma (10.26.33.236, not answering). The others need a login, so these
-come from Kuma's feature set compared with ours. Already covered: notifications with repeat /
+Four Uptime Kuma instances are on the mesh (KE0UZC, N6LKA, N3FUD and one unnamed); only KE0UZC's
+has a public page, so these come from Kuma's feature set compared with ours. Recurring maintenance,
+reading the other Kuma pages and certificate expiry were dropped. Already covered: notifications with repeat /
 escalation, maintenance windows, public status page + badges, silence / ignore, starting-node DNS.
 
 - [ ] 94. **Service check history.** Store each probe (ok, ms, error) like phone_pings; per service
@@ -362,23 +361,24 @@ escalation, maintenance windows, public status page + badges, silence / ignore, 
 - [ ] 97. **Push (heartbeat) monitors.** A URL a device or script calls every N minutes
       (repeater controller, battery / solar monitor, a backup job, a Pi behind a node); alarm when
       the calls stop. Covers things we can't probe (behind NAT, outbound-only, off-mesh).
-- [ ] 98. **Recurring maintenance windows.** Weekly / monthly schedules (e.g. Tuesday net-night
-      work, the 1st Saturday tower day) instead of one window at a time; maintenance.py has no
-      repeat today.
 - [ ] 99. **More notification channels.** Telegram, Pushover, Gotify, Matrix, SMS gateway, or
       Apprise (one library, ~90 services). We have email, Discord, ntfy and webhook.
-- [ ] 100. **Read the other Kuma instances.** Their public status pages have a JSON API
-      (`/api/status-page/<slug>` and `/api/status-page/heartbeat/<slug>`): show those monitors'
-      state on Services & Devices (marked "from KE0UZC's Kuma") and link to the page, instead of
-      probing the same services twice. Only pages their owners publish; no logins.
-- [ ] 101. **Status page notes.** A pinned operator message on the club status page and /wall
+- [x] 101. **Status page notes.** A pinned operator message on the club status page and /wall
       ("Collins tower work Saturday 9-12"), separate from maintenance windows; Kuma calls these
       incidents on a status page.
-- [ ] 102. **Certificate expiry** for https services (warn 14 / 3 days before); few mesh services use
-      TLS, so low priority.
-- [ ] 103. **Dependency groups.** Kuma's monitor groups: a group is down when its children are.
+      *Built: status_notes.py; "Status notes" on the Status page (admins add / remove, start and end time,
+      Notice / Important), shown as a banner there, on /wall and in the club status page notices.*
+- [x] 103. **Dependency groups.** Kuma's monitor groups: a group is down when its children are.
       For us: alerts for services and phones behind a node that is down are already held; extend it
       so a site's nodes behind one failed backbone link raise one alarm, not one per node.
+      *Already there: incidents.py `cutoff` (nodes down behind one bridge link -> one incident, member
+      events held) and `site_outage`; the new per-user alerts (#104) go through the same suppression.*
+- [x] 104. **Accounts and alerts to people.** A user per node callsign (user id = callsign, no
+      password until an admin sets one); log in with callsign + password; admins grant admin power.
+      Each service alerts its node owner by default; users turn their own on/off, admins anyone's.
+      Infrastructure team members get alerts for infrastructure nodes by group and severity. E-mail
+      (operator's SMTP) and ntfy per user, through notify.py's pipeline per user.
+      *Built: users.py, user_alerts.py, /account page, "Alerts go to" on the node page Services table.*
 
 ## Pending radio work (outside the app)
 

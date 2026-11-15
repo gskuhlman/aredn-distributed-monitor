@@ -13,10 +13,10 @@ const Auth = {
         window.__authFetch = original;
         window.fetch = async (input, init) => {
             const resp = await original(input, init);
-            if (resp.status !== 401) return resp;
+            if (resp.status !== 401 && resp.status !== 403) return resp;
             let body = null;
             try { body = await resp.clone().json(); } catch (e) { return resp; }
-            if (!body || !body.login_required) return resp;
+            if (!body || !(body.login_required || body.admin_required)) return resp;
             const ok = await this.prompt(body.error);
             return ok ? original(input, init) : resp;
         };
@@ -31,7 +31,8 @@ const Auth = {
             box.innerHTML = `<form class="auth-box" autocomplete="off">
                 <h3>Log in</h3>
                 <p class="form-hint">${this.esc(message || 'Log in to make changes')}. Reading works without a login.</p>
-                <input type="password" class="form-input" name="password" placeholder="Password" required>
+                <input class="form-input" name="user" placeholder="Callsign (blank: admin password)" autocomplete="username">
+                <input type="password" class="form-input" name="password" placeholder="Password" required autocomplete="current-password">
                 <p class="auth-error" hidden></p>
                 <div class="auth-actions">
                     <button type="submit" class="btn btn-primary">Log in</button>
@@ -39,7 +40,8 @@ const Auth = {
                 </div></form>`;
             document.body.appendChild(box);
             const form = box.querySelector('form');
-            const input = form.querySelector('input');
+            const input = form.querySelector('input[name="password"]');
+            const userInput = form.querySelector('input[name="user"]');
             const err = form.querySelector('.auth-error');
             const done = (ok) => { box.remove(); this.pending = null; resolve(ok); };
             form.querySelector('[data-cancel]').addEventListener('click', () => done(false));
@@ -48,7 +50,7 @@ const Auth = {
                 e.preventDefault();
                 const r = await window.__authFetch('/api/auth/login', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: input.value })
+                    body: JSON.stringify({ password: input.value, user: userInput.value.trim() || undefined })
                 });
                 const d = await r.json().catch(() => ({}));
                 if (r.ok) {
@@ -60,7 +62,7 @@ const Auth = {
                     input.select();
                 }
             });
-            input.focus();
+            userInput.focus();
         });
         return this.pending;
     },

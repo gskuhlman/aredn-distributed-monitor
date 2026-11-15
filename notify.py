@@ -750,9 +750,11 @@ class Dispatcher:
     """Anti-spam pipeline. Pure state machine driven by process()/tick() so it
     can be tested without threads; the worker calls it from a loop."""
 
-    def __init__(self, sender=None, clock=None):
+    def __init__(self, sender=None, clock=None, acks=True):
         self.sender = sender or send
         self.clock = clock or time.time
+        # Per-user pipelines (user_alerts.py) have no acknowledge links or escalation.
+        self.acks = acks
         self.last_sent = {}      # (rule_id, subject, type) -> ts
         self.held = {}           # (rule_id, subject, problem type) -> {'event','rule','at'}
         self.alerted = set()     # (rule_id, subject, problem type) problems actually alerted
@@ -871,7 +873,7 @@ class Dispatcher:
                 self._enqueue(held['rule'], [held['event']], held['title'], held['line'], cfg, 'alert',
                               cooldown_key=key)
         self.flush(cfg)
-        if now - getattr(self, '_ack_checked', -1e18) >= 60:
+        if self.acks and now - getattr(self, '_ack_checked', -1e18) >= 60:
             self._ack_checked = now
             self.escalate(cfg)
 
@@ -920,6 +922,8 @@ class Dispatcher:
             items = batch['items']
             ack_lines = {}
             try:
+                if not self.acks:
+                    raise LookupError('no acknowledge links')
                 import acks
                 for a in items:
                     if a['kind'] == 'alert':

@@ -20,7 +20,7 @@ const MuteControls = {
 
     async loadAuth() {
         const s = typeof Auth !== 'undefined' ? await Auth.status() : null;
-        this.admin = !s || !s.enabled || !!s.logged_in;
+        this.admin = !s || !s.enabled || ('is_admin' in s ? !!(s.logged_in && s.is_admin) : !!s.logged_in);
         return this.admin;
     },
 
@@ -56,7 +56,7 @@ const MuteControls = {
         const { muteAct: action, muteNode: node, muteKey: key } = btn.dataset;
         if (this.admin === null) await this.loadAuth();
         if (!this.admin) {
-            if (typeof Auth === 'undefined' || !await Auth.prompt('Log in to silence or ignore')) return;
+            if (typeof Auth === 'undefined' || !await Auth.prompt('Log in as an admin to silence or ignore')) return;
             await this.loadAuth();
         }
         if (action === 'enable') return this.send('DELETE', node, key, null, btn, onDone);

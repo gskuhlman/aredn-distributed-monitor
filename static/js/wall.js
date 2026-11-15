@@ -74,6 +74,13 @@
         el.textContent = s.warning ? '⛈ ' + s.text : '';
     }
 
+    function notes(d) {
+        const el = document.getElementById('wall-notes');
+        if (!el) return;
+        el.hidden = !d.notes.length;
+        el.textContent = d.notes.map(n => '📌 ' + n.text).join('   ·   ');
+    }
+
     async function refresh() {
         const jobs = [
             get('/api/boards/agencies').then(agencies),
@@ -81,6 +88,7 @@
             get('/api/network').then(plot),
             get('/api/reports/tape?hours=24&scope=infrastructure-connected').then(tape),
             get('/api/weather/storm').then(storm).catch(() => {}),
+            get('/api/status-notes').then(notes).catch(() => {}),
         ];
         const res = await Promise.allSettled(jobs);
         if (res.some(r => r.status === 'fulfilled')) lastOk = Date.now();

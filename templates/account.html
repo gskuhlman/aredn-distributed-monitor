@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account - AREDN Network Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container node-page admin-page">
+        <header class="header">
+            <div class="header-left">
+                <a href="/" class="btn btn-secondary">&larr; Monitor</a>
+                <h1>Account &amp; Alerts</h1>
+            </div>
+            <div class="header-controls">
+                <span id="acct-who" class="form-hint"></span>
+                <button id="acct-logout" class="btn btn-secondary btn-small" hidden>Log out</button>
+            </div>
+        </header>
+        <main class="node-page-content">
+            <!-- Login (callsign + password) -->
+            <section class="node-page-section" id="acct-login" hidden>
+                <h2>Log in</h2>
+                <p class="form-hint">Every node owner has an account: the user id is your callsign. A new account has no
+                    password, so ask an admin to set one; then you can change it here and set up your alerts.</p>
+                <form id="acct-login-form" class="mh-controls" autocomplete="on">
+                    <input id="acct-cs" class="form-input" placeholder="Callsign" autocomplete="username" required>
+                    <input id="acct-pw" type="password" class="form-input" placeholder="Password" autocomplete="current-password" required>
+                    <button class="btn btn-primary">Log in</button>
+                    <span id="acct-login-msg" class="form-hint"></span>
+                </form>
+            </section>
+
+            <!-- The user's own settings -->
+            <section class="node-page-section" id="acct-me" hidden>
+                <h2>My alerts <small id="acct-me-cs" class="form-hint"></small></h2>
+                <div class="acct-grid">
+                    <label>E-mail <input id="me-email" type="email" class="form-input" placeholder="you@example.com"></label>
+                    <label>ntfy topic <input id="me-ntfy" class="form-input" placeholder="e.g. w0abc-mesh-alerts"></label>
+                    <label class="checkbox-label"><input type="checkbox" id="me-enabled"> Send me alerts</label>
+                </div>
+                <p class="form-hint">Alerts go to every destination you fill in. ntfy: install the ntfy app and subscribe to the
+                    same topic (pick one nobody would guess).</p>
+                <div id="me-team"></div>
+                <div class="mh-controls">
+                    <button id="me-save" class="btn btn-primary btn-small">Save</button>
+                    <button id="me-test" class="btn btn-secondary btn-small">Send a test alert</button>
+                    <span id="me-msg" class="form-hint"></span>
+                </div>
+                <h3>Services that alert me</h3>
+                <p class="form-hint">Services on your nodes alert you by default. Turn one off here, or ask for alerts from any
+                    other service on its node page (Services table).</p>
+                <div id="me-services"></div>
+                <h3>Password</h3>
+                <form id="me-pw-form" class="mh-controls" autocomplete="off">
+                    <input id="me-pw-cur" type="password" class="form-input" placeholder="Current password" autocomplete="current-password">
+                    <input id="me-pw-new" type="password" class="form-input" placeholder="New password (8+ characters)" autocomplete="new-password">
+                    <button class="btn btn-secondary btn-small">Change password</button>
+                    <span id="me-pw-msg" class="form-hint"></span>
+                </form>
+            </section>
+
+            <!-- Admin: users -->
+            <section class="node-page-section" id="acct-admin" hidden>
+                <h2>Users <small class="form-hint">one per node callsign, created automatically</small></h2>
+                <p class="form-hint">Set a password so a user can log in. <b>Admin</b> gives the same powers as the admin
+                    password. <b>Infra team</b> users get alerts for infrastructure nodes (each picks which kinds).</p>
+                <div class="mh-controls">
+                    <input id="adm-filter" class="form-input" placeholder="Filter callsigns">
+                    <input id="adm-new" class="form-input" placeholder="Add a callsign (no node)">
+                    <button id="adm-add" class="btn btn-secondary btn-small">Add user</button>
+                    <span id="adm-msg" class="form-hint"></span>
+                </div>
+                <div id="adm-users"><p class="loading">Loading…</p></div>
+            </section>
+        </main>
+    </div>
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/account.js') }}"></script>
+</body>
+</html>
