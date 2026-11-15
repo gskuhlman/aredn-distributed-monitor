@@ -2,8 +2,10 @@
  * Silence / Ignore / Enable controls for one service or device on one node
  * (service_check.py service_mutes; POST/DELETE /api/services/mute). Used by
  * the node page Services table and the Services & Devices page. The buttons
- * show for everyone; without a login they open the login box first. Silence
- * asks how long inline (no browser dialog).
+ * show for everyone; without a login they open the login box first. Admins
+ * silence, ignore and enable anything; a node owner (logged in with their
+ * callsign) silences and enables their own node's services. Silence asks how
+ * long inline (no browser dialog).
  *
  *   MuteControls.label(mute)              alerts state badge
  *   MuteControls.buttons(node, key, mute) buttons; key = service name or 'device:<ip>'
@@ -11,6 +13,7 @@
  */
 const MuteControls = {
     admin: null,
+    callsign: null,
     SILENCE: [[1, '1 hour'], [6, '6 hours'], [24, '1 day'], [168, '1 week'], [720, '1 month'], ['', 'Until enabled again']],
 
     esc(v) {
@@ -21,7 +24,16 @@ const MuteControls = {
     async loadAuth() {
         const s = typeof Auth !== 'undefined' ? await Auth.status() : null;
         this.admin = !s || !s.enabled || ('is_admin' in s ? !!(s.logged_in && s.is_admin) : !!s.logged_in);
+        this.callsign = s && s.logged_in && s.callsign ? String(s.callsign).toLowerCase() : null;
         return this.admin;
+    },
+
+    owner(node) {
+        return !!this.callsign && String(node || '').split('-')[0].toLowerCase() === this.callsign;
+    },
+
+    allowed(node, action) {
+        return this.admin || (this.owner(node) && action !== 'ignore');
     },
 
     label(m) {
@@ -55,8 +67,10 @@ const MuteControls = {
     async act(btn, onDone) {
         const { muteAct: action, muteNode: node, muteKey: key } = btn.dataset;
         if (this.admin === null) await this.loadAuth();
-        if (!this.admin) {
-            if (typeof Auth === 'undefined' || !await Auth.prompt('Log in as an admin to silence or ignore')) return;
+        if (!this.allowed(node, action)) {
+            const why = action === 'ignore' ? 'Log in as an admin to ignore a service'
+                : 'Log in as the node owner (your callsign) or an admin';
+            if (typeof Auth === 'undefined' || !await Auth.prompt(why)) return;
             await this.loadAuth();
         }
         if (action === 'enable') return this.send('DELETE', node, key, null, btn, onDone);

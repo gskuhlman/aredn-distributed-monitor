@@ -90,6 +90,7 @@ const Account = {
             this.groups = d.groups;
             const u = d.user;
             document.getElementById('acct-me-cs').textContent = `${u.callsign.toUpperCase()} · ${u.nodes.length} node${u.nodes.length === 1 ? '' : 's'}`;
+            document.getElementById('me-name').value = u.name || '';
             document.getElementById('me-email').value = u.email;
             document.getElementById('me-ntfy').value = u.ntfy_topic;
             document.getElementById('me-enabled').checked = u.alerts_enabled;
@@ -117,6 +118,7 @@ const Account = {
     async saveMe() {
         const msg = document.getElementById('me-msg');
         const body = {
+            name: document.getElementById('me-name').value.trim(),
             email: document.getElementById('me-email').value.trim(),
             ntfy_topic: document.getElementById('me-ntfy').value.trim(),
             alerts_enabled: document.getElementById('me-enabled').checked,
@@ -174,12 +176,13 @@ const Account = {
 
     drawUsers() {
         const q = document.getElementById('adm-filter').value.trim().toLowerCase();
-        const rows = this.users.filter(u => !q || u.callsign.includes(q) || u.nodes.some(n => n.includes(q)));
+        const rows = this.users.filter(u => !q || u.callsign.includes(q) || (u.name || '').toLowerCase().includes(q) || u.nodes.some(n => n.includes(q)));
         const me = this.status.callsign;
         document.getElementById('adm-users').innerHTML = `<div class="table-scroll-wrapper"><table class="info-table diag-table">
-            <thead><tr><th>Callsign</th><th>Nodes</th><th>Password</th><th>Admin</th><th>Infra team</th><th>Alerts to</th><th>Last login</th><th></th></tr></thead>
+            <thead><tr><th>Callsign</th><th>Name</th><th>Nodes</th><th>Password</th><th>Admin</th><th>Infra team</th><th>Alerts to</th><th>Last login</th><th></th></tr></thead>
             <tbody>${rows.map(u => `<tr>
                 <td><strong>${this.esc(u.callsign.toUpperCase())}</strong>${u.callsign === me ? ' <small>(you)</small>' : ''}</td>
+                <td>${this.esc(u.name || '')}</td>
                 <td title="${this.esc(u.nodes.join(', '))}">${u.nodes.length || '<small>none</small>'}</td>
                 <td class="acct-pw-cell">${u.has_password ? '<span class="svc-alerts svc-alerts-on">set</span>' : '<span class="svc-alerts svc-alerts-ignored">none</span>'}
                     <button class="btn btn-small btn-secondary" data-act="pw" data-cs="${this.esc(u.callsign)}">${u.has_password ? 'Reset' : 'Set'}</button>

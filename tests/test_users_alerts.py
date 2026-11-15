@@ -159,3 +159,12 @@ def test_status_notes(mesh):
     assert [x['showing'] for x in status_notes.upcoming_and_active(now)] == [True, False]
     assert status_notes.active(datetime(2026, 11, 15, 12, 30)) == []
     assert status_notes.delete(later['id'])
+
+
+def test_owner_and_name(owners):
+    assert users.owns('kf9mt', 'kf9mt-home-litebeam')
+    assert not users.owns('kf9mt', 'w0gq-col-rkt-s')
+    assert not users.owns(None, 'kf9mt-home-litebeam')
+    u, err = users.update('kf9mt', {'name': '  Rickie   Sexton '})
+    assert err is None and u['name'] == 'Rickie Sexton'
+    assert any(p.match('/api/services/mute') for p in auth.USER_PATHS)

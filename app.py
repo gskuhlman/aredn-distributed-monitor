@@ -798,11 +798,27 @@ def run_service_check_task():
         return {'events': [], 'aborted': str(exc)}
 
 
+def _mute_denied(node, mode):
+    """Admins mute anything; a node owner may silence (not ignore) their own
+    node's services and enable them again unless an admin ignored them."""
+    if auth.is_admin():
+        return None
+    if not users.owns(auth.current_callsign(), node):
+        return jsonify({'error': 'Only the node owner or an admin can do that', 'admin_required': True}), 403
+    if mode == 'ignore':
+        return jsonify({'error': 'Only an admin can ignore a service', 'admin_required': True}), 403
+    return None
+
+
 @app.route('/api/services/mute', methods=['POST'])
 def api_service_mute():
-    """Admin: silence {node, service, mode: 'silence', hours: 1|6|24|168|720|null}
-    or ignore {node, service, mode: 'ignore'} one service on one node."""
+    """Silence {node, service, mode: 'silence', hours: 1|6|24|168|720|null}
+    or ignore {node, service, mode: 'ignore'} one service on one node. Admins,
+    or the node owner for silence."""
     body = request.get_json(silent=True) or {}
+    denied = _mute_denied(body.get('node'), body.get('mode'))
+    if denied:
+        return denied
     mute, error = service_check.set_mute(body.get('node'), body.get('service'), body.get('mode'), body.get('hours'))
     if error:
         return jsonify({'error': error}), 400
@@ -811,10 +827,18 @@ def api_service_mute():
 
 @app.route('/api/services/mute', methods=['DELETE'])
 def api_service_unmute():
-    """Admin: enable alerts and checks for one service again."""
+    """Enable alerts and checks for one service again (admin, or the owner after a silence)."""
     node, service = request.args.get('node', ''), request.args.get('service', '')
     if not node or not service:
         return jsonify({'error': 'node and service are required'}), 400
+    current = None
+    if not auth.is_admin():
+        service_check.ensure_tables()
+        with database.get_connection() as conn:
+            current = service_check.mutes(conn).get((node, service))
+    denied = _mute_denied(node, current.get('mode') if current else 'silence')
+    if denied:
+        return denied
     return jsonify({'removed': service_check.clear_mute(node, service)})
 
 

@@ -59,6 +59,7 @@ OPEN_POSTS = [re.compile(p) for p in (
 USER_PATHS = [re.compile(p) for p in (
     r'^/api/me(/.*)?$',
     r'^/api/service-alerts$',
+    r'^/api/services/mute$',
 )]
 MAX_FAILS = 5
 FAIL_WINDOW_S = 300

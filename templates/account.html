@@ -36,6 +36,7 @@
             <section class="node-page-section" id="acct-me" hidden>
                 <h2>My alerts <small id="acct-me-cs" class="form-hint"></small></h2>
                 <div class="acct-grid">
+                    <label>Name <input id="me-name" class="form-input" placeholder="Your name"></label>
                     <label>E-mail <input id="me-email" type="email" class="form-input" placeholder="you@example.com"></label>
                     <label>ntfy topic <input id="me-ntfy" class="form-input" placeholder="e.g. w0abc-mesh-alerts"></label>
                     <label class="checkbox-label"><input type="checkbox" id="me-enabled"> Send me alerts</label>
@@ -67,7 +68,7 @@
                 <p class="form-hint">Set a password so a user can log in. <b>Admin</b> gives the same powers as the admin
                     password. <b>Infra team</b> users get alerts for infrastructure nodes (each picks which kinds).</p>
                 <div class="mh-controls">
-                    <input id="adm-filter" class="form-input" placeholder="Filter callsigns">
+                    <input id="adm-filter" class="form-input" placeholder="Filter callsigns or names">
                     <input id="adm-new" class="form-input" placeholder="Add a callsign (no node)">
                     <button id="adm-add" class="btn btn-secondary btn-small">Add user</button>
                     <span id="adm-msg" class="form-hint"></span>

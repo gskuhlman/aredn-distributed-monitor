@@ -58,6 +58,9 @@ def ensure_tables():
                 last_login DATETIME
             )
         ''')
+        cols = {r[1] for r in conn.execute('PRAGMA table_info(users)')}
+        if 'name' not in cols:
+            conn.execute('ALTER TABLE users ADD COLUMN name TEXT')
     _tables_ready = True
 
 
@@ -99,7 +102,7 @@ def _public(r, nodes=None, private=False):
             groups = json.loads(r['infra_groups']) if r['infra_groups'] else list(DEFAULT_INFRA_GROUPS)
         except ValueError:
             groups = list(DEFAULT_INFRA_GROUPS)
-        u.update({'email': r['email'] or '', 'ntfy_topic': r['ntfy_topic'] or '',
+        u.update({'name': r['name'] or '', 'email': r['email'] or '', 'ntfy_topic': r['ntfy_topic'] or '',
                   'alerts_enabled': bool(r['alerts_enabled']), 'infra_groups': groups,
                   'infra_min_severity': r['infra_min_severity'] or 'warning',
                   'created_at': r['created_at'], 'last_login': r['last_login']})
@@ -209,6 +212,9 @@ def update(callsign, data, as_admin=False):
     cs = (callsign or '').lower()
     data = data or {}
     sets, vals = [], []
+    if 'name' in data:
+        name = ' '.join(str(data['name'] or '').split())[:80]
+        sets.append('name = ?'); vals.append(name or None)
     if 'email' in data:
         email = str(data['email'] or '').strip()
         if email and not EMAIL_RE.match(email):
@@ -247,3 +253,9 @@ def is_admin(callsign):
     with database.get_connection() as conn:
         r = conn.execute('SELECT is_admin FROM users WHERE callsign = ?', ((callsign or '').lower(),)).fetchone()
     return bool(r and r[0])
+
+
+def owns(callsign, node_name):
+    """True when the node name starts with this callsign (the node owner)."""
+    cs = (callsign or '').lower()
+    return bool(cs) and callsign_of(node_name) == cs
