@@ -314,6 +314,9 @@ def _hygiene(start):
             'common_fixes': sorted(fixes.items(), key=lambda kv: -kv[1])[:6],
             'worst_nodes': [{'name': n['name'], 'score': n['score'], 'fixes': n['fixes'][:2]}
                             for n in rows if n['score'] < HYGIENE_LOW][:15],
+            # Every node with something to fix, by owner then score: the full to-do list.
+            'action_items': [{'name': n['name'], 'owner': n['owner'], 'score': n['score'], 'fixes': n['fixes']}
+                             for n in sorted(rows, key=lambda n: (n['owner'], n['score'], n['name'])) if n['fixes']],
             'owners': [{'owner': o['owner'], 'nodes': o['nodes'], 'avg_score': o['avg_score'], 'fixes': o['fixes']}
                        for o in r['owners'] if o['avg_score'] < HYGIENE_LOW][:10]}
 
@@ -426,9 +429,20 @@ def render_text(r, short=False):
         if hy.get('common_fixes'):
             lines.append('Most common fixes: ' + ', '.join(f"{HYGIENE_FIX_LABEL.get(k, k)} ({n})"
                                                            for k, n in hy['common_fixes']) + '.')
-        block('Lowest hygiene scores', hy.get('worst_nodes'),
-              lambda n: f"{n['name']}: {n['score']}" + (f" – {'; '.join(n['fixes'])}" if n['fixes'] else ''), lim)
-        if not short:
+        if short:
+            block('Lowest hygiene scores', hy.get('worst_nodes'),
+                  lambda n: f"{n['name']}: {n['score']}" + (f" – {'; '.join(n['fixes'])}" if n['fixes'] else ''), lim)
+        else:
+            items = hy.get('action_items') or []
+            if items:
+                lines.append(f"\nHygiene action items ({len(items)} node(s), by owner):")
+                owner = None
+                for n in items:
+                    if n['owner'] != owner:
+                        owner = n['owner']
+                        lines.append(f"  {owner}:")
+                    lines.append(f"    {n['name']} ({n['score']}/100):")
+                    lines.extend(f"      - {f}" for f in n['fixes'])
             block('Owners to nudge', hy.get('owners'),
                   lambda o: f"{o['owner']}: avg {o['avg_score']} over {o['nodes']} node(s), {o['fixes']} fix(es)", lim)
     inf = r.get('infrastructure') or {}

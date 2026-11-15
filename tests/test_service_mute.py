@@ -144,3 +144,4 @@ def test_weekly_hygiene_section(mesh):
     text = weekly_report.render_text({'start': '2026-01-01 00:00', 'end': '2026-01-08 00:00',
                                       'headline': {'error': 'n/a'}, 'hygiene': hy})
     assert 'Node hygiene: average score' in text and 'no location' in text
+    assert 'Hygiene action items' in text and '    w0aa-home (' in text and 'Set the node location' in text
