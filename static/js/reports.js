@@ -314,6 +314,12 @@ const ReportsModule = {
             { key: 'timestamp', dir: 'desc' });
 
         const voipRows = [
+            ...(d.phones || []).map(p => ({
+                when: '', kind: `Phone ${p.kind || ''}`.trim(),
+                source: `${p.name || p.ip}${p.extension ? ` (x${p.extension})` : ''}`, target: p.node_name || p.ip,
+                result: `reachable ${this.fmt(p.reachable_pct, 1)}% of ${p.checks} checks; ${this.fmt(p.avg_ms, 0)} ms, ` +
+                    `jitter ${this.fmt(p.jitter_ms, 1)} ms, loss ${this.fmt(p.loss_pct, 1)}%`
+            })),
             ...d.voip_tests.map(t => ({
                 when: t.ran_at, kind: `Call test (${t.codec})`, source: t.source_node,
                 target: t.target_node,
@@ -327,7 +333,7 @@ const ReportsModule = {
             }))
         ];
         this.renderTable('rpt-voip', voipRows, [
-            ['when', 'Time'], ['kind', 'Kind'], ['source', 'Source'], ['target', 'Target'],
+            ['when', 'Time'], ['kind', 'Kind'], ['source', 'Phone / source'], ['target', 'Node / target'],
             ['result', 'Result']
         ], () => '', { key: 'when', dir: 'desc' });
     },
@@ -419,7 +425,7 @@ const ReportsModule = {
             ['Starting Node Lost', s.gateway_outages],
             ['Maintenance', s.maintenance_windows
                 ? `${s.maintenance_windows} window(s), ${s.maintenance_events ?? 0} events` : 'none'],
-            ['VoIP Tests / Sessions', `${s.voip_tests} / ${s.voip_sessions}`]
+            ['Phones / VoIP Tests / Sessions', `${s.phones ?? 0} / ${s.voip_tests} / ${s.voip_sessions}`]
         ];
         document.getElementById('rpt-summary').innerHTML = tiles.map(([label, value]) =>
             `<div class="rpt-tile"><span class="rpt-tile-label">${this.esc(label)}</span>` +

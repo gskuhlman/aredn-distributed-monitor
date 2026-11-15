@@ -134,15 +134,18 @@ const CollectorHealth = {
         const timeScale = typeof ReportsModule !== 'undefined' ? ReportsModule.timeScale(win)
             : { type: 'time', min: this.date(win.start), max: this.date(win.end) };
         const pts = key => d.series.filter(r => r[key] != null).map(r => ({ x: this.date(r.t), y: r[key] }));
-        const line = (label, color, key) => ({
-            label, data: pts(key), borderColor: color, backgroundColor: color, borderWidth: 1.5,
+        const line = (label, color, key, yAxisID = 'y') => ({
+            label, data: pts(key), borderColor: color, backgroundColor: color, borderWidth: 1.5, yAxisID,
             pointRadius: d.series.length > 60 ? 0 : 2, spanGaps: false, tension: 0.2
         });
         this.chart('latency', 'ch-latency-chart', {
             type: 'line',
             data: { datasets: [line('HTTP sysinfo (ms)', '#3498db', 'http_ms'), line('TCP connect (ms)', '#16a085', 'connect_ms'),
-                line('DNS (ms)', '#e67e22', 'dns_ms')] },
-            options: { scales: { x: timeScale, y: { beginAtZero: true, title: { display: true, text: 'ms' } } } }
+                line('DNS (ms, right axis)', '#e67e22', 'dns_ms', 'dns')] },
+            // DNS is usually under a millisecond (cached), so it gets its own axis instead of lying on zero.
+            options: { scales: { x: timeScale, y: { beginAtZero: true, title: { display: true, text: 'ms' } },
+                dns: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false },
+                    title: { display: true, text: 'DNS ms' } } } }
         });
         const bar = (label, color, key) => ({ label, data: pts(key), backgroundColor: color, stack: 'polls' });
         this.chart('polls', 'ch-polls-chart', {

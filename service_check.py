@@ -79,6 +79,19 @@ def ensure_tables():
                 PRIMARY KEY (node_name, service_name)
             )
         ''')
+        # Per-day tallies for weekly availability (service_checks only keeps running totals).
+        # A check counts only while the node is up: a node outage is the scanner's, not the service's.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS service_check_daily (
+                day TEXT NOT NULL,
+                node_name TEXT NOT NULL,
+                service_name TEXT NOT NULL,
+                checks INTEGER NOT NULL DEFAULT 0,
+                oks INTEGER NOT NULL DEFAULT 0,
+                ms_total INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (day, node_name, service_name)
+            )
+        ''')
         conn.execute('''
             CREATE TABLE IF NOT EXISTS service_mutes (
                 node_name TEXT NOT NULL,
@@ -93,6 +106,7 @@ def ensure_tables():
 
 
 MUTE_MODES = ('silence', 'ignore')
+DAILY_KEEP_DAYS = 400
 SILENCE_HOURS = (1, 6, 24, 168, 720)     # 1 h, 6 h, 1 d, 1 w, 1 month; None = until enabled again
 
 
@@ -273,8 +287,10 @@ def run(now=None):
     with ThreadPoolExecutor(max_workers=12) as pool:
         results = dict(zip(seen, pool.map(probe, seen.values())))
     now_s = now.strftime(TS_FMT)
+    day = now.strftime('%Y-%m-%d')
     events = []
     rows = []
+    daily = []
     for key, s in seen.items():
         ok, error, ms, kind = results[key]
         st = states.get(key) or {'fail_count': 0, 'alarm': 0, 'since': None, 'last_ok': None,
@@ -301,6 +317,8 @@ def run(now=None):
                                    f"Service {s['name']} ({s['link']}) not answering: {error}; "
                                    f"node {s['node_name']} is up", 'warning'))
             # node down: the scanner reports that; keep the counters as they are
+        if ok or (ok is False and node_up):
+            daily.append((day, s['node_name'], s['name'], 1 if ok else 0, int(ms or 0) if ok else 0))
         rows.append((s['node_name'], s['name'], s['link'], kind, None if ok is None else int(bool(ok)),
                      fail_count, alarm, since, now_s, last_ok, error, ms, checks, oks))
     with database.get_connection() as conn:
@@ -310,11 +328,45 @@ def run(now=None):
         # Services no longer advertised are dropped.
         stale = [k for k in states if k not in advertised]
         conn.executemany('DELETE FROM service_checks WHERE node_name = ? AND service_name = ?', stale)
+        conn.executemany('''INSERT INTO service_check_daily (day, node_name, service_name, checks, oks, ms_total)
+                            VALUES (?, ?, ?, 1, ?, ?)
+                            ON CONFLICT(day, node_name, service_name) DO UPDATE SET
+                                checks = checks + 1, oks = oks + excluded.oks, ms_total = ms_total + excluded.ms_total''',
+                         daily)
+        conn.execute('DELETE FROM service_check_daily WHERE day < ?',
+                     ((now - timedelta(days=DAILY_KEEP_DAYS)).strftime('%Y-%m-%d'),))
     out = []
     for kind, node, text, sev in events:
         database.log_event(kind, node, text, sev)
         out.append({'timestamp': now_s, 'event_type': kind, 'node_name': node, 'details': text, 'severity': sev})
     return {'events': out, 'aborted': None, 'checked': sum(1 for r in results.values() if r[0] is not None)}
+
+
+def availability(start, end):
+    """Per service over the days in [start, end) (datetimes): checks while the
+    node was up, answered %, average ms, and service_down events. Sorted worst first."""
+    ensure_tables()
+    d0, d1 = start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
+    with database.get_connection() as conn:
+        rows = [dict(r) for r in conn.execute('''
+            SELECT node_name, service_name, SUM(checks) AS checks, SUM(oks) AS oks, SUM(ms_total) AS ms_total,
+                   MIN(day) AS first_day
+            FROM service_check_daily WHERE day >= ? AND day <= ?
+            GROUP BY node_name, service_name''', (d0, d1))]
+        downs = {}
+        for r in conn.execute('''SELECT node_name, details FROM events WHERE event_type = 'service_down'
+                                 AND timestamp >= ? AND timestamp < ?''', (start.strftime(TS_FMT), end.strftime(TS_FMT))):
+            downs[r['node_name']] = downs.get(r['node_name'], []) + [r['details'] or '']
+        muted = mutes(conn)
+    for r in rows:
+        r['availability_pct'] = round(100.0 * r['oks'] / r['checks'], 2) if r['checks'] else None
+        r['avg_ms'] = round(r['ms_total'] / r['oks']) if r['oks'] else None
+        r['outages'] = sum(1 for d in downs.get(r['node_name'], []) if d.startswith(f"Service {r['service_name']} ("))
+        m = muted.get((r['node_name'], r['service_name']))
+        r['mute'] = m['mode'] if m else None
+        del r['ms_total']
+    rows.sort(key=lambda r: (r['availability_pct'] if r['availability_pct'] is not None else 101, r['node_name']))
+    return rows
 
 
 def report():

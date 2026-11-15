@@ -402,6 +402,22 @@ def window_report(start, end, scope='all', link_type='all', search='',
             ORDER BY started_at DESC
         ''', (e, s))]
 
+        # ---- phones (phones.py pings each SIP phone / ATA): reachability and network quality
+        try:
+            phones = [dict(r) for r in cur.execute('''
+                SELECT p.id, p.name, p.extension, p.ip, p.node_name, p.kind,
+                       COUNT(g.timestamp) AS checks, SUM(g.ok) AS oks,
+                       ROUND(AVG(CASE WHEN g.ok THEN g.avg_ms END), 1) AS avg_ms,
+                       ROUND(AVG(CASE WHEN g.ok THEN g.jitter_ms END), 1) AS jitter_ms,
+                       ROUND(AVG(g.loss), 1) AS loss_pct
+                FROM phones p JOIN phone_pings g ON g.phone_id = p.id
+                WHERE g.timestamp >= ? AND g.timestamp < ? AND p.enabled = 1
+                GROUP BY p.id ORDER BY p.name''', win)]
+        except Exception:                    # phones.py tables not created yet
+            phones = []
+        for p in phones:
+            p['reachable_pct'] = round(100.0 * (p['oks'] or 0) / p['checks'], 2) if p['checks'] else None
+
         # ---- timeline buckets
         timeline = {}
 
@@ -541,6 +557,7 @@ def window_report(start, end, scope='all', link_type='all', search='',
             'gateway_outages': gateway_outages,
             'voip_tests': len(voip_tests),
             'voip_sessions': len(voip_sessions),
+            'phones': len(phones),
         },
         'timeline': timeline_rows,
         'maintenance': maintenance.report_windows(s, e),
@@ -553,6 +570,7 @@ def window_report(start, end, scope='all', link_type='all', search='',
         'events_truncated': len(events) > MAX_ROWS,
         'voip_tests': voip_tests,
         'voip_sessions': voip_sessions,
+        'phones': phones,
     }
 
 

@@ -2836,6 +2836,8 @@ tr.site-down td { opacity: 0.65; }
 .wall-ticker .wt-warning { border-left-color: #f0b429; } .wall-ticker .wt-critical { border-left-color: #ec7063; }
 .wall-ticker .wt-incident { background: #2a1c1c; } .wall-ticker .wt-maintenance { border-left-color: #5dade2; }
 .wall-plot { width: 100%; height: 100%; }
+.wall-map { width: 100%; height: calc(100% - 28px); min-height: 300px; border-radius: 6px; background: #1b2631; }
+.wall-map .leaflet-tile-pane { filter: brightness(0.85); }
 .wall-plot line { stroke-width: 1.5; } .wp-good { stroke: #52be80; } .wp-degr { stroke: #f0b429; } .wp-bad { stroke: #ec7063; stroke-dasharray: 4 3; }
 .wp-node { fill: #aab7c4; } .wp-infra { fill: #5dade2; stroke: #fff; stroke-width: 1; } .wp-down { fill: #ec7063; }
 .wp-empty { fill: #98a6b4; font-size: 16px; }
@@ -3004,3 +3006,6 @@ tr.site-down td { opacity: 0.65; }
 .svc-recip { font-size: .8em; padding: 1px 6px; border-radius: 10px; background: #eaf2f8; color: #1b4f72; white-space: nowrap; }
 .svc-recip.off { background: #f2f3f4; color: #7b7d7d; text-decoration: line-through; }
 .svc-recip button { border: none; background: none; cursor: pointer; padding: 0 0 0 3px; color: inherit; }
+
+/* Changes page: Add change sits at the right end of the header. */
+.chg-add-right { margin-left: auto; }

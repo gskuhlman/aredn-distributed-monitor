@@ -222,6 +222,65 @@ def _site_outages(start, end):
             for i in incidents.site_outages(_fmt(start), _fmt(end))]
 
 
+def _site_uptime(start, end):
+    """Per infrastructure site: site up % (time not in a site-outage incident,
+    i.e. not every radio there down at once) and its radios' node uptime."""
+    import incidents
+    import site_dashboard
+    import uptime
+    incidents.ensure_tables()
+    sites = site_dashboard.sites()
+    if not sites:
+        return []
+    window_min = (end - start).total_seconds() / 60
+    s_, e_ = _fmt(start), _fmt(end)
+    down = {}
+    with database.get_connection() as conn:
+        for r in conn.execute('''SELECT site, opened_at, resolved_at FROM incidents WHERE kind = 'site_outage'
+                                 AND opened_at < ? AND (resolved_at IS NULL OR resolved_at > ?)''', (e_, s_)):
+            a = max(datetime.strptime(r['opened_at'][:19], '%Y-%m-%d %H:%M:%S'), start)
+            b = min(datetime.strptime(r['resolved_at'][:19], '%Y-%m-%d %H:%M:%S'), end) if r['resolved_at'] else end
+            if b > a and r['site']:
+                code = r['site'].upper()
+                down.setdefault(code, []).append((a, b))
+        radios = uptime.node_uptime(s_, e_, [n for x in sites for n in x['nodes']], conn)
+    out = []
+    for x in sites:
+        spans = sorted(down.get(x['code'].upper(), []))
+        minutes, cur = 0.0, None
+        for a, b in spans:                      # merge overlapping outages
+            if cur and a <= cur[1]:
+                cur = (cur[0], max(cur[1], b))
+            else:
+                if cur:
+                    minutes += (cur[1] - cur[0]).total_seconds() / 60
+                cur = (a, b)
+        if cur:
+            minutes += (cur[1] - cur[0]).total_seconds() / 60
+        pcts = [(n, radios[n]['uptime_pct']) for n in x['nodes'] if radios.get(n, {}).get('uptime_pct') is not None]
+        worst = min(pcts, key=lambda p: p[1]) if pcts else None
+        out.append({'site': x['code'], 'name': x['name'], 'radios': len(x['nodes']),
+                    'site_uptime_pct': round(100.0 * (1 - minutes / window_min), 2) if window_min else None,
+                    'outages': len(spans), 'down_minutes': round(minutes),
+                    'radio_uptime_pct': round(sum(p for _, p in pcts) / len(pcts), 2) if pcts else None,
+                    'worst_radio': {'name': worst[0], 'uptime_pct': worst[1]} if worst else None,
+                    'reboots': sum(radios.get(n, {}).get('reboots') or 0 for n in x['nodes'])})
+    out.sort(key=lambda r: (r['site_uptime_pct'] if r['site_uptime_pct'] is not None else 101,
+                            r['radio_uptime_pct'] if r['radio_uptime_pct'] is not None else 101))
+    return out
+
+
+def _services(start, end):
+    """Service checks this week (service_check.availability): totals and the services that missed checks."""
+    import service_check
+    rows = service_check.availability(start, end)
+    checked = [r for r in rows if r['checks']]
+    perfect = sum(1 for r in checked if r['availability_pct'] == 100)
+    return {'services': len(checked), 'all_answered': perfect,
+            'since': min((r['first_day'] for r in checked), default=None),
+            'problems': [r for r in checked if r['availability_pct'] < 100 or r['outages']][:25]}
+
+
 def build(end=None, days=7):
     end = end or datetime.now().replace(second=0, microsecond=0)
     start = end - timedelta(days=days)
@@ -231,6 +290,8 @@ def build(end=None, days=7):
     _section(out, 'worst_nodes', lambda: _worst(start, end, 'node'))
     _section(out, 'new_problems', lambda: _new_problems(start, end))
     _section(out, 'site_outages', lambda: _site_outages(start, end))
+    _section(out, 'site_uptime', lambda: _site_uptime(start, end))
+    _section(out, 'services', lambda: _services(start, end))
     _section(out, 'infrastructure', _infrastructure)
     _section(out, 'changes', lambda: _changes(start, end))
     _section(out, 'change_verdicts', lambda: _verdicts(start, end))
@@ -271,6 +332,26 @@ def render_text(r, short=False):
                     + f": {o['nodes']} radio(s), " + ({'power': 'power outage (radios came back rebooted)',
                                                       'network': 'network (radios kept running)'}.get(o.get('cause'))
                                                      or 'cause not known yet'), 4 if short else 10)
+    def pct(v):
+        return '?' if v is None else f'{v:g}%'
+
+    block('Site uptime', r.get('site_uptime'),
+          lambda x: f"{x['site']}{' ' + x['name'] if x['name'] and x['name'] != x['site'] else ''}: site {pct(x['site_uptime_pct'])}"
+                    + (f" ({x['outages']} outage(s), {x['down_minutes']} min)" if x['outages'] else '')
+                    + f"; {x['radios']} radio(s) avg {pct(x['radio_uptime_pct'])}"
+                    + (f", worst {x['worst_radio']['name']} {pct(x['worst_radio']['uptime_pct'])}"
+                       if x['worst_radio'] and x['worst_radio']['uptime_pct'] != x['radio_uptime_pct'] else '')
+                    + (f", {x['reboots']} reboot(s)" if x['reboots'] else ''), 6 if short else 40)
+    sv = r.get('services') or {}
+    if _err(sv):
+        lines.append(f"\nServices: unavailable ({sv['error']})")
+    elif sv.get('services'):
+        since = f" (tracked since {sv['since']})" if sv.get('since') and sv['since'] > r['start'][:10] else ''
+        lines.append(f"\nServices: {sv['all_answered']} of {sv['services']} answered every check while their node was up{since}.")
+        block('Services that missed checks', sv.get('problems'),
+              lambda x: f"{x['node_name']} {x['service_name']}: {pct(x['availability_pct'])} of {x['checks']} checks"
+                        + (f", {x['outages']} outage alert(s)" if x['outages'] else '')
+                        + (f" [{x['mute']}d]" if x['mute'] else ''), lim)
     block('Worst links', r.get('worst_links'), lambda i: f"{i['name']}: avg {i['avg']}, min {i['min']}"
           + (f", dropped {i['drop']['points']} at {i['drop']['at'][5:16]}" if i['drop'] else ''), lim)
     block('Worst nodes', r.get('worst_nodes'), lambda i: f"{i['name']}: avg {i['avg']}, min {i['min']}", lim)

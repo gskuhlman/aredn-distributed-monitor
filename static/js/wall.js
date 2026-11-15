@@ -27,7 +27,69 @@
         window.AgencyTiles.renderDetails(document.getElementById('wall-details'), d);
     }
 
-    function plot(net) {
+    // Leaflet map on the Channel Map's base map (offline Protomaps and/or
+    // online tiles); the plain SVG plot stays as the fallback.
+    let lmap = null, lgroup = null, fitted = false, mapFailed = false;
+    async function plot(net) {
+        if (!mapFailed && typeof ChannelMap !== 'undefined') {
+            try {
+                await mapPlot(net);
+                return;
+            } catch (e) {
+                console.warn('wall map: falling back to the plain plot', e);
+                mapFailed = true;
+                document.getElementById('wall-map').hidden = true;
+                document.getElementById('wall-plot').style.display = '';
+            }
+        }
+        svgPlot(net);
+    }
+
+    const LINK_COLOR = { good: '#52be80', degraded: '#f0b429' };
+    async function mapPlot(net) {
+        await ChannelMap.ensureBase();
+        const box = document.getElementById('wall-map');
+        if (!lmap) {
+            box.hidden = false;
+            document.getElementById('wall-plot').style.display = 'none';
+            lmap = L.map(box, { zoomControl: false, attributionControl: true, dragging: false, scrollWheelZoom: false,
+                                doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false })
+                .setView([42.0, -91.67], 10);
+            ChannelMap.addBaseLayers(lmap);
+            lgroup = L.layerGroup().addTo(lmap);
+            window.addEventListener('resize', () => lmap.invalidateSize());
+        }
+        const nodes = net.nodes.filter(n => n.lat != null && n.lon != null && !n.is_link_only);
+        const at = {};
+        nodes.forEach(n => { at[n.id] = n; });
+        lgroup.clearLayers();
+        net.edges.filter(e => at[e.from] && at[e.to] && /rf|dtd/i.test(e.link_type || '')).forEach(e => {
+            const a = at[e.from], b = at[e.to];
+            L.polyline([[a.lat, a.lon], [b.lat, b.lon]], {
+                color: LINK_COLOR[e.status] || '#ec7063', weight: 2, opacity: 0.85,
+                dashArray: LINK_COLOR[e.status] ? null : '4 3', interactive: false
+            }).addTo(lgroup);
+        });
+        nodes.forEach(n => {
+            const color = n.is_inactive ? '#ec7063' : n.is_infrastructure ? '#2e86c1' : '#566573';
+            L.circleMarker([n.lat, n.lon], {
+                radius: n.is_infrastructure ? 6 : 4, color: '#fff', weight: n.is_infrastructure ? 1.5 : 1,
+                fillColor: color, fillOpacity: 0.95
+            }).bindTooltip(esc(n.id)).addTo(lgroup);
+        });
+        if (!fitted && nodes.length) {
+            // Fit the densest 95% so one far node doesn't zoom the map out.
+            const med = a => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
+            const mlat = med(nodes.map(n => n.lat)), mlon = med(nodes.map(n => n.lon));
+            const dist = n => Math.hypot(n.lat - mlat, (n.lon - mlon) * Math.cos(mlat * Math.PI / 180));
+            const keep = nodes.slice().sort((a, b) => dist(a) - dist(b)).slice(0, Math.max(1, Math.ceil(nodes.length * 0.95)));
+            lmap.invalidateSize();
+            lmap.fitBounds(keep.map(n => [n.lat, n.lon]), { padding: [16, 16] });
+            fitted = true;
+        }
+    }
+
+    function svgPlot(net) {
         const svg = document.getElementById('wall-plot');
         const nodes = net.nodes.filter(n => n.lat != null && n.lon != null && !n.is_link_only);
         if (!nodes.length) { svg.innerHTML = '<text x="300" y="200" text-anchor="middle" class="wp-empty">No located nodes</text>'; return; }

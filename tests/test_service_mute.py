@@ -114,3 +114,22 @@ def test_device_mute_quiets_phone_and_counts(svc, monkeypatch):
     assert cat['counts']['muted'] == 1
     service_check.clear_mute('w0aa-pbx', 'device:10.0.0.9')
     assert phones.run(pinger=pinger)['events'][0]['event_type'] == 'phone_unreachable'
+
+
+def test_daily_availability_and_weekly_sections(svc, mesh):
+    import weekly_report
+    now = datetime.now()
+    for ok in (True, True, False, True):
+        svc['ok'] = ok
+        service_check.run(now=now)
+    rows = service_check.availability(now - timedelta(days=7), now + timedelta(minutes=1))
+    assert len(rows) == 1 and rows[0]['checks'] == 4 and rows[0]['availability_pct'] == 75.0
+    assert rows[0]['avg_ms'] == 5
+    sv = weekly_report._services(now - timedelta(days=7), now + timedelta(minutes=1))
+    assert sv['services'] == 1 and sv['all_answered'] == 0 and sv['problems'][0]['service_name'] == 'PBX'
+    mesh.infra('w0aa-pbx', 'AAA')
+    sites = weekly_report._site_uptime(now - timedelta(days=7), now)
+    assert sites[0]['site'] == 'AAA' and sites[0]['site_uptime_pct'] == 100.0 and sites[0]['outages'] == 0
+    text = weekly_report.render_text({'start': '2026-01-01 00:00', 'end': '2026-01-08 00:00',
+                                      'headline': {'error': 'n/a'}, 'site_uptime': sites, 'services': sv})
+    assert 'Site uptime' in text and 'PBX: 75% of 4 checks' in text

@@ -33,6 +33,7 @@ const ChangesModule = {
         on('chg-origin', 'change', () => this.renderList());
         on('chg-hours', 'change', () => this.load());
         on('chg-add-toggle', 'click', () => this.toggleForm());
+        on('chg-refresh', 'click', () => this.load());
         on('chg-cancel', 'click', () => this.toggleForm(false));
         on('chg-save', 'click', () => this.save());
         on('chg-window', 'change', () => this.current && this.compare(this.current.id));

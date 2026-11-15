@@ -28,6 +28,7 @@
             </section>
             <section class="wall-panel">
                 <h2>Mesh</h2>
+                <div id="wall-map" class="wall-map" hidden></div>
                 <svg id="wall-plot" class="wall-plot" viewBox="0 0 600 400" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Located nodes and links"></svg>
             </section>
             <section class="wall-panel wall-tape-panel">
@@ -37,6 +38,7 @@
         </div>
         <footer class="wall-foot">F = full screen · <a href="/">monitor</a> · <a href="/board/agencies">agencies</a></footer>
     </div>
+    <script src="{{ url_for('static', filename='js/channel-map.js') }}"></script>
     <script src="{{ url_for('static', filename='js/agencies.js') }}"></script>
     <script src="{{ url_for('static', filename='js/wall.js') }}"></script>
 </body>
