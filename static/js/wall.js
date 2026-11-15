@@ -78,13 +78,16 @@
             }).bindTooltip(esc(n.id)).addTo(lgroup);
         });
         if (!fitted && nodes.length) {
-            // Fit the densest 95% so one far node doesn't zoom the map out.
+            // Fit the main cluster: nodes within FIT_KM of the median position
+            // (like the Map tab), so a few far nodes don't zoom the map out.
+            const FIT_KM = 40;
             const med = a => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
             const mlat = med(nodes.map(n => n.lat)), mlon = med(nodes.map(n => n.lon));
-            const dist = n => Math.hypot(n.lat - mlat, (n.lon - mlon) * Math.cos(mlat * Math.PI / 180));
-            const keep = nodes.slice().sort((a, b) => dist(a) - dist(b)).slice(0, Math.max(1, Math.ceil(nodes.length * 0.95)));
+            const km = n => 111 * Math.hypot(n.lat - mlat, (n.lon - mlon) * Math.cos(mlat * Math.PI / 180));
+            let keep = nodes.filter(n => km(n) <= FIT_KM);
+            if (keep.length < 2) keep = nodes;
             lmap.invalidateSize();
-            lmap.fitBounds(keep.map(n => [n.lat, n.lon]), { padding: [16, 16] });
+            lmap.fitBounds(keep.map(n => [n.lat, n.lon]), { padding: [20, 20], maxZoom: 13 });
             fitted = true;
         }
     }
