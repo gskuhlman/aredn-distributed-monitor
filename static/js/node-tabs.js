@@ -28,6 +28,9 @@ const NodeTabs = {
         const group = document.getElementById(id)?.closest('.node-page-section[data-group]')?.dataset.group;
         if (!group) return false;
         this.show(group, false);
+        // Scroll to it once the page's data has drawn the sections above it.
+        [300, 2000].forEach(ms => setTimeout(() => document.getElementById(id)
+            ?.closest('.node-page-section')?.scrollIntoView({ block: 'start' }), ms));
         return true;
     },
 

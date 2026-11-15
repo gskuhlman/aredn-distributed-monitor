@@ -333,7 +333,6 @@ _PAGE = {   # event type -> (in-app page, label)
     'route_count_restored': ('#/routing/babel', 'Babel Costs'),
     'noise_jump': ('#/radio/noise', 'Noise Sources'),
     'noise_cleared': ('#/radio/noise', 'Noise Sources'),
-    'call_quality_poor': ('#/voip', 'VoIP & Phones'),
     'phone_unreachable': ('#/voip', 'Phone Connectivity'),
     'phone_restored': ('#/voip', 'Phone Connectivity'),
     'gateway_lost': ('#/reports/starting-node', 'Starting Node'),
@@ -345,6 +344,7 @@ _PAGE = {   # event type -> (in-app page, label)
 }
 # Node page group (node-tabs.js hash) for events about one node.
 _NODE_PART = {
+    'call_quality_poor': ('np-call', 'Call Quality'),
     'service_down': ('node-services', 'Services'), 'service_restored': ('node-services', 'Services'),
     'link_dropped': ('links', 'Links'), 'link_restored': ('links', 'Links'),
     'routing_error': ('links', 'Babel Costs'), 'routing_restored': ('links', 'Babel Costs'),

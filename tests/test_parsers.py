@@ -163,5 +163,6 @@ def test_ticker_event_links():
     assert L('radio_phy_resets', 'w0aa-a', 'resets')['href'] == '/nodes/w0aa-a#radio'
     assert L('route_detour', None, 'Route A → B')['href'] == '#/routing/route-watch'
     assert L('gateway_lost', None, 'x')['href'] == '#/reports/starting-node'
+    assert L('call_quality_poor', 'w0aa-a', 'Call quality poor')['href'] == '/nodes/w0aa-a#np-call'
     assert L('login_failed', None, 'Failed login') is None
     assert L('something_new', 'w0aa-a', 'x')['href'] == '/nodes/w0aa-a'
