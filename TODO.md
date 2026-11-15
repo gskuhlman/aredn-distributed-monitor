@@ -342,6 +342,44 @@ attached devices), Link Health map, Log Viewer (syslog), Incidents, Changes, Ali
       exception (services.uc:259) every 2 min and a LAN WiFi client re-joining 78 times;
       W0GQ-MMC-AC2 firewall reload on each guest-WiFi reconnect.
 
+## Round 7 ideas (2026-11-15, from Uptime Kuma)
+
+Four Uptime Kuma instances are on the mesh: KE0UZC's (ke0uzc-uptime:3001, public status page
+"KE0UZC Apps", 1 monitor, down at the time), N6LKA-uptimekuma (10.228.128.110), n3fud-kuma
+(10.171.54.228) and Uptime-Kuma (10.26.33.236, not answering). The others need a login, so these
+come from Kuma's feature set compared with ours. Already covered: notifications with repeat /
+escalation, maintenance windows, public status page + badges, silence / ignore, starting-node DNS.
+
+- [ ] 94. **Service check history.** Store each probe (ok, ms, error) like phone_pings; per service
+      a Kuma-style heartbeat bar (last 50 checks), response-time chart, uptime 24 h / 30 d / 1 y.
+      Today service_checks keeps only the current state and lifetime counters.
+- [ ] 95. **Keyword / status checks for web services.** Per service: expected text on the page (or
+      absent), expected HTTP status, follow redirects. A page that answers "404" or an error page
+      counts as up today unless the status is >= 400 (n0ywb-4-CAM1 returns 404 at its advertised link).
+- [ ] 96. **Per-service check settings.** Interval, failures before alarm, retry interval while
+      failing (Kuma checks faster once a monitor fails, so an outage is confirmed sooner).
+      Today SERVICE_CHECK_INTERVAL_MINUTES / SERVICE_CHECK_FAILS apply to every service.
+- [ ] 97. **Push (heartbeat) monitors.** A URL a device or script calls every N minutes
+      (repeater controller, battery / solar monitor, a backup job, a Pi behind a node); alarm when
+      the calls stop. Covers things we can't probe (behind NAT, outbound-only, off-mesh).
+- [ ] 98. **Recurring maintenance windows.** Weekly / monthly schedules (e.g. Tuesday net-night
+      work, the 1st Saturday tower day) instead of one window at a time; maintenance.py has no
+      repeat today.
+- [ ] 99. **More notification channels.** Telegram, Pushover, Gotify, Matrix, SMS gateway, or
+      Apprise (one library, ~90 services). We have email, Discord, ntfy and webhook.
+- [ ] 100. **Read the other Kuma instances.** Their public status pages have a JSON API
+      (`/api/status-page/<slug>` and `/api/status-page/heartbeat/<slug>`): show those monitors'
+      state on Services & Devices (marked "from KE0UZC's Kuma") and link to the page, instead of
+      probing the same services twice. Only pages their owners publish; no logins.
+- [ ] 101. **Status page notes.** A pinned operator message on the club status page and /wall
+      ("Collins tower work Saturday 9-12"), separate from maintenance windows; Kuma calls these
+      incidents on a status page.
+- [ ] 102. **Certificate expiry** for https services (warn 14 / 3 days before); few mesh services use
+      TLS, so low priority.
+- [ ] 103. **Dependency groups.** Kuma's monitor groups: a group is down when its children are.
+      For us: alerts for services and phones behind a node that is down are already held; extend it
+      so a site's nodes behind one failed backbone link raise one alarm, not one per node.
+
 ## Pending radio work (outside the app)
 
 Channel plan for Collins + MMC + EOC, 2026-11-06, from WiFi scans (pasted /a/scan tables of col-rkt-n,
