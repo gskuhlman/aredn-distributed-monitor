@@ -56,7 +56,7 @@ const Account = {
         const cs = s.callsign;
         document.getElementById('acct-who').textContent = s.logged_in
             ? `Logged in as ${s.user}${s.is_admin ? ' (admin)' : ''}` : 'Not logged in';
-        document.getElementById('acct-logout').hidden = !s.logged_in;
+        document.getElementById('acct-logout').style.display = s.logged_in ? '' : 'none';
         const login = document.getElementById('acct-login');
         login.hidden = !!cs;
         login.querySelector('.form-hint').innerHTML = s.logged_in && !cs
