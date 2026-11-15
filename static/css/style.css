@@ -3027,3 +3027,21 @@ tr.site-down td { opacity: 0.65; }
 .sp-ref-chans { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
 .nowrap { white-space: nowrap; }
 @media (max-width: 600px) { .sp-ref-lane { grid-template-columns: 110px 1fr; } }
+
+/* Service check history (service-history.js) */
+.sh-cell { display: inline-flex; flex-direction: column; gap: 3px; align-items: flex-start; background: none; border: none;
+    padding: 2px; cursor: pointer; font: inherit; color: inherit; text-align: left; border-radius: 4px; }
+.sh-cell:hover, .sh-cell:focus-visible { background: #ecf0f1; outline: none; }
+.sh-bar { display: inline-flex; gap: 1px; align-items: stretch; height: 16px; vertical-align: middle; }
+.sh-bar i { display: block; width: 4px; border-radius: 1px; background: #dfe4e8; }
+.sh-bar i.sh-up { background: #27ae60; }
+.sh-bar i.sh-down { background: #c0392b; }
+.sh-bar i.sh-nodedown { background: #95a5a6; }
+.sh-uptime { font-size: 0.78rem; color: #566573; white-space: nowrap; }
+.sh-up-item + .sh-up-item::before { content: '· '; color: #aab7b8; }
+.sh-pct-good { color: #1e8449; } .sh-pct-warn { color: #b9770e; } .sh-pct-bad { color: #c0392b; }
+.sh-detail { margin-top: 10px; padding: 10px 12px; border: 1px solid #e5e8e8; border-radius: 6px; background: #fbfcfc; }
+.sh-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sh-detail-head h4 { margin: 0 auto 0 0; }
+.sh-chart-wrap { position: relative; height: 220px; }
+@media (max-width: 600px) { .sh-bar i { width: 3px; } }

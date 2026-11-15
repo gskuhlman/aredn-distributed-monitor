@@ -130,7 +130,7 @@ def _next():
     h = hygiene.report()
     out['owners'] = [o for o in h['owners'] if o['fixes']][:6]
     out['services_down'] = [{'node': s['node_name'], 'service': s['service_name'], 'error': s['last_error']}
-                            for s in service_check.report()['services'] if s['state'] == 'alarm'][:10]
+                            for s in service_check.report(history=False)['services'] if s['state'] == 'alarm'][:10]
     return out
 
 

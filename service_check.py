@@ -92,6 +92,20 @@ def ensure_tables():
                 PRIMARY KEY (day, node_name, service_name)
             )
         ''')
+        # Every probe (TODO #94): heartbeat bars, response-time charts, 24 h / 30 d uptime.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS service_probes (
+                ts DATETIME NOT NULL,
+                node_name TEXT NOT NULL,
+                service_name TEXT NOT NULL,
+                ok INTEGER NOT NULL,
+                ms INTEGER,
+                error TEXT,
+                node_up INTEGER NOT NULL DEFAULT 1
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_service_probes_svc ON service_probes (node_name, service_name, ts)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_service_probes_ts ON service_probes (ts)')
         conn.execute('''
             CREATE TABLE IF NOT EXISTS service_mutes (
                 node_name TEXT NOT NULL,
@@ -291,6 +305,7 @@ def run(now=None):
     events = []
     rows = []
     daily = []
+    probes = []
     for key, s in seen.items():
         ok, error, ms, kind = results[key]
         st = states.get(key) or {'fail_count': 0, 'alarm': 0, 'since': None, 'last_ok': None,
@@ -317,6 +332,9 @@ def run(now=None):
                                    f"Service {s['name']} ({s['link']}) not answering: {error}; "
                                    f"node {s['node_name']} is up", 'warning'))
             # node down: the scanner reports that; keep the counters as they are
+        if ok is not None:
+            probes.append((now_s, s['node_name'], s['name'], 1 if ok else 0, ms if ok else None,
+                           None if ok else (error or '')[:200], 1 if (ok or node_up) else 0))
         if ok or (ok is False and node_up):
             daily.append((day, s['node_name'], s['name'], 1 if ok else 0, int(ms or 0) if ok else 0))
         rows.append((s['node_name'], s['name'], s['link'], kind, None if ok is None else int(bool(ok)),
@@ -333,6 +351,10 @@ def run(now=None):
                             ON CONFLICT(day, node_name, service_name) DO UPDATE SET
                                 checks = checks + 1, oks = oks + excluded.oks, ms_total = ms_total + excluded.ms_total''',
                          daily)
+        conn.executemany('''INSERT INTO service_probes (ts, node_name, service_name, ok, ms, error, node_up)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)''', probes)
+        conn.execute('DELETE FROM service_probes WHERE ts < ?',
+                     ((now - timedelta(hours=config.HISTORY_RETENTION_HOURS)).strftime(TS_FMT),))
         conn.execute('DELETE FROM service_check_daily WHERE day < ?',
                      ((now - timedelta(days=DAILY_KEEP_DAYS)).strftime('%Y-%m-%d'),))
     out = []
@@ -369,7 +391,72 @@ def availability(start, end):
     return rows
 
 
-def report():
+BEATS = 50
+
+
+def _pct(oks, checks):
+    return round(100.0 * oks / checks, 2) if checks else None
+
+
+def beats_and_uptime(conn, now=None, node=None, limit=BEATS):
+    """{(node, service): {'beats': [[ts, state, ms, error], ...] oldest first, 'uptime': {'24h', '30d', '1y'}}}.
+    state 1 = answered, 0 = failed while the node was up, -1 = failed with the node down (not counted).
+    24 h / 30 d come from the probes, 1 y from the daily tallies."""
+    now = now or datetime.now()
+    where, args = '', []
+    if node:
+        where, args = 'WHERE node_name = ?', [node]
+    out = {}
+    for r in conn.execute(f'''
+            SELECT node_name, service_name, ts, ok, ms, error, node_up FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY node_name, service_name ORDER BY ts DESC) AS rn
+                FROM service_probes {where})
+            WHERE rn <= ? ORDER BY node_name, service_name, ts''', args + [limit]):
+        state = 1 if r['ok'] else (0 if r['node_up'] else -1)
+        out.setdefault((r['node_name'], r['service_name']), {'beats': [], 'uptime': {}})['beats'].append(
+            [r['ts'], state, r['ms'], r['error']])
+    spans = (('24h', now - timedelta(hours=24)), ('30d', now - timedelta(days=30)))
+    for key, since in spans:
+        for r in conn.execute(f'''SELECT node_name, service_name, SUM(ok) AS oks,
+                                         SUM(CASE WHEN ok = 1 OR node_up = 1 THEN 1 ELSE 0 END) AS checks
+                                  FROM service_probes WHERE ts >= ? {'AND node_name = ?' if node else ''}
+                                  GROUP BY node_name, service_name''', [since.strftime(TS_FMT)] + args):
+            out.setdefault((r['node_name'], r['service_name']), {'beats': [], 'uptime': {}})['uptime'][key] = \
+                _pct(r['oks'] or 0, r['checks'])
+    for r in conn.execute(f'''SELECT node_name, service_name, SUM(oks) AS oks, SUM(checks) AS checks
+                              FROM service_check_daily WHERE day >= ? {'AND node_name = ?' if node else ''}
+                              GROUP BY node_name, service_name''',
+                          [(now - timedelta(days=365)).strftime('%Y-%m-%d')] + args):
+        out.setdefault((r['node_name'], r['service_name']), {'beats': [], 'uptime': {}})['uptime']['1y'] = \
+            _pct(r['oks'] or 0, r['checks'])
+    return out
+
+
+def history(node, service, hours=24, now=None):
+    """One service's probes over `hours` (response-time chart), its last beats and uptime."""
+    ensure_tables()
+    now = now or datetime.now()
+    hours = max(1, min(int(hours or 24), config.HISTORY_RETENTION_HOURS))
+    with database.get_connection() as conn:
+        probes = [{'ts': r['ts'], 'ok': bool(r['ok']), 'ms': r['ms'], 'error': r['error'], 'node_up': bool(r['node_up'])}
+                  for r in conn.execute('''SELECT ts, ok, ms, error, node_up FROM service_probes
+                                           WHERE node_name = ? AND service_name = ? AND ts >= ? ORDER BY ts''',
+                                        (node, service, (now - timedelta(hours=hours)).strftime(TS_FMT)))]
+        extra = beats_and_uptime(conn, now, node).get((node, service), {'beats': [], 'uptime': {}})
+        first = conn.execute('SELECT MIN(ts) FROM service_probes WHERE node_name = ? AND service_name = ?',
+                             (node, service)).fetchone()[0]
+    ms = sorted(p['ms'] for p in probes if p['ms'] is not None)
+    counted = [p for p in probes if p['ok'] or p['node_up']]
+    return {'node': node, 'service': service, 'hours': hours, 'probes': probes, 'beats': extra['beats'],
+            'uptime': extra['uptime'], 'history_since': first,
+            'window': {'checks': len(counted), 'answered': sum(1 for p in counted if p['ok']),
+                       'uptime_pct': _pct(sum(1 for p in counted if p['ok']), len(counted)),
+                       'ms_median': ms[len(ms) // 2] if ms else None,
+                       'ms_p95': ms[min(len(ms) - 1, int(len(ms) * 0.95))] if ms else None}}
+
+
+def report(history=True):
+    """Every service's state; with history, its last beats and uptime (beats_and_uptime)."""
     ensure_tables()
     with database.get_connection() as conn:
         rows = [dict(r) for r in conn.execute('''
@@ -378,7 +465,11 @@ def report():
             ORDER BY c.alarm DESC, (c.ok = 0) DESC, c.node_name, c.service_name''')]
         now = datetime.now()
         muted = mutes(conn, now)
+        hist = beats_and_uptime(conn, now) if history else {}
     for r in rows:
+        h = hist.get((r['node_name'], r['service_name'])) or {}
+        r['beats'] = h.get('beats', [])
+        r['uptime'] = h.get('uptime', {})
         r['mute'] = muted.get((r['node_name'], r['service_name']))
         r['node_up'] = _node_up({'is_active': r['node_active'], 'last_seen': r['node_last_seen']}, now)
         r['availability_pct'] = round(100.0 * r['oks'] / r['checks'], 1) if r['checks'] else None

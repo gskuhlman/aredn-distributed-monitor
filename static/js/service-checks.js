@@ -57,16 +57,17 @@ const ServiceChecks = {
             : ` <small>(silenced ${m.until ? 'until ' + this.esc(m.until.slice(0, 16)) : 'until enabled'})</small>`;
         const el = document.getElementById('sc-report');
         el.innerHTML = rows.length ? `<div class="table-scroll-wrapper"><table class="info-table diag-table">
-            <thead><tr><th>State</th><th>Node</th><th>Service</th><th>Link</th><th>Last result</th><th>Availability</th><th>Last OK</th></tr></thead>
+            <thead><tr><th>State</th><th>Node</th><th>Service</th><th>Link</th><th>Last result</th><th>Last 50 checks · uptime</th><th>Last OK</th></tr></thead>
             <tbody>${rows.map(s => `<tr>
                 <td><span class="diag-badge infra-badge-${badge[s.state] || 'info'}">${this.esc(label[s.state] || s.state)}</span></td>
                 <td><a href="/nodes/${encodeURIComponent(s.node_name)}">${this.esc(s.node_name)}</a></td>
                 <td>${this.esc(s.service_name)}${muteNote(s.mute)}</td>
                 <td class="sc-link">${this.esc(s.link || '')}</td>
                 <td>${s.ok === 1 ? `answered${s.last_ms != null ? ` in ${s.last_ms} ms` : ''}` : this.esc(s.last_error || '-')}</td>
-                <td>${s.availability_pct != null ? s.availability_pct + '%' : '-'}</td>
+                <td>${ServiceHistory.cell(s.node_name, s.service_name, s.beats, s.uptime)}</td>
                 <td>${this.esc(s.last_ok || '-')}</td></tr>`).join('')}</tbody></table></div>`
             : '<p class="log-empty">Every probed service answers.</p>';
+        ServiceHistory.bind(el, document.getElementById('sc-history'));
         const c = d.counts;
         this.setStatus(`${c.up || 0} up, ${c.alarm || 0} alarm, ${c.down || 0} failing, ${c.node_down || 0} on down nodes, `
             + `${(c.external || 0) + (c.none || 0)} not probed`

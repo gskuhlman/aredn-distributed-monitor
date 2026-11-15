@@ -1,7 +1,8 @@
 /**
  * Node page Services table (service_check.py): each advertised service with
  * its latest check and its alerts, with Silence / Ignore / Enable buttons
- * (mute-controls.js; a login is asked for on click), and who it alerts
+ * (mute-controls.js; a login is asked for on click), its last 50 checks and
+ * uptime (service-history.js; click for the response-time chart), and who it alerts
  * (user_alerts.py): the node owner by default. "Alert me" / "Stop alerting
  * me" change your own; an admin adds (+) or removes (x) anyone.
  */
@@ -84,6 +85,12 @@ const NodeServices = {
         });
     },
 
+    historyCell(name) {
+        const c = this.checks[name];
+        if (!c || c.mute?.mode === 'ignore' || c.ok == null && !(c.beats || []).length) return '';
+        return ServiceHistory.cell(window.NODE_NAME, name, c.beats, c.uptime);
+    },
+
     checkCell(c) {
         if (!c) return '<span class="form-hint">not checked</span>';
         if (c.mute?.mode === 'ignore') return '<span class="form-hint">not checked (ignored)</span>';
@@ -114,15 +121,17 @@ const NodeServices = {
                 <td>${this.esc(s.protocol || 'N/A')}</td>
                 <td>${this.esc(s.ip || 'N/A')}</td>
                 <td>${this.checkCell(this.checks[s.name])}</td>
+                <td>${this.historyCell(s.name)}</td>
                 <td>${MuteControls.label(m)}</td>
                 <td>${MuteControls.buttons(node, s.name, m)}</td>
                 <td>${this.recipCell(s.name)}</td>
             </tr>`;
         }).join('');
         el.innerHTML = `<div class="table-scroll-wrapper"><table class="info-table">
-            <tr><th>Service</th><th>Protocol</th><th>IP</th><th>Check</th><th>Alerts</th><th></th><th>Alerts go to</th></tr>
+            <tr><th>Service</th><th>Protocol</th><th>IP</th><th>Check</th><th>Last 50 checks · uptime</th><th>Alerts</th><th></th><th>Alerts go to</th></tr>
             ${rows}</table></div>`;
         MuteControls.bind(el, () => this.render());
+        ServiceHistory.bind(el, document.getElementById('node-service-history'));
         this.bindRecips(el);
     },
 

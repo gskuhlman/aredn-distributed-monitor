@@ -842,6 +842,19 @@ def api_service_unmute():
     return jsonify({'removed': service_check.clear_mute(node, service)})
 
 
+@app.route('/api/services/history')
+def api_service_history():
+    """One service's probes over ?hours (default 24), last beats and 24 h / 30 d / 1 y uptime."""
+    node, service = request.args.get('node', ''), request.args.get('service', '')
+    if not node or not service:
+        return _json_error('node and service are required')
+    try:
+        hours = int(request.args.get('hours') or 24)
+    except ValueError:
+        return _json_error('hours must be a number')
+    return jsonify(service_check.history(node, service, hours))
+
+
 @app.route('/api/services/checks/run', methods=['POST'])
 def api_service_checks_run():
     result = run_service_check_task()

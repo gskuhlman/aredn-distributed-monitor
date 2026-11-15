@@ -349,12 +349,12 @@ has a public page, so these come from Kuma's feature set compared with ours. Rec
 reading the other Kuma pages and certificate expiry were dropped. Already covered: notifications with repeat /
 escalation, maintenance windows, public status page + badges, silence / ignore, starting-node DNS.
 
-- [ ] 94. **Service check history.** Store each probe (ok, ms, error) like phone_pings; per service
+- [x] 94. **Service check history.** Store each probe (ok, ms, error) like phone_pings; per service
       a Kuma-style heartbeat bar (last 50 checks), response-time chart, uptime 24 h / 30 d / 1 y.
-      Today service_checks keeps only the current state and lifetime counters.
-      *Started: per-day tallies (`service_check_daily`: checks while the node was up, answered,
-      ms) since 2026-11-15, used by the weekly report. Still to do: per-probe rows and the
-      heartbeat bar / charts.*
+      *Built: `service_probes` (every probe, node up or not, kept `HISTORY_RETENTION_HOURS`) and
+      `service_check_daily` (400 days, for 1 y); `GET /api/services/history`; bar + uptime on the node
+      page Services table and Status → Service Checks, click for the response-time chart (24 h / 7 d /
+      30 d) and the failed checks. Checks while the node was down are grey and not counted.*
 - [ ] 95. **Keyword / status checks for web services.** Per service: expected text on the page (or
       absent), expected HTTP status, follow redirects. A page that answers "404" or an error page
       counts as up today unless the status is >= 400 (n0ywb-4-CAM1 returns 404 at its advertised link).

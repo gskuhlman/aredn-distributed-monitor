@@ -145,3 +145,27 @@ def test_weekly_hygiene_section(mesh):
                                       'headline': {'error': 'n/a'}, 'hygiene': hy})
     assert 'Node hygiene: average score' in text and 'no location' in text
     assert 'Hygiene action items' in text and '    w0aa-home (' in text and 'Set the node location' in text
+
+
+def test_probe_history_beats_and_uptime(svc):
+    now = datetime.now()
+    for i, ok in enumerate((True, False, True, True)):
+        svc['ok'] = ok
+        service_check.run(now=now - timedelta(minutes=40 - i * 10))
+    h = service_check.history('w0aa-pbx', 'PBX', 24, now=now)
+    assert [p['ok'] for p in h['probes']] == [True, False, True, True]
+    assert h['window']['checks'] == 4 and h['window']['uptime_pct'] == 75.0 and h['window']['ms_median'] == 5
+    assert [b[1] for b in h['beats']] == [1, 0, 1, 1] and h['beats'][1][3] == 'refused'
+    assert h['uptime']['24h'] == 75.0 and h['uptime']['30d'] == 75.0 and h['uptime']['1y'] == 75.0
+    row = service_check.report()['services'][0]
+    assert len(row['beats']) == 4 and row['uptime']['24h'] == 75.0
+    assert 'beats' not in service_check.report(history=False)['services'][0] or \
+        service_check.report(history=False)['services'][0]['beats'] == []
+
+
+def test_probe_with_node_down_not_counted(svc, monkeypatch):
+    monkeypatch.setattr(service_check, '_node_up', lambda node, now: False)
+    svc['ok'] = False
+    service_check.run()
+    h = service_check.history('w0aa-pbx', 'PBX')
+    assert h['beats'][0][1] == -1 and h['window']['checks'] == 0 and h['uptime'].get('24h') is None

@@ -85,7 +85,7 @@ def agencies(now=None):
         nodes = {r['name']: dict(r) for r in conn.execute('SELECT name, is_active, last_seen FROM nodes')}
         up_month = uptime.node_uptime(month_start.strftime(TS_FMT), now.strftime(TS_FMT), all_members, conn)
     try:
-        services = service_check.report()['services']
+        services = service_check.report(history=False)['services']
     except Exception:
         services = []
     try:
