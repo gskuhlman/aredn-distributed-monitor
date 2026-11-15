@@ -7,6 +7,8 @@
  * channels, with the AP table below. Read-only.
  */
 const WifiScans = {
+    prefix: 'ws-',          // element ids: <prefix>pick, -range, -mesh, -reload, -chart, -slot, -table, -status
+    tab: 'planning',
     initialized: false,
     detail: null,
     LEVEL_COLORS: { free: '#58d68d', light: '#f7dc6f', moderate: '#f5b041', busy: '#e74c3c' },
@@ -14,20 +16,29 @@ const WifiScans = {
     hookTab() {
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                if (btn.dataset.tab === 'planning') this.open();
+                if (btn.dataset.tab === this.tab) this.open();
             });
         });
     },
 
+    el(key) {
+        return document.getElementById(this.prefix + key);
+    },
+
+    /** Another copy on another page, with its own element id prefix. */
+    copy(prefix, tab) {
+        return Object.assign(Object.create(this), { prefix, tab, initialized: false, detail: null });
+    },
+
     open() {
         if (this.initialized) return;
-        if (!document.getElementById('ws-pick')) return;
+        if (!this.el('pick')) return;
         this.initialized = true;
-        document.getElementById('ws-pick').addEventListener('change', () => this.load());
-        document.getElementById('ws-range').addEventListener('change', () => this.load());
-        document.getElementById('ws-mesh').addEventListener('change', () => this.renderTable());
-        document.getElementById('ws-reload').addEventListener('click', () => this.loadList());
-        document.getElementById('ws-chart').addEventListener('click', (event) => {
+        this.el('pick').addEventListener('change', () => this.load());
+        this.el('range').addEventListener('change', () => this.load());
+        this.el('mesh').addEventListener('change', () => this.renderTable());
+        this.el('reload').addEventListener('click', () => this.loadList());
+        this.el('chart').addEventListener('click', (event) => {
             const slot = event.target.closest('[data-slot]');
             if (slot) this.showSlot(Number(slot.dataset.slot));
         });
@@ -36,7 +47,7 @@ const WifiScans = {
 
     /** Dropdown: sites (scans of their radios pooled) then single radios. */
     async loadList() {
-        const select = document.getElementById('ws-pick');
+        const select = this.el('pick');
         const keep = select.value;
         this.setStatus('Loading scans...');
         try {
@@ -45,9 +56,9 @@ const WifiScans = {
             if (!nodes.length) {
                 select.innerHTML = '';
                 this.setStatus('');
-                document.getElementById('ws-chart').innerHTML = `<p class="log-empty">No WiFi scans yet. Paste a radio's
+                this.el('chart').innerHTML = `<p class="log-empty">No WiFi scans yet. Paste a radio's
                     scan table (WiFi Survey above, Import) or scan a radio from there.</p>`;
-                document.getElementById('ws-table').innerHTML = '';
+                this.el('table').innerHTML = '';
                 return;
             }
             const sites = {};
@@ -67,19 +78,19 @@ const WifiScans = {
     },
 
     async load() {
-        const pick = document.getElementById('ws-pick').value;
+        const pick = this.el('pick').value;
         if (!pick) return;
         const [kind, name] = [pick.slice(0, pick.indexOf(':')), pick.slice(pick.indexOf(':') + 1)];
-        const [low, high] = document.getElementById('ws-range').value.split('-').map(Number);
+        const [low, high] = this.el('range').value.split('-').map(Number);
         this.setStatus('Loading...');
-        document.getElementById('ws-slot').innerHTML = '';
+        this.el('slot').innerHTML = '';
         try {
             const resp = await fetch(`/api/wifi-survey/detail?${kind}=${encodeURIComponent(name)}&low=${low}&high=${high}`);
             const data = await resp.json();
             if (!resp.ok) {
                 this.detail = null;
-                document.getElementById('ws-chart').innerHTML = `<p class="log-empty">${this.esc(data.error || 'No scan')}</p>`;
-                document.getElementById('ws-table').innerHTML = '';
+                this.el('chart').innerHTML = `<p class="log-empty">${this.esc(data.error || 'No scan')}</p>`;
+                this.el('table').innerHTML = '';
                 this.setStatus('');
                 return;
             }
@@ -98,7 +109,7 @@ const WifiScans = {
      * middle strip: 5 MHz busy level; lower lanes: our radios' channels. */
     renderChart() {
         const d = this.detail;
-        const el = document.getElementById('ws-chart');
+        const el = this.el('chart');
         const lo = d.band.low, hi = d.band.high;
         const inRange = a => a.low != null && a.high > lo && a.low < hi;
         const wifi = d.aps.filter(a => !a.is_mesh && inRange(a));
@@ -245,7 +256,7 @@ const WifiScans = {
 
     showSlot(i) {
         const s = this.detail?.slots[i];
-        const el = document.getElementById('ws-slot');
+        const el = this.el('slot');
         if (!s) return;
         const here = this.detail.aps.filter(a => a.low != null && Math.min(s.high, a.high) > Math.max(s.low, a.low));
         const ours = this.detail.ours.filter(o => Math.min(s.high, o.high) > Math.max(s.low, o.low));
@@ -260,9 +271,9 @@ const WifiScans = {
 
     renderTable() {
         const d = this.detail;
-        const el = document.getElementById('ws-table');
+        const el = this.el('table');
         if (!d) { el.innerHTML = ''; return; }
-        const mesh = document.getElementById('ws-mesh').checked;
+        const mesh = this.el('mesh').checked;
         const rows = d.aps.filter(a => (mesh || !a.is_mesh) && a.low != null && a.high > d.band.low && a.low < d.band.high);
         if (!rows.length) { el.innerHTML = '<p class="log-empty">Nothing heard in this range.</p>'; return; }
         const pooled = d.scans.length > 1;
@@ -280,7 +291,7 @@ const WifiScans = {
     },
 
     setStatus(text) {
-        const el = document.getElementById('ws-status');
+        const el = this.el('status');
         if (el) el.textContent = text;
     },
 
@@ -291,4 +302,6 @@ const WifiScans = {
     }
 };
 
-document.addEventListener('DOMContentLoaded', () => WifiScans.hookTab());
+// The Spectrum page shows the same scan results at its bottom (ids sp-ws-*).
+const SpectrumWifiScans = WifiScans.copy('sp-ws-', 'spectrum');
+document.addEventListener('DOMContentLoaded', () => { WifiScans.hookTab(); SpectrumWifiScans.hookTab(); });

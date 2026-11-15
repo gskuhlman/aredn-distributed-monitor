@@ -1589,6 +1589,25 @@
                             <div id="sp-summary" class="sp-detail"></div>
                         </div>
                         <div id="sp-reminders" class="sp-detail sp-reminders"></div>
+                        <!-- Known users of the band (spectrum-reference.js) -->
+                        <section class="diag-section sp-ref" id="sp-ref"></section>
+                        <!-- Copy of the Channel Planning WiFi scan results (wifi-scans.js, ids sp-ws-*) -->
+                        <section class="diag-section" id="sp-wifi-scans">
+                            <h3>WiFi scan results <small class="form-hint">what each radio heard, and how busy each frequency is (same as Channel Planning)</small></h3>
+                            <div class="cp-form">
+                                <label>Scan <select id="sp-ws-pick" class="form-input"></select></label>
+                                <label>Range <select id="sp-ws-range" class="form-input">
+                                    <option value="5640-5930" selected>Ham band (5650&ndash;5925)</option>
+                                    <option value="5150-5930">All 5 GHz</option>
+                                </select></label>
+                                <label class="header-checkbox"><input type="checkbox" id="sp-ws-mesh"> List mesh radios too</label>
+                                <button id="sp-ws-reload" class="btn btn-secondary btn-small">Reload</button>
+                                <span id="sp-ws-status" class="form-hint"></span>
+                            </div>
+                            <div id="sp-ws-chart"></div>
+                            <div id="sp-ws-slot" class="ws-slot-detail"></div>
+                            <div id="sp-ws-table"></div>
+                        </section>
                     </div>
                 </div>
             </div>
@@ -2229,6 +2248,7 @@
     <script src="{{ url_for('static', filename='js/hygiene.js') }}"></script>
     <script src="{{ url_for('static', filename='js/new-nodes.js') }}"></script>
     <script src="{{ url_for('static', filename='js/wifi-survey.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/spectrum-reference.js') }}"></script>
     <script src="{{ url_for('static', filename='js/geo-map-extras.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-potential.js') }}"></script>
     <script src="{{ url_for('static', filename='js/link-alerts.js') }}"></script>
