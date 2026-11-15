@@ -352,6 +352,9 @@ escalation, maintenance windows, public status page + badges, silence / ignore, 
 - [ ] 94. **Service check history.** Store each probe (ok, ms, error) like phone_pings; per service
       a Kuma-style heartbeat bar (last 50 checks), response-time chart, uptime 24 h / 30 d / 1 y.
       Today service_checks keeps only the current state and lifetime counters.
+      *Started: per-day tallies (`service_check_daily`: checks while the node was up, answered,
+      ms) since 2026-11-15, used by the weekly report. Still to do: per-probe rows and the
+      heartbeat bar / charts.*
 - [ ] 95. **Keyword / status checks for web services.** Per service: expected text on the page (or
       absent), expected HTTP status, follow redirects. A page that answers "404" or an error page
       counts as up today unless the status is >= 400 (n0ywb-4-CAM1 returns 404 at its advertised link).
@@ -379,6 +382,39 @@ escalation, maintenance windows, public status page + badges, silence / ignore, 
       Infrastructure team members get alerts for infrastructure nodes by group and severity. E-mail
       (operator's SMTP) and ntfy per user, through notify.py's pipeline per user.
       *Built: users.py, user_alerts.py, /account page, "Alerts go to" on the node page Services table.*
+
+## Done since Round 7 (2026-11-15)
+
+- [x] 105. **Node owners silence their own services.** Logged in with their callsign, an owner can
+      Silence / Enable services on their own nodes (node page, Services & Devices); Ignore stays
+      admin-only, and an owner can't re-enable something an admin ignored.
+- [x] 106. **User names and the club roster.** `users.name` (shown and filterable in the admin
+      Users table, editable on /account); the club's members loaded with name, e-mail and admin
+      flag (data in the database only, not in the repo). Passwords still to be set by an admin.
+- [x] 107. **Backup download.** Admin-only Download button per backup on the Database page;
+      each download is logged with who took it.
+- [x] 108. **Wall display map.** The Mesh panel draws on the Channel Map base map (offline +
+      online tiles), fitted to the main cluster; the SVG plot stays as the fallback.
+- [x] 109. **Changes page Refresh.** Refresh (reload + re-filter) where Add change was; Add change
+      moved to the right end of the header.
+- [x] 110. **Reports fixes.** Starting-node DNS on its own axis (it was real but ~0.7 ms, so it lay
+      on zero); the VoIP section lists every pinged phone (reachable %, ms, jitter, loss) as well
+      as call tests and sessions.
+- [x] 111. **Weekly report: site uptime and services.** Per infrastructure site: site up % from
+      site-outage incidents, outages and minutes down, radio uptime average / worst, reboots.
+      Services: how many answered every check while their node was up, and the ones that missed.
+- [x] 112. **Weekly report: node hygiene.** Average score with the change since the last report,
+      most common fixes, owners to nudge, and the action items for every node grouped by owner
+      (short chat version: lowest scores only).
+- [x] 113. **Spectrum: who else uses these frequencies.** Reference list of US allocations near the
+      AREDN bands (ham, WiFi / U-NII, ISM, radars, cellular / CBRS, C-V2X, drone video, satellite,
+      fixed links) with a shares-with-ham column, lanes over the chart's range, kind filters, and
+      WiFi / AREDN channel tables. *Check against current FCC rules, especially 3.4 GHz and 5.9 GHz.*
+- [x] 114. **Spectrum: WiFi scan results.** The Channel Planning scan results also at the bottom
+      of the Spectrum page (`WifiScans.copy('sp-ws-', 'spectrum')`).
+- [x] 115. **Page menu on small screens.** The drop-down fits the window (fixed under the button,
+      scrolls inside) and becomes a wrapping grid on narrow screens, so every group is reachable.
+- [x] 116. **README rewritten** for the current features, accounts and alerts, and Docker.
 
 ## Pending radio work (outside the app)
 
