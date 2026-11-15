@@ -150,3 +150,18 @@ def test_mesh_gateway_from_sysinfo():
     assert get({'node_details': {'mesh_gateway': True}}) == 1
     assert get({'node_details': {'mesh_gateway': False}}) == 0
     assert get({'node_details': {}}) is None
+
+
+def test_ticker_event_links():
+    import boards
+    L = boards.event_link
+    assert L('mcs_drop', 'w0aa-a', 'RF link to w0aa-b: transmit rate 90 Mbps')['href'] == '#diagnose/w0aa-a/w0aa-b'
+    assert L('link_dropped', 'w0aa-a', 'Wireguard link to w0aa-c dropped')['href'] == '#/routing/tunnels'
+    assert L('link_dropped', 'w0aa-a', 'RF link to w0aa-b dropped')['label'] == 'Link diagnosis'
+    assert L('service_down', 'w0aa-a', 'Service X not answering')['href'] == '/nodes/w0aa-a#node-services'
+    assert L('node_offline', 'w0aa-a', 'Node offline')['href'] == '/nodes/w0aa-a#history'
+    assert L('radio_phy_resets', 'w0aa-a', 'resets')['href'] == '/nodes/w0aa-a#radio'
+    assert L('route_detour', None, 'Route A → B')['href'] == '#/routing/route-watch'
+    assert L('gateway_lost', None, 'x')['href'] == '#/reports/starting-node'
+    assert L('login_failed', None, 'Failed login') is None
+    assert L('something_new', 'w0aa-a', 'x')['href'] == '/nodes/w0aa-a'

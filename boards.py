@@ -20,7 +20,9 @@ ticker()    "What's happening" lines for the Status page and the wall: open
 """
 
 import json
+import re
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
 import database
 import local_time
@@ -322,6 +324,59 @@ def _details(members, nodes, s_rows, paths, now, all_paths=()):
     return {'problems': problems, 'nodes': n_rows, 'services': s_rows, 'paths': p_rows}
 
 
+_PEER_RE = re.compile(r'\bRF link to ([A-Za-z0-9][A-Za-z0-9._-]*?)[:\s]')
+_PAGE = {   # event type -> (in-app page, label)
+    'route_detour': ('#/routing/route-watch', 'Route Watch'),
+    'route_restored': ('#/routing/route-watch', 'Route Watch'),
+    'route_flapping': ('#/routing/route-watch', 'Route Watch'),
+    'route_count_drop': ('#/routing/babel', 'Babel Costs'),
+    'route_count_restored': ('#/routing/babel', 'Babel Costs'),
+    'noise_jump': ('#/radio/noise', 'Noise Sources'),
+    'noise_cleared': ('#/radio/noise', 'Noise Sources'),
+    'call_quality_poor': ('#/voip', 'VoIP & Phones'),
+    'phone_unreachable': ('#/voip', 'Phone Connectivity'),
+    'phone_restored': ('#/voip', 'Phone Connectivity'),
+    'gateway_lost': ('#/reports/starting-node', 'Starting Node'),
+    'gateway_restored': ('#/reports/starting-node', 'Starting Node'),
+    'scan_incomplete': ('#/reports/starting-node', 'Starting Node'),
+    'incident_opened': ('#/incidents', 'Incidents'),
+    'incident_resolved': ('#/incidents', 'Incidents'),
+    'change_verdict': ('#/changes', 'Changes'),
+}
+# Node page group (node-tabs.js hash) for events about one node.
+_NODE_PART = {
+    'service_down': ('node-services', 'Services'), 'service_restored': ('node-services', 'Services'),
+    'link_dropped': ('links', 'Links'), 'link_restored': ('links', 'Links'),
+    'routing_error': ('links', 'Babel Costs'), 'routing_restored': ('links', 'Babel Costs'),
+    'ethernet_problem': ('history', 'Interface Traffic'), 'ethernet_cleared': ('history', 'Interface Traffic'),
+    'node_offline': ('history', 'Node Log'), 'node_online': ('history', 'Node Log'),
+    'node_reboot': ('history', 'Node Log'), 'node_degraded': ('history', 'Node Log'),
+}
+# One RF link's problem: open that link's diagnosis (#diagnose/<node>/<peer>).
+_PAIR_TYPES = ('one_way_link', 'mcs_', 'radio_chain', 'radio_retries', 'radio_reconnects', 'link_degrading',
+               'link_underperforming', 'link_dropped', 'link_restored')
+
+
+def event_link(event_type, node, details):
+    """{'href', 'label'}: the page that best shows this event's problem, or None."""
+    et = event_type or ''
+    if et in _PAGE:
+        href, label = _PAGE[et]
+        return {'href': href, 'label': label}
+    if et in ('link_dropped', 'link_restored') and re.search(r'\b(wireguard|tunnel)', details or '', re.I):
+        return {'href': '#/routing/tunnels', 'label': 'Tunnels'}
+    m = _PEER_RE.search((details or '') + ' ')
+    if node and m and et.startswith(_PAIR_TYPES):
+        return {'href': f"#diagnose/{quote(node, safe='')}/{quote(m.group(1).lower(), safe='')}",
+                'label': 'Link diagnosis'}
+    if not node or et in ('login_failed', 'auth_password_changed') or et.startswith('storm_warning'):
+        return None
+    part, label = _NODE_PART.get(et) or (('radio', 'Radio') if et.startswith(('radio_', 'frequency_')) else
+                                         ('links', 'Links') if et.startswith(('link_', 'one_way', 'mcs_')) else
+                                         ('', 'Node page'))
+    return {'href': f"/nodes/{quote(node, safe='')}" + (f'#{part}' if part else ''), 'label': label}
+
+
 def ticker(limit=20, hours=24, now=None):
     now = now or datetime.now()
     since = (now - timedelta(hours=hours)).strftime(TS_FMT)
@@ -330,7 +385,8 @@ def ticker(limit=20, hours=24, now=None):
         import incidents
         for i in incidents.list_incidents(status='active', days=31)['incidents']:
             items.append({'t': i.get('updated_at') or i['opened_at'], 'kind': 'incident', 'severity': i.get('severity')
-                          or 'warning', 'text': f"Incident: {i['title']} ({i['status']})", 'id': i['id']})
+                          or 'warning', 'text': f"Incident: {i['title']} ({i['status']})", 'id': i['id'],
+                          'link': {'href': '#/incidents', 'label': 'Incident'}})
     except Exception:
         pass
     try:
@@ -339,7 +395,8 @@ def ticker(limit=20, hours=24, now=None):
             what = w.get('site') or ', '.join((w.get('covered_nodes') or [])[:3]) or 'all nodes'
             items.append({'t': w.get('start_time'), 'kind': 'maintenance', 'severity': 'info',
                           'text': f"Maintenance on {what} until {str(w.get('end_time') or '')[11:16]} {local_time.abbr(w.get('end_time'))}"
-                                  + (f": {w['note']}" if w.get('note') else ''), 'id': w['id']})
+                                  + (f": {w['note']}" if w.get('note') else ''), 'id': w['id'],
+                          'link': {'href': '#/maintenance', 'label': 'Maintenance'}})
     except Exception:
         pass
     with database.get_connection() as conn:
@@ -354,7 +411,8 @@ def ticker(limit=20, hours=24, now=None):
         if node and node not in text:
             text = f'{node}: {text}'
         items.append({'t': r['timestamp'], 'kind': 'event', 'severity': r['severity'] or 'info', 'text': text,
-                      'event_type': r['event_type'], 'node': node, 'id': r['id']})
+                      'event_type': r['event_type'], 'node': node, 'id': r['id'],
+                      'link': event_link(r['event_type'], node, r['details'])})
     pinned = [i for i in items if i['kind'] != 'event']
     events = [i for i in items if i['kind'] == 'event'][:max(0, limit - len(pinned))]
     return {'generated_at': now.strftime(TS_FMT), 'items': pinned + events, 'hours': hours}

@@ -3,6 +3,7 @@
  * newest incidents, maintenance and warning / critical events (recoveries
  * too), the list under it, a storm warning (storm.py) and a banner when an
  * alarm suppression is past its review date. Every minute while Status is open.
+ * Each list line links to the page that shows that problem.
  */
 const Ticker = {
     timer: null,
@@ -19,9 +20,13 @@ const Ticker = {
         });
     },
 
+    /** Each line links to the page that shows its problem (boards.event_link). */
     line(i) {
-        return `<li class="wt-${R7.esc(i.severity)} wt-${R7.esc(i.kind)}"><time>${R7.esc((i.t || '').slice(11, 16))}</time>${
-            i.kind === 'incident' ? `<a href="#/incidents" data-inc="${i.id}">${R7.esc(i.text)}</a>` : R7.esc(i.text)}</li>`;
+        const l = i.link;
+        const inc = i.kind === 'incident' ? ` data-inc="${i.id}"` : '';
+        const text = l ? `<a href="${R7.esc(l.href)}"${inc} title="Open ${R7.esc(l.label)}">${R7.esc(i.text)}</a>
+            <a class="tk-go" href="${R7.esc(l.href)}"${inc}>${R7.esc(l.label)} →</a>` : R7.esc(i.text);
+        return `<li class="wt-${R7.esc(i.severity)} wt-${R7.esc(i.kind)}"><time>${R7.esc((i.t || '').slice(11, 16))}</time>${text}</li>`;
     },
 
     async load() {

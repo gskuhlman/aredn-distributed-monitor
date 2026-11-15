@@ -13,7 +13,7 @@ const PageRouter = {
     // Old page names that moved.
     ALIASES: { diagnostics: 'status', stability: 'rf-stats/stability' },
     // `#/<tab>/<anchor>` on pages without a side menu scrolls to an element.
-    ANCHORS: { reports: { weekly: 'weekly-report-section' }, 'rf-stats': { stability: 'rf-stability' } },
+    ANCHORS: { reports: { weekly: 'weekly-report-section', 'starting-node': 'starting-node-section' }, 'rf-stats': { stability: 'rf-stability' } },
 
     init() {
         document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => btn.addEventListener('click', () => {

@@ -2987,3 +2987,6 @@ tr.site-down td { opacity: 0.65; }
 .svc-actions { white-space: nowrap; }
 .svc-silence { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .svc-silence select { width: auto; padding: 2px 4px; }
+.ticker-list a { color: inherit; text-decoration: none; }
+.ticker-list a:hover { text-decoration: underline; }
+.ticker-list a.tk-go { font-size: .8em; color: #2471a3; margin-left: 6px; white-space: nowrap; }
