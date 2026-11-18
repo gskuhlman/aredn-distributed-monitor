@@ -1,6 +1,6 @@
 """
 In-app "What's new" (TODO #83): the finished items of TODO.md as release
-notes, newest section first. The Docker image has no .git, but TODO.md is
+notes, newest section and item first. The Docker image has no .git, but TODO.md is
 copied in, and every finished feature is recorded there as
 `- [x] N. **Title.** text` (continuation lines indented).
 
@@ -40,7 +40,8 @@ def parse(text):
             item['text'] = (item['text'] + ' ' + line.strip()).strip()
         else:
             item = None
-    return [s for s in reversed(sections) if s['items']]
+    # Newest first: sections and, within each, items (both are written oldest first).
+    return [dict(s, items=s['items'][::-1]) for s in reversed(sections) if s['items']]
 
 
 def notes():
