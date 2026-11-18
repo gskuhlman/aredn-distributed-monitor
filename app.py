@@ -76,6 +76,9 @@ import couch_client
 import notify
 import maintenance
 import rollout
+import firmware_plan
+import monthly
+import whats_new
 import change_verdict
 import ghost_trackers
 import wifi_survey
@@ -326,7 +329,7 @@ def scheduled_scan():
         # --- end Link Watch ---
 
         # Channel-plan rollouts, new-node welcomes and per-link alert rules, from what this scan stored.
-        for task in (rollout.check, welcome.after_scan, link_alerts.evaluate,
+        for task in (rollout.check, firmware_plan.check, welcome.after_scan, link_alerts.evaluate,
                      incidents.after_scan, tunnels.check, call_quality.check, noise_source.check,
                      _sync_services_catalog):
             try:
@@ -706,6 +709,87 @@ def api_rollout_update(rid):
 @app.route('/api/rollouts/<int:rid>', methods=['DELETE'])
 def api_rollout_delete(rid):
     return jsonify({'deleted': rollout.delete(rid)})
+
+
+@app.route('/api/whats-new')
+def api_whats_new():
+    """Release notes from TODO.md's finished items (whats_new.py)."""
+    return jsonify(whats_new.notes())
+
+
+@app.route('/api/reports/monthly')
+def api_reports_monthly():
+    """Long-term monthly rollups (monthly.py): ?months=12."""
+    try:
+        return jsonify(monthly.report(request.args.get('months', 12, type=int)))
+    except ValueError as exc:
+        return _json_error(exc)
+
+
+# --- Firmware upgrade planner (TODO #58, firmware_plan.py) ---
+
+def _fw_names(value):
+    if isinstance(value, str):
+        value = value.replace(',', '\n').splitlines()
+    return [str(v).strip() for v in (value or []) if str(v).strip()] or None
+
+
+@app.route('/api/firmware/plan')
+def api_firmware_plan():
+    """?target&nodes=a,b&infra=1: the ordered plan, not stored."""
+    try:
+        return jsonify(firmware_plan.plan(request.args.get('target'), _fw_names(request.args.get('nodes')),
+                                          request.args.get('infra') == '1'))
+    except ValueError as exc:
+        return _json_error(exc)
+
+
+@app.route('/api/firmware/rollouts')
+def api_firmware_rollouts():
+    return jsonify({'rollouts': firmware_plan.list_rollouts(include_finished=request.args.get('all') != '0')})
+
+
+@app.route('/api/firmware/rollouts', methods=['POST'])
+def api_firmware_rollout_create():
+    """{target?, nodes?: [names] | "a, b", infra?, name?, note?}"""
+    body = request.get_json(silent=True) or {}
+    try:
+        r = firmware_plan.create(body.get('target'), _fw_names(body.get('nodes')), name=body.get('name'),
+                                 note=body.get('note'), author=auth.current_user(),
+                                 infrastructure_only=bool(body.get('infra')))
+    except ValueError as exc:
+        return _json_error(exc)
+    return jsonify(r), 201
+
+
+@app.route('/api/firmware/rollouts/<int:rid>')
+def api_firmware_rollout(rid):
+    r = firmware_plan.get(rid)
+    return jsonify(r) if r else (jsonify({'error': 'not found'}), 404)
+
+
+@app.route('/api/firmware/rollouts/<int:rid>', methods=['PATCH'])
+def api_firmware_rollout_update(rid):
+    try:
+        ok = firmware_plan.set_status(rid, (request.get_json(silent=True) or {}).get('status'))
+    except ValueError as exc:
+        return _json_error(exc)
+    return jsonify(firmware_plan.get(rid)) if ok else (jsonify({'error': 'not found'}), 404)
+
+
+@app.route('/api/firmware/rollouts/<int:rid>', methods=['DELETE'])
+def api_firmware_rollout_delete(rid):
+    return jsonify({'deleted': firmware_plan.delete(rid)})
+
+
+@app.route('/api/firmware/rollouts/<int:rid>/steps/<int:sid>', methods=['POST'])
+def api_firmware_rollout_step(rid, sid):
+    body = request.get_json(silent=True) or {}
+    try:
+        ok = firmware_plan.set_step(rid, sid, body.get('status'), body.get('detail'))
+    except ValueError as exc:
+        return _json_error(exc)
+    return jsonify(firmware_plan.get(rid)) if ok else (jsonify({'error': 'not found'}), 404)
 
 
 @app.route('/api/rollouts/<int:rid>/steps/<int:sid>', methods=['POST'])
@@ -3861,6 +3945,7 @@ def start_scheduler():
     ssh_collect.install(scheduler, run_ssh_collect_task)
     # Round 7: hourly scan-sample rollups, slow-degradation watch, storm forecast.
     rollup.install(scheduler)
+    monthly.install(scheduler)   # long-term monthly rollups, kept forever (#83)
     degradation.install(scheduler)
     node_clock.install(scheduler, run_node_clock_task)
     storm.install(scheduler)

@@ -147,6 +147,8 @@ def classify(start, end, names=None, conn=None):
         ORDER BY timestamp
     ''', [start, end] + scope_params + [start, end]):
         samples.setdefault(r['node_name'], []).append(r)
+    for name in database.stored_node_names() & {n.lower() for n in samples}:
+        samples = {k: v for k, v in samples.items() if k.lower() != name}   # Stored: retired, not down
     if not samples:
         return {}
     failing = list(samples)

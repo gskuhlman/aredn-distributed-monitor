@@ -558,6 +558,10 @@ def is_suppressed(event):
         import maintenance
         node = (event.get('node_name') or '').lower() or None
         _, peer = event_subject(event)
+        stored = database.stored_node_names()
+        hit = next((n for n in (node, (peer or '').lower() or None) if n and n in stored), None)
+        if hit:
+            return f"{hit} is stored (retired)"
         w = maintenance.covering_window(node, event.get('timestamp'), peer)
         if w:
             return maintenance.describe_window(w)

@@ -513,7 +513,8 @@ def prune_old_nodes(days):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT name FROM nodes WHERE last_seen < ?', (cutoff,))
-        names = [row['name'] for row in cursor.fetchall()]
+        stored = stored_node_names()   # Stored nodes are kept until untagged
+        names = [row['name'] for row in cursor.fetchall() if row['name'].lower() not in stored]
         if not names:
             return 0
 
@@ -1433,7 +1434,16 @@ def set_scan_boundary(name, mode):
 
 # ============ Infrastructure Tag Operations ============
 
-NODE_TAGS = ('permanent', 'event')
+# 'stored' (TODO #83): a retired or shelved node. Kept forever, not counted as
+# down (uptime, unreachable), no alerts for it (notify.is_suppressed), never
+# offered by Cleanup. Not an infrastructure tag: the Tag filter ignores it.
+NODE_TAGS = ('permanent', 'event', 'stored')
+
+
+def stored_node_names():
+    """Lower-case names of nodes tagged Stored."""
+    with get_connection() as conn:
+        return {r[0].lower() for r in conn.execute("SELECT node_name FROM node_tags WHERE tag = 'stored'")}
 
 
 def get_node_tags_map():

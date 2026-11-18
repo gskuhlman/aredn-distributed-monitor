@@ -3054,3 +3054,29 @@ tr.site-down td { opacity: 0.65; }
 .dg-group { margin-bottom: 18px; scroll-margin-top: 8px; }
 .dg-group-title { font-size: 1.1rem; margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #2c3e50; }
 .dg-group:empty, .dg-group:not(:has(> :not(.dg-group-title))) { display: none; }
+
+/* Firmware upgrade planner (firmware-plan.js) */
+.fw-wave-row td { background: #eef3f8; }
+
+/* Stored (retired) nodes on the Nodes page */
+.status-badge.status-stored { background: #ede7f6; color: #4a3b7a; border: 1px solid #d1c4e9; }
+
+/* Header: last / next scan */
+.scan-when { font-size: 0.8rem; opacity: 0.85; white-space: nowrap; }
+@media (max-width: 900px) { .scan-when { display: none; } }
+
+/* Long-term monthly grids (monthly.js) */
+.mo-grid td, .mo-grid th { white-space: nowrap; text-align: right; }
+.mo-grid td:first-child, .mo-grid th:first-child { text-align: left; }
+
+/* What's new (whats-new.js) */
+.app-version { cursor: pointer; position: relative; }
+.app-version.wn-has-new::after { content: ''; position: absolute; top: -2px; right: -8px; width: 7px; height: 7px; border-radius: 50%; background: #e67e22; }
+.wn-panel { position: fixed; top: 60px; right: 16px; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 80px); display: flex; flex-direction: column; background: #fff; color: #2c3e50; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.25); z-index: 3000; }
+.wn-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid #eee; }
+.wn-head h3 { margin: 0; font-size: 1.05rem; }
+.wn-body { overflow-y: auto; padding: 4px 14px 14px; }
+.wn-body h4 { margin: 14px 0 6px; font-size: 0.95rem; }
+.wn-body ul { margin: 0; padding-left: 18px; }
+.wn-body li { margin-bottom: 6px; line-height: 1.35; }
+.wn-new { background: #e67e22; color: #fff; border-radius: 3px; padding: 0 4px; font-size: 0.75rem; }

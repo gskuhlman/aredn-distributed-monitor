@@ -36,6 +36,7 @@ const NodesModule = {
             statusFilter.addEventListener('change', () => this.filterNodes());
         }
         document.getElementById('nodes-infra-filter')?.addEventListener('change', () => this.filterNodes());
+        document.getElementById('nodes-export')?.addEventListener('click', () => this.exportCsv());
         if (typeFilter) {
             typeFilter.addEventListener('change', () => this.filterNodes());
         }
@@ -254,7 +255,9 @@ const NodesModule = {
             } else if (status === 'link-only') {
                 matchesStatus = !!node.is_link_only;
             } else if (status === 'inactive') {
-                matchesStatus = node.is_active !== 1;
+                matchesStatus = node.is_active !== 1 && !node.is_stored;
+            } else if (status === 'stored') {
+                matchesStatus = !!node.is_stored;
             } else if (status === '24h') {
                 const lastSeen = node.last_seen ? new Date(node.last_seen).getTime() : 0;
                 matchesStatus = (now - lastSeen) < ms24h;
@@ -315,10 +318,11 @@ const NodesModule = {
 
         let html = '';
         for (const node of this.filteredNodes) {
-            const statusClass = node.is_link_only ? 'status-link-only' : (node.is_active === 1 ? 'status-active' : 'status-inactive');
+            const statusClass = node.is_link_only ? 'status-link-only' : (node.is_active === 1 ? 'status-active'
+                : node.is_stored ? 'status-stored' : 'status-inactive');
             const statusText = node.is_link_only
                 ? (node.observed_status === 'removed' ? 'Link-only Removed' : 'Link-only')
-                : (node.is_active === 1 ? 'Active' : 'Inactive');
+                : (node.is_active === 1 ? (node.is_stored ? 'Active (tagged Stored)' : 'Active') : node.is_stored ? 'Stored' : 'Inactive');
             const lastSeen = node.last_seen ? new Date(node.last_seen).toLocaleString() : 'Never';
             const servicesCount = (node.services_list || []).length;
             const nodeName = node.name || '';
@@ -844,10 +848,40 @@ const NodesModule = {
         return 'quality-bad';
     },
 
+    /** The rows shown now (filters and sort applied) as a CSV download (TODO #83). */
+    exportCsv() {
+        const cols = [
+            ['name', n => n.name], ['status', n => this.getNodeStatusText(n)], ['ip', n => n.ip],
+            ['model', n => n.model], ['firmware', n => n.firmware_version],
+            ['rf_frequency_mhz', n => n.rf_frequency], ['rf_width_mhz', n => n.rf_chanbw],
+            ['infrastructure', n => n.is_infrastructure ? 'yes' : ''], ['site', n => n.infrastructure_site],
+            ['tags', n => ['permanent', 'event', 'stored'].filter(t => n[`is_${t}`]).join(' ')],
+            ['selected', n => n.is_selected ? 'yes' : ''], ['lat', n => n.lat], ['lon', n => n.lon],
+            ['services', n => (n.services_list || []).length], ['first_seen', n => n.first_seen],
+            ['last_seen', n => n.last_seen], ['description', n => n.description],
+        ];
+        const cell = v => {
+            const s = String(v ?? '');
+            // Quote when needed; a leading = + - @ would be read as a formula by spreadsheets.
+            const safe = /^[=+\-@]/.test(s) && !/^-?\d/.test(s) ? `'${s}` : s;
+            return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+        };
+        const rows = [cols.map(c => c[0]).join(',')].concat(
+            (this.filteredNodes || []).map(n => cols.map(c => cell(c[1](n))).join(',')));
+        const blob = new Blob([rows.join('\r\n') + '\r\n'], { type: 'text/csv' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `aredn-nodes-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    },
+
     getNodeStatusText(node) {
         if (node.is_link_only) {
             return node.observed_status === 'removed' ? 'Link-only / removed' : 'Link-only / not pollable';
         }
+        if (node.is_stored) return node.is_active === 1 ? 'Active (tagged Stored)' : 'Stored (retired)';
         return node.is_active === 1 ? 'Active' : 'Inactive';
     },
 

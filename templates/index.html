@@ -59,7 +59,7 @@
                             <button class="tab-btn" data-tab="diagnostics" title="Every check on one page: mesh health, radio and RF, routing, setup, link stability, WiFi survey">Diagnostics</button>
                             <button class="tab-btn" data-tab="radio" title="Sectors, site matrix, aim, link budget, ghost trackers, link alerts">Radio &amp; RF</button>
                             <button class="tab-btn" data-tab="routing" title="Route Watch, Path View, single points of failure, Babel costs">Routing</button>
-                            <button class="tab-btn" data-tab="setup" title="Infrastructure review, settings drift, node hygiene, cleanup">Setup</button>
+                            <button class="tab-btn" data-tab="setup" title="Infrastructure review, settings drift, node hygiene, firmware upgrades, cleanup">Setup</button>
                         </div>
                         <div class="nav-group">
                             <div class="nav-group-title">Planning</div>
@@ -117,6 +117,7 @@
                       title="Scans are limited to the selected nodes. Change it in Admin, Scanning settings.">Scanning selected nodes only</span>
                 <span id="status-indicator" class="status-indicator"></span>
                 <span id="status-text">Connecting...</span>
+                <span id="scan-when" class="scan-when" title="When the last scan finished and when the next one starts"></span>
                 <button id="scan-btn" class="btn btn-primary">Scan now</button>
                 <button id="log-btn" class="btn btn-secondary">Event Log</button>
                 <button id="settings-btn" class="btn btn-secondary">Settings</button>
@@ -408,6 +409,7 @@
                                 <option value="24h">Seen in 24 hours</option>
                                 <option value="7d">Seen in 7 days</option>
                                 <option value="inactive">Inactive</option>
+                                <option value="stored">Stored (retired)</option>
                             </select>
                             <select id="nodes-infra-filter" class="form-input" title="Infrastructure filter">
                                 <option value="all">All Infrastructure</option>
@@ -432,6 +434,7 @@
                         </div>
                         <div class="nodes-count">
                             <span id="nodes-total-count">0</span> nodes
+                            <button id="nodes-export" class="btn btn-secondary btn-small" title="Download the nodes shown (current filters and sort) as a CSV file">Export CSV</button>
                         </div>
                     </div>
 
@@ -967,6 +970,7 @@
                         <button class="subnav-btn" data-sub="infrastructure">Infrastructure Review</button>
                         <button class="subnav-btn" data-sub="drift">Settings Drift</button>
                         <button class="subnav-btn" data-sub="hygiene">Node Hygiene</button>
+                        <button class="subnav-btn" data-sub="firmware">Firmware Upgrades</button>
                         <button class="subnav-btn" data-sub="cleanup">Cleanup</button>
                     </nav>
                     <div class="diag-scroll subnav-body">
@@ -1016,6 +1020,25 @@
                                 <p class="form-hint">Scores are worked out each time from what the scanner last read from the node (description, location, firmware, antenna settings) plus operator notes here. After an owner fixes something on the node, it shows after the next scan, or press <strong>Re-check</strong> on its row to read that node now and score it again. A contact can be in the node description or in a note on the node page.</p>
                             </div>
                         </div>
+                        <div class="subpage" data-sub="firmware">
+                            <!-- Firmware upgrade planner (#58, firmware-plan.js) -->
+                            <div class="diag-section">
+                                <h3>Firmware Upgrades <small class="form-hint">upgrade order, far ends first, so no node loses its path mid-upgrade; ticked off when the scanner sees the new version</small></h3>
+                                <div class="mh-controls">
+                                    <select id="fw-target" class="form-input" title="Version to upgrade to"><option value="">Newest release on the mesh</option></select>
+                                    <input type="text" id="fw-nodes" class="form-input" placeholder="nodes (empty = every node on an older release)" title="Comma-separated node names" list="chg-node-names">
+                                    <label class="checkbox-label"><input type="checkbox" id="fw-infra"> Infrastructure only</label>
+                                    <button id="fw-preview" class="btn btn-primary">Preview plan</button>
+                                    <input type="text" id="fw-name" class="form-input" placeholder="name (optional)" maxlength="120">
+                                    <button id="fw-start" class="btn btn-secondary" disabled>Track this plan</button>
+                                    <button id="fw-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                    <span id="fw-status" class="form-hint"></span>
+                                </div>
+                                <div id="fw-plan"></div>
+                                <h4>Tracked upgrades</h4>
+                                <div id="fw-list"><p class="log-empty">Loading…</p></div>
+                            </div>
+                        </div>
                         <div class="subpage" data-sub="cleanup">
                             <!-- Cleanup (#24, cleanup.js) -->
                             <div class="diag-section">
@@ -1030,7 +1053,7 @@
                                     <span id="cleanup-count" class="form-hint"></span>
                                     <span id="cleanup-status" class="form-hint"></span>
                                 </div>
-                                <div id="cleanup-list"><p class="log-empty">Press Find candidates to run. Infrastructure, Permanent/Event-tagged, selected and starting nodes are never offered.</p></div>
+                                <div id="cleanup-list"><p class="log-empty">Press Find candidates to run. Infrastructure, Permanent/Event/Stored-tagged, selected and starting nodes are never offered.</p></div>
                             </div>
                             <!-- end Cleanup -->
                         </div>
@@ -1393,6 +1416,25 @@
                             </div>
                         </div>
                         <!-- end Weekly report -->
+
+                        <!-- Long-term monthly rollups (#83, monthly.py, monthly.js) -->
+                        <div class="diag-section" id="monthly-section">
+                            <h3>Long-term <small class="form-hint">month by month, kept forever: node uptime, RF link SNR, service availability</small></h3>
+                            <div class="mh-controls">
+                                <select id="mo-months" class="form-input" title="How many months">
+                                    <option value="6">6 months</option>
+                                    <option value="12" selected>12 months</option>
+                                    <option value="24">2 years</option>
+                                    <option value="60">5 years</option>
+                                </select>
+                                <input type="text" id="mo-search" class="form-input" placeholder="filter nodes / links">
+                                <button id="mo-refresh" class="btn btn-secondary btn-small">Refresh</button>
+                                <span id="mo-status" class="form-hint"></span>
+                            </div>
+                            <div id="mo-summary"><p class="log-empty">Loading…</p></div>
+                            <details class="diag-details"><summary>Node uptime by month</summary><div id="mo-nodes" class="table-scroll-wrapper"></div></details>
+                            <details class="diag-details"><summary>RF link SNR by month (weaker direction, median)</summary><div id="mo-links" class="table-scroll-wrapper"></div></details>
+                        </div>
 
                         <!-- Starting-node health (collector_health.py) -->
                         <div class="diag-section" id="starting-node-section">
@@ -2296,6 +2338,9 @@
     <script src="{{ url_for('static', filename='js/call-quality.js') }}"></script>
     <script src="{{ url_for('static', filename='js/alert-handling.js') }}"></script>
     <script src="{{ url_for('static', filename='js/global-search.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/firmware-plan.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/monthly.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/whats-new.js') }}"></script>
     <script src="{{ url_for('static', filename='js/diagnostics-page.js') }}"></script>
 </body>
 </html>

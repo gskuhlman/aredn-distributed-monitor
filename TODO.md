@@ -193,9 +193,9 @@ arrive as many separate events.
       interference area.
 - [x] 57. **Tunnel health.** Per tunnel (legacy and WireGuard): up time, flaps, latency, which
       nodes reach the mesh only through it, and what loses the mesh if the internet goes down.
-- [ ] 58. **Firmware upgrade planner.** Order upgrades far ends first so no node loses its path
+- [x] 58. **Firmware upgrade planner.** Order upgrades far ends first so no node loses its path
       mid-upgrade, tracked like a rollout (#29) and ticked off when the scanner sees the new
-      version.
+      version. *Built: see #120.*
 
 ### For the club
 
@@ -298,9 +298,9 @@ pulls the RTSP camera streams seen crossing the MMC tunnel.
       listed for a week; devices = hosts plugged into each node.
 - [x] 82. **Tunnel dependency.** RF native vs needs a tunnel vs off air summary (spof with tunnels
       removed), plus an alert when a node loses its last RF path.
-- [ ] 83. **Smaller ones.** "Stored" state for retired nodes (not counted as down); "polled 5 min
+- [x] 83. **Smaller ones.** "Stored" state for retired nodes (not counted as down); "polled 5 min
       ago, next in 4" in the header; CSV export of the node list; long-term rollups (monthly
-      kept forever); in-app "What changed" release notes; audit log of who changed what.
+      kept forever); in-app "What changed" release notes; audit log of who changed what. *Built: see #121.*
 - [ ] 84. **Cross-check MeshWatch's findings.** w0gq-col-rkt-w 86 failed TX/min and
       w0gq-col-sq-2mmc 61/min; KD0CGN nodes with 25-40 ms jitter (route flapping?).
 
@@ -427,6 +427,20 @@ escalation, maintenance windows, public status page + badges, silence / ignore, 
       Mesh Health sections from Status, all of Radio & RF, Routing and Setup, Link Stability and
       the WiFi Survey, with a jump menu. The sections move in while it is open and back when it
       closes, so their own pages are unchanged.
+- [x] 120. **Firmware upgrade planner (#58).** Setup > Firmware Upgrades (also on Diagnostics):
+      pick a version (default the newest release on the mesh) and optionally nodes or infrastructure
+      only; the plan puts every node after the nodes that reach the mesh through it, in waves that
+      can go together, with what goes dark during each reboot. Nightlies are left out unless named.
+      "Track this plan" makes a checklist that ticks itself off when the scanner reads the new
+      version, flags a version that is neither old nor new, and notes a node upgraded before the
+      nodes behind it.
+- [x] 121. **Smaller ones (#83).** *Stored* tag on the node page for retired or shelved nodes: kept
+      forever, not counted as down (uptime, unreachable), no alerts, never offered by Cleanup,
+      own filter and badge on the Nodes page. Header shows "scanned 5 min ago · next in 4 min".
+      Nodes page Export CSV (the rows shown, with filters). Long-term monthly rollups kept forever
+      (node uptime, RF link SNR, service availability; Reports > Long-term). What's new: click the
+      build number in the header (from these done items; new ones marked). The audit log was
+      already there (#50, Admin page).
 
 ## Pending radio work (outside the app)
 

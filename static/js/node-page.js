@@ -26,7 +26,7 @@ const NodePage = {
         document.getElementById('node-infrastructure-toggle')?.addEventListener('change', (event) => {
             this.setInfrastructure(event.target.checked);
         });
-        for (const tag of ['permanent', 'event']) {
+        for (const tag of ['permanent', 'event', 'stored']) {
             document.getElementById(`node-${tag}-toggle`)?.addEventListener('change', (event) => {
                 this.setTag(tag, event.target.checked);
             });
@@ -86,7 +86,7 @@ const NodePage = {
         if (boundarySelect) {
             boundarySelect.value = node.scan_boundary || '';
         }
-        for (const tag of ['permanent', 'event']) {
+        for (const tag of ['permanent', 'event', 'stored']) {
             const tagToggle = document.getElementById(`node-${tag}-toggle`);
             if (tagToggle) tagToggle.checked = Boolean(node[`is_${tag}`]);
         }
@@ -211,7 +211,7 @@ const NodePage = {
                 this.data.node.is_event = result.is_event;
             }
             if (toggle) toggle.checked = result[`is_${tag}`];
-            const label = tag === 'permanent' ? 'Permanent' : 'Event';
+            const label = { permanent: 'Permanent', event: 'Event', stored: 'Stored' }[tag] || tag;
             this.showToast('success', enabled ? `Tagged ${label}` : `${label} Tag Removed`, this.nodeName);
         } catch (error) {
             if (toggle) toggle.checked = !enabled;

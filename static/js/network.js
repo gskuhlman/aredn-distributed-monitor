@@ -1359,15 +1359,23 @@ function startCountdown() {
  */
 function updateCountdown() {
     const countdownElement = document.getElementById('footer-countdown');
+    const when = document.getElementById('scan-when');
 
     if (!lastScanTime) {
         countdownElement.textContent = '--';
+        if (when) when.textContent = '';
         return;
     }
 
     const now = new Date();
     const nextScan = new Date(lastScanTime.getTime() + (pollInterval * 1000));
     const remaining = Math.max(0, Math.floor((nextScan - now) / 1000));
+    // Header: "scanned 5 min ago · next in 4 min" (minutes are enough there).
+    if (when && countdownElement.textContent !== 'Scanning...') {
+        const ago = Math.max(0, Math.round((now - lastScanTime) / 60000));
+        const next = Math.ceil(remaining / 60);
+        when.textContent = `scanned ${ago < 1 ? 'just now' : `${ago} min ago`} · ${remaining <= 0 ? 'next soon' : `next in ${next} min`}`;
+    }
 
     if (remaining <= 0) {
         countdownElement.textContent = 'Soon...';
@@ -1423,6 +1431,8 @@ function initSocket() {
         document.getElementById('scan-btn').disabled = true;
         // Show scanning in countdown
         document.getElementById('footer-countdown').textContent = 'Scanning...';
+        const when = document.getElementById('scan-when');
+        if (when) when.textContent = 'scan running';
         // Update scan status in footer
         const scanStatus = document.getElementById('footer-scan-status');
         if (scanStatus) {

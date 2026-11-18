@@ -197,7 +197,10 @@ def node_uptime(start, end, names=None, conn=None):
         by_node.setdefault(name, []).append((_ts(ts), bool(reachable), up_s, via is None))
 
     out = {}
+    stored = database.stored_node_names()   # retired nodes: not counted as down
     for name, samples in by_node.items():
+        if name.lower() in stored:
+            continue
         up_s, down_s, unchecked_s, reboots = judge(samples, s, holes_all + holes.get(name.lower(), []))
         judged = up_s + down_s
         last_poll = samples[-1][0]

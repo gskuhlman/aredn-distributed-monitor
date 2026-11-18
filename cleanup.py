@@ -91,6 +91,7 @@ def _protections():
     tags = database.get_tagged_node_names()
     add(tags.get('permanent', []), 'Permanent')
     add(tags.get('event', []), 'Event')
+    add(tags.get('stored', []), 'Stored')
     add(database.get_selected_node_names(), 'selected')
     seed = starting_node_name()
     if seed:

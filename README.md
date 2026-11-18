@@ -45,13 +45,16 @@ The header menu groups the pages; a shared filter bar under it (Nodes: All / Sel
 
 ### Nodes and links
 
-- **Nodes:** table and detail panel; a **full node page** per node (`/nodes/<name>`) grouped into Overview, Radio, Links, History and Tools: link health, services with their checks and who they alert, alignment, power advisor, Prometheus and SSH radio details, interface traffic, syslog, changes, notes, setup checklist.
+- **Nodes:** table and detail panel; a **full node page** per node (`/nodes/<name>`) grouped into Overview, Radio, Links, History and Tools: link health, services with their checks and who they alert, alignment, power advisor, Prometheus and SSH radio details, interface traffic, syslog, changes, notes, setup checklist. Export CSV of the rows shown. Tag a retired or shelved node **Stored** on its page: kept, never counted as down, no alerts.
 - **Links:** RF statistics, ping/iPerf, pair diagnosis with ranked findings and a verdict, link budget and terrain, link stability (flapping and asymmetric links).
 - **VoIP & Phones:** phone and PBX reachability pings with alarms, continuous call quality (jitter, MOS) per node, two-ended streamed voice tests.
 - **Services & Devices:** every advertised service by category with its check state, devices on each node's LAN, and **Silence / Ignore / Enable** per service or device (with a "show silenced and ignored" filter).
 
+Click the build number in the header for **What's new**. The header also shows when the last scan ran and when the next one starts.
+
 ### Checks
 
+- **Firmware Upgrades** (Setup): upgrade order far ends first, in waves, with what goes dark during each reboot; track it and it ticks itself off as the scanner reads the new versions.
 - **Diagnostics:** every check on one page: the Mesh Health sections from Status, all of Radio & RF, Routing and Setup, Link Stability and the WiFi Survey, with a side menu to jump between groups. The same sections stay on their own pages.
 - **Radio & RF:** sector airtime, site neighbour matrix, antenna aim, link budget and link potential, ghost trackers, per-link alert rules, slow degradation, noise sources.
 - **Routing:** Route Watch (traceroutes of key paths, detours, flapping, "why did it change?", traffic along a route), path view, single points of failure, Babel costs, tunnels.
@@ -63,7 +66,7 @@ The header menu groups the pages; a shared filter bar under it (Nodes: All / Sel
 
 ### History
 
-- **Reports:** any time window: node and link tables, events, unreachable causes, timeline, starting-node health (response time, DNS, outages), weather correlation, health score, heatmap, link swimlanes, capacity (nightly iPerf), VoIP (phone reachability, call tests).
+- **Reports:** any time window: node and link tables, events, unreachable causes, timeline, starting-node health (response time, DNS, outages), weather correlation, health score, heatmap, link swimlanes, capacity (nightly iPerf), VoIP (phone reachability, call tests). **Long-term**: month by month, kept forever (node uptime, RF link SNR, service availability).
 - **Weekly report:** saved and optionally sent every week: headline, **site uptime**, **services** (availability and outages), **node hygiene** (average and trend, most common fixes, action items for every node by owner), site outages, worst links and nodes, new problems, infrastructure review, changes with before/after verdicts, capacity, single points of failure, weather.
 - **Changes:** change log (manual, plus automatic from scans, syslog and SSH), before/after comparison, Refresh to reload with the filters.
 - **Node Logs:** syslog search with filters, rates and CSV export.
