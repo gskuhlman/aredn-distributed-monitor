@@ -415,6 +415,18 @@ escalation, maintenance windows, public status page + badges, silence / ignore, 
 - [x] 115. **Page menu on small screens.** The drop-down fits the window (fixed under the button,
       scrolls inside) and becomes a wrapping grid on narrow screens, so every group is reachable.
 - [x] 116. **README rewritten** for the current features, accounts and alerts, and Docker.
+- [x] 117. **Service check history (#94).** Every probe stored (`service_probes`); last-50 heartbeat
+      bar and 24 h / 30 d / 1 y uptime on the node page Services table and Status > Service Checks;
+      click for a response-time chart (24 h / 7 d / 30 d) and the failed checks. Checks while the node
+      itself was down don't count against the service.
+- [x] 118. **E-mail through the club mail server.** Alerts go out through Postfix on
+      eiedn-app1.local.mesh (port 25, relay for the monitor, no TLS: its certificate is self-signed),
+      from aredn-monitor@eiedn-app1.local.mesh; test mail delivered. Members with an e-mail address
+      now get their node-owner alerts. The operator e-mail channel is still off (no To address).
+- [x] 119. **Diagnostics page.** Every check on one page (Checks > Diagnostics, `#/diagnostics`):
+      Mesh Health sections from Status, all of Radio & RF, Routing and Setup, Link Stability and
+      the WiFi Survey, with a jump menu. The sections move in while it is open and back when it
+      closes, so their own pages are unchanged.
 
 ## Pending radio work (outside the app)
 
