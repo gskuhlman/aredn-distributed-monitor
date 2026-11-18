@@ -52,6 +52,7 @@ The header menu groups the pages; a shared filter bar under it (Nodes: All / Sel
 
 ### Checks
 
+- **Diagnostics:** every check on one page: the Mesh Health sections from Status, all of Radio & RF, Routing and Setup, Link Stability and the WiFi Survey, with a side menu to jump between groups. The same sections stay on their own pages.
 - **Radio & RF:** sector airtime, site neighbour matrix, antenna aim, link budget and link potential, ghost trackers, per-link alert rules, slow degradation, noise sources.
 - **Routing:** Route Watch (traceroutes of key paths, detours, flapping, "why did it change?", traffic along a route), path view, single points of failure, Babel costs, tunnels.
 - **Setup:** infrastructure review, settings drift (firmware and radio settings), **node hygiene** score with fixes per owner, cleanup of stale and junk nodes.

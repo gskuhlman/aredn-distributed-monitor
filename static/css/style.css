@@ -3046,3 +3046,11 @@ tr.site-down td { opacity: 0.65; }
 .sh-detail-head .sh-hours { width: auto; }
 .sh-chart-wrap { position: relative; height: 220px; }
 @media (max-width: 600px) { .sh-bar i { width: 3px; } }
+
+/* Diagnostics page (diagnostics-page.js): every check on one page */
+.dg-jump-btn { text-align: left; background: none; border: none; border-radius: 4px; padding: 8px 10px; font-size: 0.92rem; color: #2c3e50; cursor: pointer; font-family: inherit; }
+.dg-jump-btn:hover, .dg-jump-btn:focus-visible { background: #ecf0f1; outline: none; }
+#diagnostics-view .subpage { display: block; }
+.dg-group { margin-bottom: 18px; scroll-margin-top: 8px; }
+.dg-group-title { font-size: 1.1rem; margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #2c3e50; }
+.dg-group:empty, .dg-group:not(:has(> :not(.dg-group-title))) { display: none; }

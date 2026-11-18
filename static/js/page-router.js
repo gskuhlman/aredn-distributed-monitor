@@ -11,9 +11,10 @@ const PageRouter = {
     applying: false,
     tab: 'status',
     // Old page names that moved.
-    ALIASES: { diagnostics: 'status', stability: 'rf-stats/stability' },
+    ALIASES: { stability: 'rf-stats/stability' },
     // `#/<tab>/<anchor>` on pages without a side menu scrolls to an element.
-    ANCHORS: { reports: { weekly: 'weekly-report-section', 'starting-node': 'starting-node-section' }, 'rf-stats': { stability: 'rf-stability' } },
+    ANCHORS: { reports: { weekly: 'weekly-report-section', 'starting-node': 'starting-node-section' }, 'rf-stats': { stability: 'rf-stability' },
+        diagnostics: { health: 'dg-health', radio: 'dg-radio', routing: 'dg-routing', setup: 'dg-setup', stability: 'dg-stability', wifi: 'dg-wifi' } },
 
     init() {
         document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => btn.addEventListener('click', () => {

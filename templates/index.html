@@ -56,6 +56,7 @@
                         </div>
                         <div class="nav-group">
                             <div class="nav-group-title">Checks</div>
+                            <button class="tab-btn" data-tab="diagnostics" title="Every check on one page: mesh health, radio and RF, routing, setup, link stability, WiFi survey">Diagnostics</button>
                             <button class="tab-btn" data-tab="radio" title="Sectors, site matrix, aim, link budget, ghost trackers, link alerts">Radio &amp; RF</button>
                             <button class="tab-btn" data-tab="routing" title="Route Watch, Path View, single points of failure, Babel costs">Routing</button>
                             <button class="tab-btn" data-tab="setup" title="Infrastructure review, settings drift, node hygiene, cleanup">Setup</button>
@@ -558,7 +559,7 @@
                             </div>
                             <div id="tape-report"><p class="log-empty">Loading…</p></div>
                         </div>
-                        <div class="diag-section">
+                        <div class="diag-section" data-diag="health">
                             <h3>Mesh Health Check <small class="form-hint">network-wide problem finder, scoped by scan boundaries</small></h3>
                             <div class="mh-controls">
                                 <select id="mh-severity" class="form-input">
@@ -589,7 +590,7 @@
                         </div>
 
                         <!-- Link Watch (link-watch.js) -->
-                        <div class="diag-section">
+                        <div class="diag-section" data-diag="health">
                             <h3>Link Watch <small class="form-hint">continuous one-way link alarm and noise-floor watch, checked after every scan</small></h3>
                             <div class="mh-controls">
                                 <button id="lw-refresh" class="btn btn-secondary btn-small">Refresh</button>
@@ -611,7 +612,7 @@
                         <!-- end Link Watch -->
 
                         <!-- Node uptime (uptime.py, node-uptime.js) -->
-                        <div class="diag-section" id="uptime-section">
+                        <div class="diag-section" id="uptime-section" data-diag="health">
                             <h3>Node Uptime <small class="form-hint">share of the checked time each node was up and answering (Nodes, Time and Search from the filter bar), lowest first</small></h3>
                             <div class="mh-controls">
                                 <label class="gf-check"><input type="checkbox" id="nu-all"> Show every node (not only below 100%)</label>
@@ -626,7 +627,7 @@
                         </div>
 
                         <!-- New nodes (#45, new-nodes.js) -->
-                        <div class="diag-section">
+                        <div class="diag-section" data-diag="health">
                             <h3>New Nodes <small class="form-hint">nodes discovered recently: setup checklist, links and a suggested channel, watched for a week</small></h3>
                             <div class="mh-controls">
                                 <button id="nn-refresh" class="btn btn-secondary btn-small">Refresh</button>
@@ -637,7 +638,7 @@
                         </div>
 
                         <!-- Service checks (#36, service-checks.js) -->
-                        <div class="diag-section">
+                        <div class="diag-section" data-diag="health">
                             <h3>Service Checks <small class="form-hint">advertised services (web, phones, cameras, Winlink) that stop answering while their node is up</small></h3>
                             <div class="mh-controls">
                                 <button id="sc-refresh" class="btn btn-secondary btn-small">Refresh</button>
@@ -648,6 +649,35 @@
                             <div id="sc-report"><p class="log-empty">Loading…</p></div>
                             <div id="sc-history"></div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Diagnostics View (diagnostics-page.js): every check on one page. The
+                 sections are moved in from Status, Radio & RF, Routing, Setup, Links
+                 and Channel Planning while this page is open, and back when it closes. -->
+            <div id="diagnostics-view" class="view-container">
+                <div class="nodes-container">
+                    <div class="subnav-layout">
+                    <nav class="subnav dg-jump" aria-label="Jump to a group of checks">
+                        <button class="dg-jump-btn" data-dg="health">Mesh Health</button>
+                        <button class="dg-jump-btn" data-dg="radio">Radio &amp; RF</button>
+                        <button class="dg-jump-btn" data-dg="routing">Routing</button>
+                        <button class="dg-jump-btn" data-dg="setup">Setup</button>
+                        <button class="dg-jump-btn" data-dg="stability">Link Stability</button>
+                        <button class="dg-jump-btn" data-dg="wifi">WiFi Survey</button>
+                    </nav>
+                    <div class="diag-scroll subnav-body" id="dg-body">
+                        <div class="nodes-header page-header">
+                            <div class="nodes-header-left"><h2 class="page-title">Diagnostics</h2><span class="form-hint">every check in one place; the same sections are still on their own pages</span></div>
+                        </div>
+                        <div class="dg-group" id="dg-health"><h2 class="dg-group-title">Mesh Health <small class="form-hint">from Status</small></h2></div>
+                        <div class="dg-group" id="dg-radio"><h2 class="dg-group-title">Radio &amp; RF</h2></div>
+                        <div class="dg-group" id="dg-routing"><h2 class="dg-group-title">Routing</h2></div>
+                        <div class="dg-group" id="dg-setup"><h2 class="dg-group-title">Setup</h2></div>
+                        <div class="dg-group" id="dg-stability"><h2 class="dg-group-title">Link Stability <small class="form-hint">from Links</small></h2></div>
+                        <div class="dg-group" id="dg-wifi"><h2 class="dg-group-title">WiFi Survey <small class="form-hint">from Channel Planning</small></h2></div>
+                    </div>
                     </div>
                 </div>
             </div>
@@ -2266,5 +2296,6 @@
     <script src="{{ url_for('static', filename='js/call-quality.js') }}"></script>
     <script src="{{ url_for('static', filename='js/alert-handling.js') }}"></script>
     <script src="{{ url_for('static', filename='js/global-search.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/diagnostics-page.js') }}"></script>
 </body>
 </html>

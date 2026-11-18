@@ -52,6 +52,8 @@ const R7 = {
 
     onShow(tab, sub, fn) {
         const check = () => {
+            // The same section moved onto the Diagnostics page (diagnostics-page.js).
+            if (typeof DiagnosticsPage !== 'undefined' && DiagnosticsPage.shows(tab, sub)) return fn();
             const view = document.getElementById(`${tab}-view`);
             if (!view || !view.classList.contains('active')) return;
             if (sub && !view.querySelector(`.subpage.active[data-sub="${sub}"]`)) return;
